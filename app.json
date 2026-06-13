@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "Uptic",
+    "slug": "uptic",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "uptic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.uptic.app"
+    },
+    "android": {
+      "package": "com.uptic.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#121212",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      "expo-font",
+      "expo-splash-screen",
+      "expo-updates",
+      "expo-notifications"
+    ],
+    "updates": {
+      "url": "https://u.expo.dev/bedf55f1-d06f-47e3-9156-77e99ab6b710",
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "bedf55f1-d06f-47e3-9156-77e99ab6b710"
+      }
+    },
+    "owner": "anton.immel"
+  }
+}
