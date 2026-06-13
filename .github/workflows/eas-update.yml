@@ -2,7 +2,7 @@ name: EAS Update
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
 
 jobs:
   update:
