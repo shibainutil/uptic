@@ -30,8 +30,15 @@ const CATEGORY_EMOJI: Record<string, string> = {
 const EMPTY_FORM = { name: '', category: 'Other', description: '' };
 
 async function uploadExerciseImage(userId: string, exerciseId: string, localUri: string): Promise<string> {
-  const response = await fetch(localUri);
-  const blob = await response.blob();
+  // fetch().blob() is not supported in React Native's Hermes engine; use XHR instead
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.onload = () => resolve(xhr.response);
+    xhr.onerror = () => reject(new Error('Failed to read image file'));
+    xhr.responseType = 'blob';
+    xhr.open('GET', localUri, true);
+    xhr.send(null);
+  });
   const imageRef = ref(storage, `users/${userId}/exercises/${exerciseId}.jpg`);
   await uploadBytes(imageRef, blob);
   return getDownloadURL(imageRef);
