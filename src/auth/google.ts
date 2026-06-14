@@ -50,6 +50,14 @@ export async function signInWithGoogle(): Promise<void> {
 
     const credential = GoogleAuthProvider.credential(idToken);
     await signInWithCredential(auth, credential);
+
+    // Also sign in to the native Firebase instance so @react-native-firebase/storage is authenticated.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const nativeAuth = require('@react-native-firebase/auth').default;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { GoogleAuthProvider: NativeGoogleAuthProvider } = require('@react-native-firebase/auth');
+    const nativeCred = NativeGoogleAuthProvider.credential(idToken);
+    await nativeAuth().signInWithCredential(nativeCred);
   } catch (e: unknown) {
     // Swallow the explicit user-cancelled case so it isn't surfaced as an error.
     const code = (e as { code?: string })?.code;
