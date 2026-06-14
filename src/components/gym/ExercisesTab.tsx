@@ -17,7 +17,7 @@ const EMPTY_FORM = { name: '', category: 'Other', description: '' };
 
 export function ExercisesTab() {
   const { user } = useAuth();
-  const { exercises, add, update, remove } = useExercises(user!.uid);
+  const { exercises, add, update, remove } = useExercises(user?.uid);
 
   const [modal, setModal] = useState<'add' | Exercise | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);

@@ -24,10 +24,14 @@ function userDoc(uid: string, col: string, id: string) {
 
 // ── Exercises ──────────────────────────────────────────────────────────────
 
-export function useExercises(userId: string) {
+export function useExercises(userId: string | null | undefined) {
   const [exercises, setExercises] = useState<Exercise[]>([]);
 
   useEffect(() => {
+    if (!userId) {
+      setExercises([]);
+      return;
+    }
     const unsub = onSnapshot(userCol(userId, 'exercises'), (snap) => {
       setExercises(snap.docs.map((d) => d.data() as Exercise));
     });
@@ -52,10 +56,14 @@ export function useExercises(userId: string) {
 
 // ── Training Modules ───────────────────────────────────────────────────────
 
-export function useModules(userId: string) {
+export function useModules(userId: string | null | undefined) {
   const [modules, setModules] = useState<TrainingModule[]>([]);
 
   useEffect(() => {
+    if (!userId) {
+      setModules([]);
+      return;
+    }
     const unsub = onSnapshot(userCol(userId, 'modules'), (snap) => {
       setModules(snap.docs.map((d) => d.data() as TrainingModule));
     });
@@ -99,10 +107,14 @@ export function useModules(userId: string) {
 
 // ── Training Cycles ────────────────────────────────────────────────────────
 
-export function useCycles(userId: string) {
+export function useCycles(userId: string | null | undefined) {
   const [cycles, setCycles] = useState<TrainingCycle[]>([]);
 
   useEffect(() => {
+    if (!userId) {
+      setCycles([]);
+      return;
+    }
     const unsub = onSnapshot(userCol(userId, 'cycles'), (snap) => {
       setCycles(snap.docs.map((d) => d.data() as TrainingCycle));
     });

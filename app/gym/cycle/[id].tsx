@@ -13,8 +13,8 @@ export default function CycleDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { user } = useAuth();
-  const { cycles, update } = useCycles(user!.uid);
-  const { modules } = useModules(user!.uid);
+  const { cycles, update } = useCycles(user?.uid);
+  const { modules } = useModules(user?.uid);
 
   const cycle = cycles.find((c) => c.id === id);
   const [addModal, setAddModal] = useState(false);

@@ -1,20 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\anton\\\\Projects\\\\uptic\\\\v0\" -Recurse -Force)",
-      "Bash(Select-Object -Property FullName, PSIsContainer)",
-      "Bash(Sort-Object FullName)",
-      "Bash(Format-Table -AutoSize)",
-      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\anton\\\\Projects\\\\uptic\\\\v0\\\\lib\" -File -Recurse | Where-Object { $_.Extension -eq '.dart' } | ForEach-Object { $_.FullName } | Sort-Object)",
-      "Bash(npm create *)",
-      "PowerShell(cd \"C:\\\\Users\\\\anton\\\\Projects\\\\uptic\\\\app\" && npm run dev 2>&1 &)",
-      "Bash(npm run *)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173)",
-      "Read(//mnt/c/Users/anton/Projects/uptic/**)",
-      "Bash(npm install *)",
-      "PowerShell(Get-Process -Name \"node\" -ErrorAction SilentlyContinue)",
-      "PowerShell(Stop-Process -Force)",
-      "PowerShell(Move-Item \"C:\\\\Users\\\\anton\\\\Projects\\\\uptic\\\\app\" \"C:\\\\Users\\\\anton\\\\Projects\\\\app\" -Force)"
+      "Bash(*)",
+      "PowerShell(*)"
     ]
   }
 }

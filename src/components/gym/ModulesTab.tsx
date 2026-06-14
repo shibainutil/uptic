@@ -12,7 +12,7 @@ const EMPTY_FORM = { name: '', description: '' };
 
 export function ModulesTab() {
   const { user } = useAuth();
-  const { modules, add, remove } = useModules(user!.uid);
+  const { modules, add, remove } = useModules(user?.uid);
   const router = useRouter();
 
   const [addModal, setAddModal] = useState(false);

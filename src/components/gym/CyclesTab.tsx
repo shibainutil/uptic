@@ -12,8 +12,8 @@ const EMPTY_FORM = { name: '', description: '' };
 
 export function CyclesTab() {
   const { user } = useAuth();
-  const { cycles, add, remove } = useCycles(user!.uid);
-  const { modules } = useModules(user!.uid);
+  const { cycles, add, remove } = useCycles(user?.uid);
+  const { modules } = useModules(user?.uid);
   const router = useRouter();
 
   const [addModal, setAddModal] = useState(false);

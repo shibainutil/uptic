@@ -19,8 +19,8 @@ export default function ModuleDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { user } = useAuth();
-  const { modules, update, addExecution, updateExecution, removeExecution } = useModules(user!.uid);
-  const { exercises } = useExercises(user!.uid);
+  const { modules, update, addExecution, updateExecution, removeExecution } = useModules(user?.uid);
+  const { exercises } = useExercises(user?.uid);
 
   const mod = modules.find((m) => m.id === id);
 
