@@ -3,8 +3,7 @@ import {
   View, Text, Pressable, SectionList, StyleSheet, Alert, Image, ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { storage } from '../../firebase';
+import * as FileSystem from 'expo-file-system';
 import { useAuth } from '../../context/AuthContext';
 import { useExercises } from '../../store/gymStore';
 import { Modal } from '../ui/Modal';
@@ -29,12 +28,15 @@ const CATEGORY_EMOJI: Record<string, string> = {
 
 const EMPTY_FORM = { name: '', category: 'Other', description: '' };
 
-async function uploadExerciseImage(userId: string, exerciseId: string, localUri: string): Promise<string> {
-  const response = await fetch(localUri);
-  const blob = await response.blob();
-  const imageRef = ref(storage, `users/${userId}/exercises/${exerciseId}.jpg`);
-  await uploadBytes(imageRef, blob);
-  return getDownloadURL(imageRef);
+async function saveExerciseImageLocally(exerciseId: string, localUri: string): Promise<string> {
+  const dir = FileSystem.documentDirectory + 'exercises/';
+  const dirInfo = await FileSystem.getInfoAsync(dir);
+  if (!dirInfo.exists) {
+    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+  }
+  const dest = dir + exerciseId + '.jpg';
+  await FileSystem.copyAsync({ from: localUri, to: dest });
+  return dest;
 }
 
 export function ExercisesTab() {
@@ -85,15 +87,14 @@ export function ExercisesTab() {
     if (!form.name.trim() || saving) return;
     setSaving(true);
     try {
-      const uid = user?.uid;
       if (modal === 'add') {
         const id = await add({
           name: form.name.trim(),
           category: form.category,
           description: form.description.trim() || undefined,
         });
-        if (pendingImage && uid) {
-          const imageUri = await uploadExerciseImage(uid, id, pendingImage);
+        if (pendingImage) {
+          const imageUri = await saveExerciseImageLocally(id, pendingImage);
           await update(id, { imageUri });
         }
       } else if (modal && typeof modal === 'object') {
@@ -102,8 +103,8 @@ export function ExercisesTab() {
           category: form.category,
           description: form.description.trim() || undefined,
         };
-        if (pendingImage && uid) {
-          updateData.imageUri = await uploadExerciseImage(uid, modal.id, pendingImage);
+        if (pendingImage) {
+          updateData.imageUri = await saveExerciseImageLocally(modal.id, pendingImage);
         }
         await update(modal.id, updateData);
       }
