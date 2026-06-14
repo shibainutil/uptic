@@ -3,7 +3,6 @@ import {
   View, Text, Pressable, SectionList, StyleSheet, Alert, Image, ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { storage } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
@@ -30,13 +29,7 @@ const CATEGORY_EMOJI: Record<string, string> = {
 
 const EMPTY_FORM = { name: '', category: 'Other', description: '' };
 
-async function uploadExerciseImage(userId: string, exerciseId: string, localUri: string): Promise<string> {
-  // Firebase Storage web SDK Blob/ArrayBuffer APIs don't work in React Native's
-  // Hermes engine. Reading the file as base64 and using uploadString bypasses
-  // all blob handling entirely.
-  const base64 = await FileSystem.readAsStringAsync(localUri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
+async function uploadExerciseImage(userId: string, exerciseId: string, base64: string): Promise<string> {
   const imageRef = ref(storage, `users/${userId}/exercises/${exerciseId}.jpg`);
   await uploadString(imageRef, base64, 'base64', { contentType: 'image/jpeg' });
   return getDownloadURL(imageRef);
@@ -48,7 +41,7 @@ export function ExercisesTab() {
 
   const [modal, setModal] = useState<'add' | Exercise | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
-  const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [pendingImage, setPendingImage] = useState<{ uri: string; base64: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
   function openAdd() {
@@ -80,9 +73,10 @@ export function ExercisesTab() {
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.7,
+      base64: true,
     });
-    if (!result.canceled) {
-      setPendingImage(result.assets[0].uri);
+    if (!result.canceled && result.assets[0].base64) {
+      setPendingImage({ uri: result.assets[0].uri, base64: result.assets[0].base64 });
     }
   }
 
@@ -98,7 +92,7 @@ export function ExercisesTab() {
           description: form.description.trim() || undefined,
         });
         if (pendingImage && uid) {
-          const imageUri = await uploadExerciseImage(uid, id, pendingImage);
+          const imageUri = await uploadExerciseImage(uid, id, pendingImage.base64);
           await update(id, { imageUri });
         }
       } else if (modal && typeof modal === 'object') {
@@ -108,7 +102,7 @@ export function ExercisesTab() {
           description: form.description.trim() || undefined,
         };
         if (pendingImage && uid) {
-          updateData.imageUri = await uploadExerciseImage(uid, modal.id, pendingImage);
+          updateData.imageUri = await uploadExerciseImage(uid, modal.id, pendingImage.base64);
         }
         await update(modal.id, updateData);
       }
@@ -133,7 +127,7 @@ export function ExercisesTab() {
     .filter((s) => s.data.length > 0);
 
   const currentImageUri =
-    pendingImage ??
+    pendingImage?.uri ??
     (modal && typeof modal === 'object' ? modal.imageUri : undefined);
 
   return (
