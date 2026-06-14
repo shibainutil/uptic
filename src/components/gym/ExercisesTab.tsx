@@ -3,7 +3,8 @@ import {
   View, Text, Pressable, SectionList, StyleSheet, Alert, Image, ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import * as FileSystem from 'expo-file-system';
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { storage } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import { useExercises } from '../../store/gymStore';
@@ -30,17 +31,14 @@ const CATEGORY_EMOJI: Record<string, string> = {
 const EMPTY_FORM = { name: '', category: 'Other', description: '' };
 
 async function uploadExerciseImage(userId: string, exerciseId: string, localUri: string): Promise<string> {
-  // fetch().blob() is not supported in React Native's Hermes engine; use XHR instead
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.onload = () => resolve(xhr.response);
-    xhr.onerror = () => reject(new Error('Failed to read image file'));
-    xhr.responseType = 'blob';
-    xhr.open('GET', localUri, true);
-    xhr.send(null);
+  // Firebase Storage web SDK Blob/ArrayBuffer APIs don't work in React Native's
+  // Hermes engine. Reading the file as base64 and using uploadString bypasses
+  // all blob handling entirely.
+  const base64 = await FileSystem.readAsStringAsync(localUri, {
+    encoding: FileSystem.EncodingType.Base64,
   });
   const imageRef = ref(storage, `users/${userId}/exercises/${exerciseId}.jpg`);
-  await uploadBytes(imageRef, blob);
+  await uploadString(imageRef, base64, 'base64', { contentType: 'image/jpeg' });
   return getDownloadURL(imageRef);
 }
 
