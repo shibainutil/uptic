@@ -3,8 +3,7 @@ import {
   View, Text, Pressable, SectionList, StyleSheet, Alert, Image, ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { ref, uploadString, getDownloadURL } from 'firebase/storage';
-import { storage } from '../../firebase';
+import { auth } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import { useExercises } from '../../store/gymStore';
 import { Modal } from '../ui/Modal';
@@ -29,10 +28,38 @@ const CATEGORY_EMOJI: Record<string, string> = {
 
 const EMPTY_FORM = { name: '', category: 'Other', description: '' };
 
+// Firebase Storage web SDK creates Blobs internally, which Hermes doesn't support.
+// Bypass the SDK entirely — upload via XHR to the REST API instead.
 async function uploadExerciseImage(userId: string, exerciseId: string, base64: string): Promise<string> {
-  const imageRef = ref(storage, `users/${userId}/exercises/${exerciseId}.jpg`);
-  await uploadString(imageRef, base64, 'base64', { contentType: 'image/jpeg' });
-  return getDownloadURL(imageRef);
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error('Not authenticated');
+
+  const bucket = 'uptic-6ff6b.firebasestorage.app';
+  const path = `users/${userId}/exercises/${exerciseId}.jpg`;
+  const encodedPath = encodeURIComponent(path);
+  const url = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o?uploadType=media&name=${encodedPath}`;
+
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+  const json = await new Promise<{ downloadTokens: string }>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.setRequestHeader('Content-Type', 'image/jpeg');
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(JSON.parse(xhr.responseText));
+      } else {
+        reject(new Error(`Upload failed (${xhr.status}): ${xhr.responseText}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Network error during upload'));
+    xhr.send(bytes);
+  });
+
+  return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}?alt=media&token=${json.downloadTokens}`;
 }
 
 export function ExercisesTab() {
