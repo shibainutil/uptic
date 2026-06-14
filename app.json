@@ -13,6 +13,7 @@
     },
     "android": {
       "package": "com.uptic.app",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#121212",
         "foregroundImage": "./assets/android-icon-foreground.png",
