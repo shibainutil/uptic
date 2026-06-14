@@ -38,9 +38,10 @@ export function useExercises(userId: string | null | undefined) {
     return unsub;
   }, [userId]);
 
-  const add = useCallback(async (data: Omit<Exercise, 'id' | 'createdAt'>) => {
+  const add = useCallback(async (data: Omit<Exercise, 'id' | 'createdAt'>): Promise<string> => {
     const id = uid();
     await setDoc(userDoc(userId, 'exercises', id), { ...data, id, createdAt: new Date().toISOString() });
+    return id;
   }, [userId]);
 
   const update = useCallback(async (id: string, data: Partial<Exercise>) => {

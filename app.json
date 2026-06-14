@@ -32,7 +32,13 @@
       "expo-splash-screen",
       "expo-updates",
       "expo-notifications",
-      "@react-native-google-signin/google-signin"
+      "@react-native-google-signin/google-signin",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Uptic needs access to your photos to add images to exercises."
+        }
+      ]
     ],
     "updates": {
       "url": "https://u.expo.dev/bedf55f1-d06f-47e3-9156-77e99ab6b710",

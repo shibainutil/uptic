@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import {
-  View, Text, Pressable, ScrollView, SectionList, StyleSheet, Alert,
+  View, Text, Pressable, SectionList, StyleSheet, Alert, Image, ActivityIndicator,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { storage } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import { useExercises } from '../../store/gymStore';
 import { Modal } from '../ui/Modal';
@@ -13,7 +16,26 @@ import type { Exercise } from '../../types/gym';
 
 const CATEGORIES = ['Chest', 'Back', 'Shoulders', 'Arms', 'Core', 'Legs', 'Cardio', 'Other'];
 
+const CATEGORY_EMOJI: Record<string, string> = {
+  Chest:     '🏋️',
+  Back:      '🔄',
+  Shoulders: '🤸',
+  Arms:      '💪',
+  Core:      '⚡',
+  Legs:      '🦵',
+  Cardio:    '❤️',
+  Other:     '⚙️',
+};
+
 const EMPTY_FORM = { name: '', category: 'Other', description: '' };
+
+async function uploadExerciseImage(userId: string, exerciseId: string, localUri: string): Promise<string> {
+  const response = await fetch(localUri);
+  const blob = await response.blob();
+  const imageRef = ref(storage, `users/${userId}/exercises/${exerciseId}.jpg`);
+  await uploadBytes(imageRef, blob);
+  return getDownloadURL(imageRef);
+}
 
 export function ExercisesTab() {
   const { user } = useAuth();
@@ -21,25 +43,77 @@ export function ExercisesTab() {
 
   const [modal, setModal] = useState<'add' | Exercise | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   function openAdd() {
     setForm(EMPTY_FORM);
+    setPendingImage(null);
     setModal('add');
   }
 
   function openEdit(ex: Exercise) {
     setForm({ name: ex.name, category: ex.category, description: ex.description ?? '' });
+    setPendingImage(null);
     setModal(ex);
   }
 
-  async function save() {
-    if (!form.name.trim()) return;
-    if (modal === 'add') {
-      await add({ name: form.name.trim(), category: form.category, description: form.description.trim() || undefined });
-    } else if (modal && typeof modal === 'object') {
-      await update(modal.id, { name: form.name.trim(), category: form.category, description: form.description.trim() || undefined });
-    }
+  function closeModal() {
+    if (saving) return;
     setModal(null);
+    setPendingImage(null);
+  }
+
+  async function pickImage() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please allow access to your photo library in Settings.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+    });
+    if (!result.canceled) {
+      setPendingImage(result.assets[0].uri);
+    }
+  }
+
+  async function save() {
+    if (!form.name.trim() || saving) return;
+    setSaving(true);
+    try {
+      const uid = user?.uid;
+      if (modal === 'add') {
+        const id = await add({
+          name: form.name.trim(),
+          category: form.category,
+          description: form.description.trim() || undefined,
+        });
+        if (pendingImage && uid) {
+          const imageUri = await uploadExerciseImage(uid, id, pendingImage);
+          await update(id, { imageUri });
+        }
+      } else if (modal && typeof modal === 'object') {
+        const updateData: Partial<Exercise> = {
+          name: form.name.trim(),
+          category: form.category,
+          description: form.description.trim() || undefined,
+        };
+        if (pendingImage && uid) {
+          updateData.imageUri = await uploadExerciseImage(uid, modal.id, pendingImage);
+        }
+        await update(modal.id, updateData);
+      }
+      setModal(null);
+      setPendingImage(null);
+    } catch (e: unknown) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not save exercise. Check your connection.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   function confirmDelete(ex: Exercise) {
@@ -52,6 +126,10 @@ export function ExercisesTab() {
   const sections = CATEGORIES
     .map((cat) => ({ title: cat, data: exercises.filter((e) => e.category === cat) }))
     .filter((s) => s.data.length > 0);
+
+  const currentImageUri =
+    pendingImage ??
+    (modal && typeof modal === 'object' ? modal.imageUri : undefined);
 
   return (
     <View style={styles.container}>
@@ -74,10 +152,23 @@ export function ExercisesTab() {
           contentContainerStyle={styles.list}
           stickySectionHeadersEnabled={false}
           renderSectionHeader={({ section }) => (
-            <Text style={styles.sectionHeader}>{section.title}</Text>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionIcon}>
+                <Text style={styles.sectionEmoji}>{CATEGORY_EMOJI[section.title] ?? '💪'}</Text>
+              </View>
+              <Text style={styles.sectionTitle}>{section.title}</Text>
+              <Text style={styles.sectionCount}>{section.data.length}</Text>
+            </View>
           )}
           renderItem={({ item }) => (
             <View style={styles.row}>
+              {item.imageUri ? (
+                <Image source={{ uri: item.imageUri }} style={styles.rowThumb} />
+              ) : (
+                <View style={[styles.rowThumb, styles.rowThumbPlaceholder]}>
+                  <Text style={{ fontSize: 22 }}>{CATEGORY_EMOJI[item.category] ?? '💪'}</Text>
+                </View>
+              )}
               <View style={styles.rowMain}>
                 <Text style={styles.rowName}>{item.name}</Text>
                 {item.description ? <Text style={styles.rowDesc}>{item.description}</Text> : null}
@@ -99,9 +190,24 @@ export function ExercisesTab() {
       <Modal
         title={modal === 'add' ? 'Add Exercise' : 'Edit Exercise'}
         visible={modal !== null}
-        onClose={() => setModal(null)}
+        onClose={closeModal}
       >
         <View style={styles.form}>
+          {/* Image picker */}
+          <Pressable style={styles.imagePicker} onPress={pickImage} disabled={saving}>
+            {currentImageUri ? (
+              <Image source={{ uri: currentImageUri }} style={styles.imagePreview} />
+            ) : (
+              <View style={styles.imagePlaceholder}>
+                <Text style={styles.imageIcon}>📷</Text>
+                <Text style={styles.imageHint}>Add photo</Text>
+              </View>
+            )}
+            <View style={styles.imageEditBadge}>
+              <Text style={styles.imageEditBadgeText}>{currentImageUri ? '✎' : '+'}</Text>
+            </View>
+          </Pressable>
+
           <Input
             label="Name"
             value={form.name}
@@ -120,14 +226,29 @@ export function ExercisesTab() {
             placeholder="Notes about this exercise"
           />
           <View style={styles.formRow}>
-            <Button label="Cancel" onPress={() => setModal(null)} style={styles.flex1} />
-            <Button label="Save" variant="primary" onPress={save} disabled={!form.name.trim()} style={styles.flex1} />
+            <Button label="Cancel" onPress={closeModal} style={styles.flex1} disabled={saving} />
+            <Button
+              label={saving ? '' : 'Save'}
+              variant="primary"
+              onPress={save}
+              disabled={!form.name.trim() || saving}
+              style={styles.flex1}
+            />
+            {saving && (
+              <ActivityIndicator
+                color="#fff"
+                style={StyleSheet.absoluteFill}
+                pointerEvents="none"
+              />
+            )}
           </View>
         </View>
       </Modal>
     </View>
   );
 }
+
+const THUMB = 52;
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
@@ -151,16 +272,32 @@ const styles = StyleSheet.create({
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
   emptyIcon: { fontSize: 48 },
   emptyText: { color: colors.textDim, fontSize: font.md, textAlign: 'center', lineHeight: 22 },
-  list: { padding: spacing.lg, gap: spacing.md },
+  list: { padding: spacing.lg, gap: spacing.sm },
   sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  sectionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: colors.surface2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionEmoji: { fontSize: 20 },
+  sectionTitle: {
+    flex: 1,
     color: colors.textMuted,
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.8,
-    marginBottom: spacing.sm,
-    marginTop: spacing.md,
   },
+  sectionCount: { color: colors.textDim, fontSize: font.sm },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -168,8 +305,19 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.surface2,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: spacing.md,
+  },
+  rowThumb: {
+    width: THUMB,
+    height: THUMB,
+    borderRadius: radius.sm,
+  },
+  rowThumbPlaceholder: {
+    backgroundColor: colors.surface2,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   rowMain: { flex: 1 },
   rowName: { color: colors.text, fontSize: font.md, fontWeight: '500' },
@@ -189,4 +337,44 @@ const styles = StyleSheet.create({
   },
   formRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
   flex1: { flex: 1 },
+  imagePicker: {
+    alignSelf: 'center',
+    width: 120,
+    height: 120,
+    borderRadius: radius.lg,
+    overflow: 'visible',
+  },
+  imagePreview: {
+    width: 120,
+    height: 120,
+    borderRadius: radius.lg,
+  },
+  imagePlaceholder: {
+    width: 120,
+    height: 120,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface2,
+    borderWidth: 2,
+    borderColor: colors.border,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  imageIcon: { fontSize: 32 },
+  imageHint: { color: colors.textMuted, fontSize: font.sm },
+  imageEditBadge: {
+    position: 'absolute',
+    bottom: -6,
+    right: -6,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colors.surface,
+  },
+  imageEditBadgeText: { color: '#fff', fontSize: 14, fontWeight: '700', lineHeight: 18 },
 });
