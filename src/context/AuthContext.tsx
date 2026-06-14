@@ -23,8 +23,13 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 function getNativeAuth() {
   if (Platform.OS === 'web') return null;
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return require('@react-native-firebase/auth').default;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('@react-native-firebase/auth').default;
+  } catch {
+    // Native module not compiled into this build yet — safe until rebuild installs it.
+    return null;
+  }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
