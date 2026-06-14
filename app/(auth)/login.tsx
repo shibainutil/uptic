@@ -8,11 +8,14 @@ import { Button } from '../../src/components/ui/Button';
 import { colors, spacing, font, radius } from '../../src/theme';
 
 export default function LoginScreen() {
-  const { loginWithEmail, registerWithEmail } = useAuth();
+  const { loginWithEmail, registerWithEmail, loginWithGoogle } = useAuth();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  const busy = loading || googleLoading;
 
   async function submit() {
     if (!email.trim() || !password) return;
@@ -28,6 +31,18 @@ export default function LoginScreen() {
       Alert.alert('Error', message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function googleSignIn() {
+    setGoogleLoading(true);
+    try {
+      await loginWithGoogle();
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Google sign-in failed';
+      Alert.alert('Google sign-in', message);
+    } finally {
+      setGoogleLoading(false);
     }
   }
 
@@ -77,8 +92,25 @@ export default function LoginScreen() {
               label={loading ? 'Please wait…' : mode === 'login' ? 'Log in' : 'Create account'}
               variant="primary"
               onPress={submit}
-              disabled={loading || !email.trim() || !password}
+              disabled={busy || !email.trim() || !password}
             />
+
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <Pressable
+              style={[styles.googleBtn, busy && styles.googleBtnDisabled]}
+              onPress={googleSignIn}
+              disabled={busy}
+            >
+              <Text style={styles.googleG}>G</Text>
+              <Text style={styles.googleText}>
+                {googleLoading ? 'Please wait…' : 'Continue with Google'}
+              </Text>
+            </Pressable>
           </View>
         </View>
       </View>
@@ -132,4 +164,28 @@ const styles = StyleSheet.create({
   tabText: { color: colors.textMuted, fontSize: font.md, fontWeight: '500' },
   tabTextActive: { color: colors.accent },
   fields: { padding: spacing.lg, gap: spacing.md },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginVertical: spacing.xs,
+  },
+  dividerLine: { flex: 1, height: 1, backgroundColor: colors.border },
+  dividerText: { color: colors.textMuted, fontSize: font.sm },
+  googleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: '#fff',
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+  },
+  googleBtnDisabled: { opacity: 0.6 },
+  googleG: {
+    color: '#4285F4',
+    fontSize: font.lg,
+    fontWeight: '800',
+  },
+  googleText: { color: '#1F1F1F', fontSize: font.md, fontWeight: '600' },
 });

@@ -7,12 +7,14 @@ import {
   type User,
 } from 'firebase/auth';
 import { auth } from '../firebase';
+import { signInWithGoogle } from '../auth/google';
 
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
   loginWithEmail: (email: string, password: string) => Promise<void>;
   registerWithEmail: (email: string, password: string) => Promise<void>;
+  loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -38,12 +40,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await createUserWithEmailAndPassword(auth, email, password);
   };
 
+  const loginWithGoogle = async () => {
+    await signInWithGoogle();
+  };
+
   const logout = async () => {
     await signOut(auth);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, loginWithEmail, registerWithEmail, logout }}>
+    <AuthContext.Provider value={{ user, loading, loginWithEmail, registerWithEmail, loginWithGoogle, logout }}>
       {children}
     </AuthContext.Provider>
   );

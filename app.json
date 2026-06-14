@@ -31,7 +31,8 @@
       "expo-font",
       "expo-splash-screen",
       "expo-updates",
-      "expo-notifications"
+      "expo-notifications",
+      "@react-native-google-signin/google-signin"
     ],
     "updates": {
       "url": "https://u.expo.dev/bedf55f1-d06f-47e3-9156-77e99ab6b710",
@@ -45,7 +46,8 @@
       "router": {},
       "eas": {
         "projectId": "bedf55f1-d06f-47e3-9156-77e99ab6b710"
-      }
+      },
+      "googleWebClientId": "752330312289-3habolld4fn9olio688d6l7afbafmfeh.apps.googleusercontent.com"
     },
     "owner": "anton.immel"
   }
