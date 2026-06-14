@@ -3,7 +3,7 @@ import {
   View, Text, Pressable, SectionList, StyleSheet, Alert, Image, ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { auth } from '../../firebase';
+import storage from '@react-native-firebase/storage';
 import { useAuth } from '../../context/AuthContext';
 import { useExercises } from '../../store/gymStore';
 import { Modal } from '../ui/Modal';
@@ -28,38 +28,10 @@ const CATEGORY_EMOJI: Record<string, string> = {
 
 const EMPTY_FORM = { name: '', category: 'Other', description: '' };
 
-// Firebase Storage web SDK creates Blobs internally, which Hermes doesn't support.
-// Bypass the SDK entirely — upload via XHR to the REST API instead.
-async function uploadExerciseImage(userId: string, exerciseId: string, base64: string): Promise<string> {
-  const token = await auth.currentUser?.getIdToken();
-  if (!token) throw new Error('Not authenticated');
-
-  const bucket = 'uptic-6ff6b.firebasestorage.app';
-  const path = `users/${userId}/exercises/${exerciseId}.jpg`;
-  const encodedPath = encodeURIComponent(path);
-  const url = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o?uploadType=media&name=${encodedPath}`;
-
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-
-  const json = await new Promise<{ downloadTokens: string }>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', url);
-    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-    xhr.setRequestHeader('Content-Type', 'image/jpeg');
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(JSON.parse(xhr.responseText));
-      } else {
-        reject(new Error(`Upload failed (${xhr.status}): ${xhr.responseText}`));
-      }
-    };
-    xhr.onerror = () => reject(new Error('Network error during upload'));
-    xhr.send(bytes);
-  });
-
-  return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}?alt=media&token=${json.downloadTokens}`;
+async function uploadExerciseImage(userId: string, exerciseId: string, localUri: string): Promise<string> {
+  const ref = storage().ref(`users/${userId}/exercises/${exerciseId}.jpg`);
+  await ref.putFile(localUri);
+  return ref.getDownloadURL();
 }
 
 export function ExercisesTab() {
@@ -68,7 +40,7 @@ export function ExercisesTab() {
 
   const [modal, setModal] = useState<'add' | Exercise | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
-  const [pendingImage, setPendingImage] = useState<{ uri: string; base64: string } | null>(null);
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   function openAdd() {
@@ -100,10 +72,9 @@ export function ExercisesTab() {
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.7,
-      base64: true,
     });
-    if (!result.canceled && result.assets[0].base64) {
-      setPendingImage({ uri: result.assets[0].uri, base64: result.assets[0].base64 });
+    if (!result.canceled) {
+      setPendingImage(result.assets[0].uri);
     }
   }
 
@@ -119,7 +90,7 @@ export function ExercisesTab() {
           description: form.description.trim() || undefined,
         });
         if (pendingImage && uid) {
-          const imageUri = await uploadExerciseImage(uid, id, pendingImage.base64);
+          const imageUri = await uploadExerciseImage(uid, id, pendingImage);
           await update(id, { imageUri });
         }
       } else if (modal && typeof modal === 'object') {
@@ -129,7 +100,7 @@ export function ExercisesTab() {
           description: form.description.trim() || undefined,
         };
         if (pendingImage && uid) {
-          updateData.imageUri = await uploadExerciseImage(uid, modal.id, pendingImage.base64);
+          updateData.imageUri = await uploadExerciseImage(uid, modal.id, pendingImage);
         }
         await update(modal.id, updateData);
       }
@@ -154,7 +125,7 @@ export function ExercisesTab() {
     .filter((s) => s.data.length > 0);
 
   const currentImageUri =
-    pendingImage?.uri ??
+    pendingImage ??
     (modal && typeof modal === 'object' ? modal.imageUri : undefined);
 
   return (
