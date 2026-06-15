@@ -54,11 +54,11 @@ export async function signInWithGoogle(): Promise<void> {
     // Also sign in to the native Firebase instance so @react-native-firebase/storage is authenticated.
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const nativeAuth = require('@react-native-firebase/auth').default;
+      const { getAuth, signInWithCredential: nativeSignInWithCredential, GoogleAuthProvider: NativeGoogleAuthProvider } = require('@react-native-firebase/auth');
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { GoogleAuthProvider: NativeGoogleAuthProvider } = require('@react-native-firebase/auth');
+      const { getApp } = require('@react-native-firebase/app');
       const nativeCred = NativeGoogleAuthProvider.credential(idToken);
-      await nativeAuth().signInWithCredential(nativeCred);
+      await nativeSignInWithCredential(getAuth(getApp()), nativeCred);
     } catch {
       // Native auth module not compiled into this build yet — safe until rebuild installs it.
     }
