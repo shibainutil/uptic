@@ -109,14 +109,18 @@ export function useExerciseExecutions(userId: string | null | undefined) {
 
 export function useRoutines(userId: string | null | undefined) {
   const [routines, setRoutines] = useState<Routine[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     if (!userId) {
       setRoutines([]);
+      setLoaded(false);
       return;
     }
+    setLoaded(false);
     const unsub = onSnapshot(userCol(userId, 'routines'), (snap) => {
       setRoutines(snap.docs.map((d) => d.data() as Routine));
+      setLoaded(true);
     });
     return unsub;
   }, [userId]);
@@ -143,21 +147,25 @@ export function useRoutines(userId: string | null | undefined) {
     await batch.commit();
   }, [userId]);
 
-  return { routines, add, update, remove };
+  return { routines, loaded, add, update, remove };
 }
 
 // ── Routine Executions ───────────────────────────────────────────────────────
 
 export function useRoutineExecutions(userId: string | null | undefined) {
   const [routineExecutions, setRoutineExecutions] = useState<RoutineExecution[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     if (!userId) {
       setRoutineExecutions([]);
+      setLoaded(false);
       return;
     }
+    setLoaded(false);
     const unsub = onSnapshot(userCol(userId, 'routineExecutions'), (snap) => {
       setRoutineExecutions(snap.docs.map((d) => d.data() as RoutineExecution));
+      setLoaded(true);
     });
     return unsub;
   }, [userId]);
@@ -169,7 +177,7 @@ export function useRoutineExecutions(userId: string | null | undefined) {
     });
   }, [userId]);
 
-  return { routineExecutions, setStatus };
+  return { routineExecutions, loaded, setStatus };
 }
 
 /**

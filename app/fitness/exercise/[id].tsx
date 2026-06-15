@@ -7,43 +7,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../../src/context/AuthContext';
 import { useExercises, useExerciseExecutions } from '../../../src/store/gymStore';
-import { Modal } from '../../../src/components/ui/Modal';
-import { Input } from '../../../src/components/ui/Input';
-import { Button } from '../../../src/components/ui/Button';
-import { Picker } from '../../../src/components/ui/Picker';
-import { Toggle } from '../../../src/components/ui/Toggle';
-import { DatePicker } from '../../../src/components/ui/DatePicker';
+import { ExecutionFormModal } from '../../../src/components/gym/ExecutionFormModal';
 import { colors, spacing, font, radius } from '../../../src/theme';
-import { todayISO, fromISO } from '../../../src/lib/schedule';
-import {
-  type Exercise, type ExerciseExecution, type ParamValue, exerciseType,
-} from '../../../src/types/gym';
-
-interface ExecForm {
-  date: string;
-  series: string;
-  reps: string;
-  durationMin: string;
-  weight: string;
-  weightUnit: 'kg' | 'lbs';
-  paramValues: Record<string, string>;
-  notes: string;
-  completed: boolean;
-}
-
-function emptyForm(ex: Exercise): ExecForm {
-  return {
-    date: todayISO(),
-    series: String(ex.series ?? 3),
-    reps: String(ex.repsMin ?? 8),
-    durationMin: String(ex.durationMin ?? 30),
-    weight: '',
-    weightUnit: 'kg',
-    paramValues: {},
-    notes: '',
-    completed: false,
-  };
-}
+import { fromISO } from '../../../src/lib/schedule';
+import { type ExerciseExecution, exerciseType } from '../../../src/types/gym';
 
 export default function ExerciseDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -54,8 +21,8 @@ export default function ExerciseDetailScreen() {
 
   const exercise = exercises.find((e) => e.id === id);
 
-  const [editing, setEditing] = useState<'add' | ExerciseExecution | null>(null);
-  const [form, setForm] = useState<ExecForm | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingExec, setEditingExec] = useState<ExerciseExecution | null>(null);
 
   const myExecutions = useMemo(
     () => executions.filter((e) => e.exerciseId === id).sort((a, b) => b.date.localeCompare(a.date)),
@@ -75,64 +42,9 @@ export default function ExerciseDetailScreen() {
 
   const isStrength = exerciseType(exercise) === 'strength';
   const params = exercise.params ?? [];
-  const requiredParams = params.filter((p) => p.required);
 
-  function openAdd() {
-    setForm(emptyForm(exercise!));
-    setEditing('add');
-  }
-
-  function openEdit(exec: ExerciseExecution) {
-    const pv: Record<string, string> = {};
-    (exec.paramValues ?? []).forEach((p) => { pv[p.paramId] = p.value; });
-    setForm({
-      date: exec.date,
-      series: String(exec.series ?? exercise!.series ?? 3),
-      reps: String(exec.reps ?? exercise!.repsMin ?? 8),
-      durationMin: String(exec.durationMin ?? exercise!.durationMin ?? 30),
-      weight: exec.weight != null ? String(exec.weight) : '',
-      weightUnit: exec.weightUnit ?? 'kg',
-      paramValues: pv,
-      notes: exec.notes ?? '',
-      completed: exec.completed,
-    });
-    setEditing(exec);
-  }
-
-  const missingRequired = form
-    ? requiredParams.filter((p) => !(form.paramValues[p.id] ?? '').trim()).map((p) => p.name)
-    : [];
-
-  async function save() {
-    if (!form || !exercise) return;
-    if (form.completed && missingRequired.length > 0) {
-      Alert.alert('Cannot complete', `Fill required parameter(s): ${missingRequired.join(', ')}`);
-      return;
-    }
-    const paramValues: ParamValue[] = params
-      .map((p) => ({ paramId: p.id, value: (form.paramValues[p.id] ?? '').trim() }))
-      .filter((p) => p.value);
-
-    const data: Omit<ExerciseExecution, 'id' | 'createdAt'> = {
-      exerciseId: exercise.id,
-      date: form.date,
-      paramValues,
-      completed: form.completed,
-      notes: form.notes.trim() || undefined,
-    };
-    if (isStrength) {
-      data.series = parseInt(form.series) || undefined;
-      data.reps = parseInt(form.reps) || undefined;
-      if (form.weight.trim()) { data.weight = parseFloat(form.weight); data.weightUnit = form.weightUnit; }
-    } else {
-      data.durationMin = parseInt(form.durationMin) || undefined;
-    }
-
-    if (editing === 'add') await add(data);
-    else if (editing && typeof editing === 'object') await update(editing.id, data);
-    setEditing(null);
-    setForm(null);
-  }
+  function openAdd() { setEditingExec(null); setFormOpen(true); }
+  function openEdit(exec: ExerciseExecution) { setEditingExec(exec); setFormOpen(true); }
 
   function confirmDelete(exec: ExerciseExecution) {
     Alert.alert('Delete Execution', 'Remove this logged execution?', [
@@ -225,57 +137,16 @@ export default function ExerciseDetailScreen() {
         }
       />
 
-      <Modal
-        title={editing === 'add' ? 'Log Execution' : 'Edit Execution'}
-        visible={editing !== null}
-        onClose={() => { setEditing(null); setForm(null); }}
-      >
-        {form && (
-          <View style={styles.form}>
-            <DatePicker label="Date" value={form.date} onChange={(v) => setForm({ ...form, date: v })} />
-
-            {isStrength ? (
-              <>
-                <View style={styles.row3}>
-                  <Input label="Series" value={form.series} onChangeText={(v) => setForm({ ...form, series: v })} keyboardType="numeric" style={styles.flex1} />
-                  <Input label="Reps" value={form.reps} onChangeText={(v) => setForm({ ...form, reps: v })} keyboardType="numeric" style={styles.flex1} />
-                  <Input label="Weight" value={form.weight} onChangeText={(v) => setForm({ ...form, weight: v })} keyboardType="decimal-pad" placeholder="opt" style={styles.flex1} />
-                </View>
-                <View style={styles.formField}>
-                  <Text style={styles.formLabel}>Unit</Text>
-                  <Picker options={['kg', 'lbs']} value={form.weightUnit} onChange={(v) => setForm({ ...form, weightUnit: v as 'kg' | 'lbs' })} />
-                </View>
-              </>
-            ) : (
-              <Input label="Duration (minutes)" value={form.durationMin} onChangeText={(v) => setForm({ ...form, durationMin: v })} keyboardType="numeric" />
-            )}
-
-            {params.map((p) => (
-              <Input
-                key={p.id}
-                label={`${p.name}${p.unit ? ` (${p.unit})` : ''}${p.required ? ' *' : ''}`}
-                value={form.paramValues[p.id] ?? ''}
-                onChangeText={(v) => setForm({ ...form, paramValues: { ...form.paramValues, [p.id]: v } })}
-                placeholder={p.required ? 'Required' : 'Optional'}
-              />
-            ))}
-
-            <Input label="Notes (optional)" value={form.notes} onChangeText={(v) => setForm({ ...form, notes: v })} placeholder="Any notes" />
-
-            <View style={styles.completeRow}>
-              <Toggle value={form.completed} onChange={(v) => setForm({ ...form, completed: v })} label="Mark as completed" />
-            </View>
-            {form.completed && missingRequired.length > 0 ? (
-              <Text style={styles.warn}>Fill required: {missingRequired.join(', ')}</Text>
-            ) : null}
-
-            <View style={styles.formRow}>
-              <Button label="Cancel" onPress={() => { setEditing(null); setForm(null); }} style={styles.flex1} />
-              <Button label="Save" variant="primary" onPress={save} style={styles.flex1} />
-            </View>
-          </View>
-        )}
-      </Modal>
+      <ExecutionFormModal
+        exercise={exercise}
+        execution={editingExec}
+        visible={formOpen}
+        onClose={() => { setFormOpen(false); setEditingExec(null); }}
+        onSubmit={async (data) => {
+          if (editingExec) await update(editingExec.id, data);
+          else await add(data);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -345,15 +216,4 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
   },
   addRowText: { color: colors.textMuted, fontSize: font.md },
-  form: { gap: spacing.lg },
-  formField: { gap: spacing.xs },
-  formLabel: {
-    fontSize: 11, fontWeight: '600', color: colors.textMuted,
-    textTransform: 'uppercase', letterSpacing: 0.8,
-  },
-  row3: { flexDirection: 'row', gap: spacing.md },
-  flex1: { flex: 1 },
-  completeRow: { marginTop: spacing.xs },
-  warn: { color: colors.danger, fontSize: font.sm },
-  formRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
 });

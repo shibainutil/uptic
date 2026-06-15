@@ -33,12 +33,51 @@ export default function RoutineEditScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { user } = useAuth();
-  const { exercises } = useExercises(user?.uid);
-  const { routines, add, update } = useRoutines(user?.uid);
-  const { routineExecutions } = useRoutineExecutions(user?.uid);
+  const { routines, loaded } = useRoutines(user?.uid);
 
   const isNew = id === 'new';
   const existing = isNew ? undefined : routines.find((r) => r.id === id);
+
+  // Wait for Firestore to load before mounting the form, otherwise the form's
+  // initial state captures empty defaults instead of the saved routine values.
+  if (!isNew && !loaded) {
+    return (
+      <SafeAreaView style={styles.container} edges={['bottom']}>
+        <Header title="Routine" onBack={() => router.back()} />
+        <View style={styles.empty}><Text style={styles.emptyText}>Loading…</Text></View>
+      </SafeAreaView>
+    );
+  }
+  if (!isNew && !existing) {
+    return (
+      <SafeAreaView style={styles.container} edges={['bottom']}>
+        <Header title="Routine" onBack={() => router.back()} />
+        <View style={styles.empty}><Text style={styles.emptyText}>Routine not found.</Text></View>
+      </SafeAreaView>
+    );
+  }
+
+  return <RoutineForm key={existing?.id ?? 'new'} existing={existing} />;
+}
+
+function Header({ title, onBack }: { title: string; onBack: () => void }) {
+  return (
+    <View style={styles.header}>
+      <Pressable onPress={onBack} style={styles.back}><Text style={styles.backText}>‹ Back</Text></Pressable>
+      <Text style={styles.headerTitle}>{title}</Text>
+      <View style={{ width: 48 }} />
+    </View>
+  );
+}
+
+function RoutineForm({ existing }: { existing?: Routine }) {
+  const router = useRouter();
+  const { user } = useAuth();
+  const { exercises } = useExercises(user?.uid);
+  const { add, update } = useRoutines(user?.uid);
+  const { routineExecutions } = useRoutineExecutions(user?.uid);
+
+  const isNew = !existing;
 
   const [name, setName] = useState(existing?.name ?? '');
   const [description, setDescription] = useState(existing?.description ?? '');
@@ -52,10 +91,10 @@ export default function RoutineEditScreen() {
 
   const history = useMemo(
     () => routineExecutions
-      .filter((e) => e.routineId === id)
+      .filter((e) => e.routineId === existing?.id)
       .sort((a, b) => b.dueDate.localeCompare(a.dueDate))
       .slice(0, 12),
-    [routineExecutions, id],
+    [routineExecutions, existing?.id],
   );
 
   function toggleExercise(exId: string) {
@@ -93,7 +132,7 @@ export default function RoutineEditScreen() {
     setSaving(true);
     try {
       if (isNew) await add(data);
-      else if (existing) await update(existing.id, data);
+      else await update(existing!.id, data);
       router.back();
     } catch (e: unknown) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Could not save routine.');
@@ -101,24 +140,9 @@ export default function RoutineEditScreen() {
     }
   }
 
-  if (!isNew && !existing) {
-    return (
-      <SafeAreaView style={styles.container} edges={['bottom']}>
-        <View style={styles.header}>
-          <Pressable onPress={() => router.back()} style={styles.back}><Text style={styles.backText}>‹ Back</Text></Pressable>
-        </View>
-        <View style={styles.empty}><Text style={styles.emptyText}>Routine not found.</Text></View>
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.back}><Text style={styles.backText}>‹ Back</Text></Pressable>
-        <Text style={styles.headerTitle}>{isNew ? 'New Routine' : 'Edit Routine'}</Text>
-        <View style={{ width: 48 }} />
-      </View>
+      <Header title={isNew ? 'New Routine' : 'Edit Routine'} onBack={() => router.back()} />
 
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         <Input label="Name" value={name} onChangeText={setName} placeholder="e.g. Biceps & Shoulders" />

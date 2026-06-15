@@ -6,7 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import {
   useRoutines, useRoutineExecutions, useExercises, useExerciseExecutions,
 } from '../../store/gymStore';
-import { toISO, withinGrace, todayISO } from '../../lib/schedule';
+import { toISO } from '../../lib/schedule';
 import { exerciseType } from '../../types/gym';
 import { colors, font, spacing, radius } from '../../theme';
 
@@ -36,7 +36,7 @@ export function TrackerTab() {
   const { user } = useAuth();
   const router = useRouter();
   const { routines } = useRoutines(user?.uid);
-  const { routineExecutions, setStatus } = useRoutineExecutions(user?.uid);
+  const { routineExecutions } = useRoutineExecutions(user?.uid);
   const { exercises } = useExercises(user?.uid);
   const { executions } = useExerciseExecutions(user?.uid);
 
@@ -85,10 +85,13 @@ export function TrackerTab() {
     .filter((e) => e.date === selectedISO)
     .sort((a, b) => exerciseName(a.exerciseId).localeCompare(exerciseName(b.exerciseId)));
 
-  function canComplete(routineId: string, dueDate: string): boolean {
+  function progressFor(execId: string, routineId: string): { done: number; total: number } {
     const r = routines.find((x) => x.id === routineId);
-    if (!r) return false;
-    return withinGrace(dueDate, r.graceDays, todayISO());
+    const total = r?.exerciseIds.length ?? 0;
+    const done = (r?.exerciseIds ?? []).filter((eid) =>
+      executions.some((e) => e.routineExecutionId === execId && e.exerciseId === eid && e.completed),
+    ).length;
+    return { done, total };
   }
 
   return (
@@ -149,32 +152,23 @@ export function TrackerTab() {
       ) : null}
 
       {dueRoutines.map((exec) => {
-        const completable = exec.status === 'pending' && canComplete(exec.routineId, exec.dueDate);
+        const { done, total } = progressFor(exec.id, exec.routineId);
         return (
-          <View key={exec.id} style={styles.agendaCard}>
+          <Pressable
+            key={exec.id}
+            style={styles.agendaCard}
+            onPress={() => router.push(`/fitness/routine-execution/${exec.id}`)}
+          >
             <View style={[styles.statusDot, { backgroundColor: STATUS_COLOR[exec.status] }]} />
-            <Pressable style={styles.agendaMain} onPress={() => router.push(`/fitness/routine/${exec.routineId}`)}>
+            <View style={styles.agendaMain}>
               <Text style={styles.agendaName}>{routineName(exec.routineId)}</Text>
               <Text style={[styles.agendaStatus, { color: STATUS_COLOR[exec.status] }]}>
                 {exec.status === 'pending' ? 'Pending' : exec.status === 'completed' ? 'Completed' : 'Failed'}
+                {total > 0 ? `  ·  ${done}/${total} done` : ''}
               </Text>
-            </Pressable>
-            {exec.status === 'pending' && (
-              completable ? (
-                <Pressable style={styles.completeBtn} onPress={() => setStatus(exec.id, 'completed')}>
-                  <MaterialIcons name="check" size={16} color="#fff" />
-                  <Text style={styles.completeBtnText}>Done</Text>
-                </Pressable>
-              ) : (
-                <Text style={styles.expired}>Grace passed</Text>
-              )
-            )}
-            {exec.status === 'completed' && (
-              <Pressable onPress={() => setStatus(exec.id, 'pending')} hitSlop={8}>
-                <Text style={styles.undo}>Undo</Text>
-              </Pressable>
-            )}
-          </View>
+            </View>
+            <MaterialIcons name="chevron-right" size={20} color={colors.textMuted} />
+          </Pressable>
         );
       })}
 

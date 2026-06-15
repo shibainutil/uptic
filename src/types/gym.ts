@@ -32,6 +32,7 @@ export interface ExerciseExecution {
   id: string;
   exerciseId: string;
   date: string;                  // ISO yyyy-mm-dd
+  routineExecutionId?: string;   // set when logged as part of a routine execution
   series?: number;
   reps?: number;
   durationMin?: number;

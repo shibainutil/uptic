@@ -24,6 +24,7 @@ function RootNavigator() {
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="fitness/exercise/[id]" options={{ presentation: 'card' }} />
       <Stack.Screen name="fitness/routine/[id]" options={{ presentation: 'card' }} />
+      <Stack.Screen name="fitness/routine-execution/[id]" options={{ presentation: 'card' }} />
     </Stack>
   );
 }
