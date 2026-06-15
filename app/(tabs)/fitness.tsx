@@ -2,20 +2,28 @@ import { useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExercisesTab } from '../../src/components/gym/ExercisesTab';
-import { ModulesTab } from '../../src/components/gym/ModulesTab';
-import { CyclesTab } from '../../src/components/gym/CyclesTab';
+import { RoutinesTab } from '../../src/components/gym/RoutinesTab';
+import { TrackerTab } from '../../src/components/gym/TrackerTab';
+import { useAuth } from '../../src/context/AuthContext';
+import { useRoutines, useRoutineExecutions, useRoutineReconcile } from '../../src/store/gymStore';
 import { colors, spacing, font } from '../../src/theme';
 
 const SUB_TABS = [
+  { key: 'tracker',   label: 'Tracker' },
   { key: 'exercises', label: 'Exercises' },
-  { key: 'modules', label: 'Modules' },
-  { key: 'cycles', label: 'Cycles' },
+  { key: 'routines',  label: 'Routines' },
 ] as const;
 
 type SubTab = typeof SUB_TABS[number]['key'];
 
-export default function GymScreen() {
-  const [tab, setTab] = useState<SubTab>('exercises');
+export default function FitnessScreen() {
+  const [tab, setTab] = useState<SubTab>('tracker');
+
+  // Generate/expire routine executions while the fitness module is open.
+  const { user } = useAuth();
+  const { routines } = useRoutines(user?.uid);
+  const { routineExecutions } = useRoutineExecutions(user?.uid);
+  useRoutineReconcile(user?.uid, routines, routineExecutions);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -34,9 +42,9 @@ export default function GymScreen() {
       </View>
 
       <View style={styles.content}>
+        {tab === 'tracker'   && <TrackerTab />}
         {tab === 'exercises' && <ExercisesTab />}
-        {tab === 'modules' && <ModulesTab />}
-        {tab === 'cycles' && <CyclesTab />}
+        {tab === 'routines'  && <RoutinesTab />}
       </View>
     </SafeAreaView>
   );
@@ -58,7 +66,7 @@ const styles = StyleSheet.create({
     borderBottomColor: 'transparent',
   },
   subTabActive: { borderBottomColor: colors.accent },
-  subTabText: { color: colors.textMuted, fontSize: font.md, fontWeight: '500' },
+  subTabText: { color: colors.textMuted, fontSize: font.sm, fontWeight: '500' },
   subTabTextActive: { color: colors.accent },
   content: { flex: 1 },
 });

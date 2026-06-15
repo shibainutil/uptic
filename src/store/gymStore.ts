@@ -5,10 +5,21 @@ import {
   setDoc,
   deleteDoc,
   updateDoc,
+  getDocs,
+  query,
+  where,
+  writeBatch,
 } from 'firebase/firestore';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { db } from '../firebase';
-import type { Exercise, TrainingModule, TrainingCycle, ExerciseExecution } from '../types/gym';
+import type {
+  Exercise,
+  ExerciseExecution,
+  Routine,
+  RoutineExecution,
+  RoutineExecStatus,
+} from '../types/gym';
+import { reconcileRoutineExecutions, todayISO } from '../lib/schedule';
 
 function uid() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -20,6 +31,10 @@ function userCol(uid: string, col: string) {
 
 function userDoc(uid: string, col: string, id: string) {
   return doc(db, 'users', uid, col, id);
+}
+
+function stripUndefined(obj: object): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
 }
 
 // ── Exercises ──────────────────────────────────────────────────────────────
@@ -40,100 +55,146 @@ export function useExercises(userId: string | null | undefined) {
 
   const add = useCallback(async (data: Omit<Exercise, 'id' | 'createdAt'>): Promise<string> => {
     const id = uid();
-    await setDoc(userDoc(userId, 'exercises', id), { ...data, id, createdAt: new Date().toISOString() });
+    const docData = { ...data, id, createdAt: new Date().toISOString() };
+    await setDoc(userDoc(userId!, 'exercises', id), stripUndefined(docData));
     return id;
   }, [userId]);
 
   const update = useCallback(async (id: string, data: Partial<Exercise>) => {
-    await updateDoc(userDoc(userId, 'exercises', id), data as Record<string, unknown>);
+    await updateDoc(userDoc(userId!, 'exercises', id), stripUndefined(data as Record<string, unknown>));
   }, [userId]);
 
   const remove = useCallback(async (id: string) => {
-    await deleteDoc(userDoc(userId, 'exercises', id));
+    await deleteDoc(userDoc(userId!, 'exercises', id));
   }, [userId]);
 
   return { exercises, add, update, remove };
 }
 
-// ── Training Modules ───────────────────────────────────────────────────────
+// ── Exercise Executions ──────────────────────────────────────────────────────
 
-export function useModules(userId: string | null | undefined) {
-  const [modules, setModules] = useState<TrainingModule[]>([]);
+export function useExerciseExecutions(userId: string | null | undefined) {
+  const [executions, setExecutions] = useState<ExerciseExecution[]>([]);
 
   useEffect(() => {
     if (!userId) {
-      setModules([]);
+      setExecutions([]);
       return;
     }
-    const unsub = onSnapshot(userCol(userId, 'modules'), (snap) => {
-      setModules(snap.docs.map((d) => d.data() as TrainingModule));
+    const unsub = onSnapshot(userCol(userId, 'exerciseExecutions'), (snap) => {
+      setExecutions(snap.docs.map((d) => d.data() as ExerciseExecution));
     });
     return unsub;
   }, [userId]);
 
-  const add = useCallback(async (data: Omit<TrainingModule, 'id' | 'createdAt'>) => {
+  const add = useCallback(async (data: Omit<ExerciseExecution, 'id' | 'createdAt'>): Promise<string> => {
     const id = uid();
-    await setDoc(userDoc(userId, 'modules', id), { ...data, id, createdAt: new Date().toISOString() });
+    const docData = { ...data, id, createdAt: new Date().toISOString() };
+    await setDoc(userDoc(userId!, 'exerciseExecutions', id), stripUndefined(docData));
+    return id;
   }, [userId]);
 
-  const update = useCallback(async (id: string, data: Partial<TrainingModule>) => {
-    await updateDoc(userDoc(userId, 'modules', id), data as Record<string, unknown>);
+  const update = useCallback(async (id: string, data: Partial<ExerciseExecution>) => {
+    await updateDoc(userDoc(userId!, 'exerciseExecutions', id), stripUndefined(data as Record<string, unknown>));
   }, [userId]);
 
   const remove = useCallback(async (id: string) => {
-    await deleteDoc(userDoc(userId, 'modules', id));
+    await deleteDoc(userDoc(userId!, 'exerciseExecutions', id));
   }, [userId]);
 
-  const addExecution = useCallback(async (moduleId: string, exec: Omit<ExerciseExecution, 'id'>) => {
-    const mod = (await import('firebase/firestore')).getDoc(userDoc(userId, 'modules', moduleId));
-    const current = ((await mod).data() as TrainingModule);
-    const newExec: ExerciseExecution = { ...exec, id: uid() };
-    await updateDoc(userDoc(userId, 'modules', moduleId), {
-      executions: [...current.executions, newExec],
-    });
-  }, [userId]);
-
-  const updateExecution = useCallback(async (moduleId: string, execId: string, data: Partial<ExerciseExecution>, currentExecutions: ExerciseExecution[]) => {
-    const updated = currentExecutions.map((e) => e.id === execId ? { ...e, ...data } : e);
-    await updateDoc(userDoc(userId, 'modules', moduleId), { executions: updated });
-  }, [userId]);
-
-  const removeExecution = useCallback(async (moduleId: string, execId: string, currentExecutions: ExerciseExecution[]) => {
-    const updated = currentExecutions.filter((e) => e.id !== execId);
-    await updateDoc(userDoc(userId, 'modules', moduleId), { executions: updated });
-  }, [userId]);
-
-  return { modules, add, update, remove, addExecution, updateExecution, removeExecution };
+  return { executions, add, update, remove };
 }
 
-// ── Training Cycles ────────────────────────────────────────────────────────
+// ── Routines ─────────────────────────────────────────────────────────────────
 
-export function useCycles(userId: string | null | undefined) {
-  const [cycles, setCycles] = useState<TrainingCycle[]>([]);
+export function useRoutines(userId: string | null | undefined) {
+  const [routines, setRoutines] = useState<Routine[]>([]);
 
   useEffect(() => {
     if (!userId) {
-      setCycles([]);
+      setRoutines([]);
       return;
     }
-    const unsub = onSnapshot(userCol(userId, 'cycles'), (snap) => {
-      setCycles(snap.docs.map((d) => d.data() as TrainingCycle));
+    const unsub = onSnapshot(userCol(userId, 'routines'), (snap) => {
+      setRoutines(snap.docs.map((d) => d.data() as Routine));
     });
     return unsub;
   }, [userId]);
 
-  const add = useCallback(async (data: Omit<TrainingCycle, 'id' | 'createdAt'>) => {
+  const add = useCallback(async (data: Omit<Routine, 'id' | 'createdAt'>): Promise<string> => {
     const id = uid();
-    await setDoc(userDoc(userId, 'cycles', id), { ...data, id, createdAt: new Date().toISOString() });
+    const docData = { ...data, id, createdAt: new Date().toISOString() };
+    await setDoc(userDoc(userId!, 'routines', id), stripUndefined(docData));
+    return id;
   }, [userId]);
 
-  const update = useCallback(async (id: string, data: Partial<TrainingCycle>) => {
-    await updateDoc(userDoc(userId, 'cycles', id), data as Record<string, unknown>);
+  const update = useCallback(async (id: string, data: Partial<Routine>) => {
+    await updateDoc(userDoc(userId!, 'routines', id), stripUndefined(data as Record<string, unknown>));
   }, [userId]);
 
+  // Deleting a routine cascades to its routine executions.
   const remove = useCallback(async (id: string) => {
-    await deleteDoc(userDoc(userId, 'cycles', id));
+    const execSnap = await getDocs(
+      query(userCol(userId!, 'routineExecutions'), where('routineId', '==', id)),
+    );
+    const batch = writeBatch(db);
+    execSnap.docs.forEach((d) => batch.delete(d.ref));
+    batch.delete(userDoc(userId!, 'routines', id));
+    await batch.commit();
   }, [userId]);
 
-  return { cycles, add, update, remove };
+  return { routines, add, update, remove };
+}
+
+// ── Routine Executions ───────────────────────────────────────────────────────
+
+export function useRoutineExecutions(userId: string | null | undefined) {
+  const [routineExecutions, setRoutineExecutions] = useState<RoutineExecution[]>([]);
+
+  useEffect(() => {
+    if (!userId) {
+      setRoutineExecutions([]);
+      return;
+    }
+    const unsub = onSnapshot(userCol(userId, 'routineExecutions'), (snap) => {
+      setRoutineExecutions(snap.docs.map((d) => d.data() as RoutineExecution));
+    });
+    return unsub;
+  }, [userId]);
+
+  const setStatus = useCallback(async (id: string, status: RoutineExecStatus) => {
+    await updateDoc(userDoc(userId!, 'routineExecutions', id), {
+      status,
+      completedAt: status === 'completed' ? new Date().toISOString() : null,
+    });
+  }, [userId]);
+
+  return { routineExecutions, setStatus };
+}
+
+/**
+ * Generates pending routine executions for due dates and fails overdue ones.
+ * Mount once (e.g. in the fitness screen); runs when routines/executions settle.
+ */
+export function useRoutineReconcile(
+  userId: string | null | undefined,
+  routines: Routine[],
+  routineExecutions: RoutineExecution[],
+) {
+  const running = useRef(false);
+
+  useEffect(() => {
+    if (!userId || routines.length === 0 || running.current) return;
+    const { toCreate, toFail } = reconcileRoutineExecutions(routines, routineExecutions, todayISO());
+    if (toCreate.length === 0 && toFail.length === 0) return;
+
+    running.current = true;
+    const batch = writeBatch(db);
+    toCreate.forEach((exec) => batch.set(userDoc(userId, 'routineExecutions', exec.id), stripUndefined(exec)));
+    toFail.forEach((id) => batch.update(userDoc(userId, 'routineExecutions', id), { status: 'failed' }));
+    batch
+      .commit()
+      .catch(() => { /* surfaced on next reconcile */ })
+      .finally(() => { running.current = false; });
+  }, [userId, routines, routineExecutions]);
 }

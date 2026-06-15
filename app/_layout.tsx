@@ -14,7 +14,7 @@ function RootNavigator() {
     if (!user && !inAuthGroup) {
       router.replace('/(auth)/login');
     } else if (user && inAuthGroup) {
-      router.replace('/(tabs)/gym');
+      router.replace('/(tabs)/fitness');
     }
   }, [user, loading, segments]);
 
@@ -22,8 +22,8 @@ function RootNavigator() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="gym/module/[id]" options={{ presentation: 'card' }} />
-      <Stack.Screen name="gym/cycle/[id]" options={{ presentation: 'card' }} />
+      <Stack.Screen name="fitness/exercise/[id]" options={{ presentation: 'card' }} />
+      <Stack.Screen name="fitness/routine/[id]" options={{ presentation: 'card' }} />
     </Stack>
   );
 }
