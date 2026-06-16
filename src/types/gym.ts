@@ -28,16 +28,23 @@ export interface ParamValue {
   value: string;
 }
 
+export interface SeriesEntry {
+  reps?: number;
+  weight?: number;
+  weightUnit?: 'kg' | 'lbs';
+}
+
 export interface ExerciseExecution {
   id: string;
   exerciseId: string;
   date: string;                  // ISO yyyy-mm-dd
   routineExecutionId?: string;   // set when logged as part of a routine execution
-  series?: number;
-  reps?: number;
+  series?: number;               // legacy: total series count
+  reps?: number;                 // legacy: single reps value
   durationMin?: number;
-  weight?: number;
+  weight?: number;               // legacy: single weight value
   weightUnit?: 'kg' | 'lbs';
+  seriesData?: SeriesEntry[];    // per-series reps + weight; replaces series/reps/weight for strength
   paramValues: ParamValue[];
   completed: boolean;
   notes?: string;

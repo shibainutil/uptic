@@ -177,7 +177,9 @@ export function TrackerTab() {
         const isCardio = ex ? exerciseType(ex) === 'cardio' : exec.durationMin != null;
         const sub = isCardio
           ? (exec.durationMin != null ? `${exec.durationMin} min` : 'Logged')
-          : (exec.series || exec.reps ? `${exec.series ?? '?'} × ${exec.reps ?? '?'}` : 'Logged');
+          : exec.seriesData && exec.seriesData.length > 0
+            ? `${exec.seriesData.filter((s) => s.reps != null && s.weight != null).length}/${exec.seriesData.length} series`
+            : (exec.series || exec.reps ? `${exec.series ?? '?'} × ${exec.reps ?? '?'}` : 'Logged');
         return (
           <Pressable key={exec.id} style={styles.agendaCard} onPress={() => router.push(`/fitness/exercise/${exec.exerciseId}`)}>
             <View style={[styles.statusDot, { backgroundColor: exec.completed ? '#22C55E' : colors.textMuted }]} />

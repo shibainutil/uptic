@@ -12,7 +12,7 @@ import {
 import { ExecutionFormModal } from '../../../src/components/gym/ExecutionFormModal';
 import { colors, spacing, font, radius } from '../../../src/theme';
 import { fromISO, withinGrace, todayISO, diffDays } from '../../../src/lib/schedule';
-import { type Exercise, type ExerciseExecution, exerciseType } from '../../../src/types/gym';
+import { type Exercise, type ExerciseExecution, exerciseType, type SeriesEntry } from '../../../src/types/gym';
 
 const STATUS_COLOR = { pending: colors.accent, completed: '#22C55E', failed: colors.danger } as const;
 
@@ -48,8 +48,25 @@ export default function RoutineExecutionScreen() {
     [routine, exercises],
   );
 
+  function linkedExecFor(exId: string): ExerciseExecution | undefined {
+    return linked.find((e) => e.exerciseId === exId);
+  }
+
   function doneExecFor(exId: string): ExerciseExecution | undefined {
     return linked.find((e) => e.exerciseId === exId && e.completed);
+  }
+
+  function seriesCircles(ex: Exercise): boolean[] {
+    const count = ex.series ?? 3;
+    const exec = linkedExecFor(ex.id);
+    if (!exec) return Array(count).fill(false);
+    if (exec.seriesData && exec.seriesData.length > 0) {
+      return Array.from({ length: count }, (_, i) => {
+        const s = (exec.seriesData as SeriesEntry[])[i];
+        return s != null && s.reps != null && s.weight != null;
+      });
+    }
+    return Array(count).fill(exec.completed);
   }
 
   const total = routine?.exerciseIds.length ?? 0;
@@ -71,7 +88,7 @@ export default function RoutineExecutionScreen() {
 
   function openLog(ex: Exercise) {
     setFormExercise(ex);
-    setEditingExec(doneExecFor(ex.id) ?? linked.find((e) => e.exerciseId === ex.id) ?? null);
+    setEditingExec(linkedExecFor(ex.id) ?? null);
     setFormOpen(true);
   }
 
@@ -154,18 +171,16 @@ export default function RoutineExecutionScreen() {
                     {isStrength ? `${ex.series ?? 3} × ${ex.repsMin ?? 8}–${ex.repsMax ?? 10}` : `${ex.durationMin ?? 30} min`}
                   </Text>
                 </View>
-                {done ? (
-                  <View style={styles.doneBadge}>
-                    <MaterialIcons name="check-circle" size={22} color="#22C55E" />
-                    {interactive && <Text style={styles.editLink}>Edit</Text>}
-                  </View>
-                ) : interactive ? (
-                  <View style={styles.logBtn}>
-                    <Text style={styles.logBtnText}>Log</Text>
-                  </View>
-                ) : (
-                  <MaterialIcons name="radio-button-unchecked" size={22} color={colors.textDim} />
-                )}
+                <View style={styles.circles}>
+                  {seriesCircles(ex).map((isDone, si) => (
+                    <MaterialIcons
+                      key={si}
+                      name={isDone ? 'check-circle' : 'radio-button-unchecked'}
+                      size={20}
+                      color={isDone ? '#22C55E' : interactive ? colors.textMuted : colors.textDim}
+                    />
+                  ))}
+                </View>
               </Pressable>
             );
           })
@@ -260,13 +275,5 @@ const styles = StyleSheet.create({
   exMain: { flex: 1 },
   exName: { color: colors.text, fontSize: font.md, fontWeight: '500' },
   exMeta: { color: colors.textDim, fontSize: font.sm, marginTop: 2 },
-  doneBadge: { alignItems: 'center', gap: 2 },
-  editLink: { color: colors.accent, fontSize: 11 },
-  logBtn: {
-    backgroundColor: colors.accent,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderRadius: radius.sm,
-  },
-  logBtnText: { color: '#fff', fontSize: font.sm, fontWeight: '600' },
+  circles: { flexDirection: 'row', gap: 4, alignItems: 'center' },
 });
