@@ -47,7 +47,6 @@ export default function TabsLayout() {
           onPress={() => setDropdownOpen((v) => !v)}
           activeOpacity={0.7}
         >
-          <MaterialIcons name="menu" size={22} color={colors.accent} />
           <MaterialIcons name={activeTab.icon} size={22} color={colors.accent} />
           <Text style={styles.activeLabel}>{activeTab.title}</Text>
         </TouchableOpacity>

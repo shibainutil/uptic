@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react';
-import { View, Text, TextInput, ScrollView, StyleSheet, Alert } from 'react-native';
+import {
+  View, Text, TextInput, ScrollView, StyleSheet, Alert,
+  Modal as RNModal, Pressable,
+} from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { Modal } from '../ui/Modal';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
-import { Picker } from '../ui/Picker';
 import { DatePicker } from '../ui/DatePicker';
 import { colors, spacing, font, radius } from '../../theme';
 import { todayISO } from '../../lib/schedule';
-import { type Exercise, type ExerciseExecution, type ParamValue, type SeriesEntry, exerciseType } from '../../types/gym';
+import {
+  type Exercise, type ExerciseExecution, type ParamValue, type SeriesEntry, exerciseType,
+} from '../../types/gym';
 
 interface SeriesRow {
   reps: string;
@@ -18,15 +21,15 @@ interface SeriesRow {
 interface ExecForm {
   date: string;
   seriesRows: SeriesRow[];
-  weightUnit: 'kg' | 'lbs';
   durationMin: string;
   paramValues: Record<string, string>;
-  notes: string;
 }
 
 interface Props {
   exercise: Exercise;
   execution: ExerciseExecution | null;
+  // Most recent prior execution for this exercise — used for weight placeholders.
+  lastExecution?: ExerciseExecution | null;
   visible: boolean;
   defaultDate?: string;
   defaultCompleted?: boolean;
@@ -41,13 +44,35 @@ function isSeriesDone(row: SeriesRow): boolean {
 }
 
 export function ExecutionFormModal({
-  exercise, execution, visible, defaultDate, routineExecutionId, lockDate, onClose, onSubmit,
+  exercise, execution, lastExecution, visible, defaultDate, routineExecutionId, lockDate, onClose, onSubmit,
 }: Props) {
   const isStrength = exerciseType(exercise) === 'strength';
   const params = exercise.params ?? [];
   const requiredParams = params.filter((p) => p.required);
   const [form, setForm] = useState<ExecForm | null>(null);
   const [saving, setSaving] = useState(false);
+  const [focused, setFocused] = useState<string | null>(null);
+
+  // Per-series weight placeholders from last execution
+  const weightPlaceholders: string[] = (() => {
+    const src = lastExecution ?? execution;
+    if (!src) return [];
+    const count = exercise.series ?? 3;
+    if (src.seriesData && src.seriesData.length > 0) {
+      return Array.from({ length: count }, (_, i) => {
+        const w = src.seriesData![i]?.weight;
+        return w != null ? String(w) : '';
+      });
+    }
+    // Legacy: first series only
+    return Array.from({ length: count }, (_, i) => (i === 0 && src.weight != null ? String(src.weight) : ''));
+  })();
+
+  const repsSuggestion = exercise.repsMin != null
+    ? exercise.repsMin === exercise.repsMax
+      ? String(exercise.repsMin)
+      : `${exercise.repsMin}`
+    : '';
 
   useEffect(() => {
     if (!visible) return;
@@ -73,19 +98,15 @@ export function ExecutionFormModal({
       setForm({
         date: execution.date,
         seriesRows,
-        weightUnit: execution.weightUnit ?? 'kg',
         durationMin: String(execution.durationMin ?? exercise.durationMin ?? 30),
         paramValues: pv,
-        notes: execution.notes ?? '',
       });
     } else {
       setForm({
         date: defaultDate ?? todayISO(),
         seriesRows: Array.from({ length: seriesCount }, () => ({ reps: '', weight: '' })),
-        weightUnit: 'kg',
         durationMin: String(exercise.durationMin ?? 30),
         paramValues: {},
-        notes: '',
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -102,8 +123,6 @@ export function ExecutionFormModal({
     ? requiredParams.filter((p) => !(form.paramValues[p.id] ?? '').trim()).map((p) => p.name)
     : [];
   const canComplete = allSeriesDone && missingRequired.length === 0;
-  const doneSeries = form ? form.seriesRows.filter(isSeriesDone).length : 0;
-  const totalSeries = form?.seriesRows.length ?? 0;
 
   async function save() {
     if (!form || saving) return;
@@ -121,24 +140,21 @@ export function ExecutionFormModal({
       date: form.date,
       paramValues,
       completed: isStrength ? canComplete : true,
-      notes: form.notes.trim() || undefined,
       ...(routineExecutionId ? { routineExecutionId } : {}),
     };
 
     if (isStrength) {
-      // Build seriesData without any undefined values (Firestore rejects them).
       const seriesData: SeriesEntry[] = form.seriesRows.map((r) => {
-        const entry: SeriesEntry = { weightUnit: form.weightUnit };
+        const entry: SeriesEntry = { weightUnit: 'kg' };
         if (r.reps.trim()) entry.reps = parseInt(r.reps);
         if (r.weight.trim()) entry.weight = parseFloat(r.weight);
         return entry;
       });
       data.seriesData = seriesData;
       data.series = form.seriesRows.length;
-      // Legacy scalar fields so TrackerTab fallback display works.
       const first = seriesData[0];
       if (first?.reps != null) data.reps = first.reps;
-      if (first?.weight != null) { data.weight = first.weight; data.weightUnit = form.weightUnit; }
+      if (first?.weight != null) { data.weight = first.weight; data.weightUnit = 'kg'; }
     } else {
       data.durationMin = parseInt(form.durationMin) || undefined;
     }
@@ -155,143 +171,177 @@ export function ExecutionFormModal({
   }
 
   return (
-    <Modal title={execution ? 'Edit Execution' : 'Log Execution'} visible={visible} onClose={onClose}>
-      {form && (
-        <View style={styles.form}>
-          {!lockDate && (
-            <DatePicker label="Date" value={form.date} onChange={(v) => setForm({ ...form, date: v })} />
-          )}
-
-          {isStrength ? (
-            <>
-              <View style={styles.unitRow}>
-                <Text style={styles.unitLabel}>Weight unit</Text>
-                <Picker
-                  options={['kg', 'lbs']}
-                  value={form.weightUnit}
-                  onChange={(v) => setForm({ ...form, weightUnit: v as 'kg' | 'lbs' })}
-                />
-              </View>
-
-              {form.seriesRows.map((row, i) => {
-                const done = isSeriesDone(row);
-                return (
-                  <View key={i} style={styles.seriesRow}>
-                    <View style={styles.seriesLeft}>
-                      <MaterialIcons
-                        name={done ? 'check-circle' : 'radio-button-unchecked'}
-                        size={22}
-                        color={done ? '#22C55E' : colors.textDim}
-                      />
-                      <Text style={styles.seriesNum}>S{i + 1}</Text>
-                    </View>
-                    <TextInput
-                      style={styles.seriesInput}
-                      value={row.weight}
-                      onChangeText={(v) => updateRow(i, 'weight', v)}
-                      keyboardType="decimal-pad"
-                      placeholder={`Weight (${form.weightUnit})`}
-                      placeholderTextColor={colors.textDim}
-                    />
-                    <TextInput
-                      style={styles.seriesInput}
-                      value={row.reps}
-                      onChangeText={(v) => updateRow(i, 'reps', v)}
-                      keyboardType="numeric"
-                      placeholder="Reps"
-                      placeholderTextColor={colors.textDim}
-                    />
-                  </View>
-                );
-              })}
-
-              <Text style={styles.progressNote}>
-                {doneSeries}/{totalSeries} series complete
-                {doneSeries === totalSeries && totalSeries > 0 ? ' ✓' : ''}
-              </Text>
-            </>
-          ) : (
-            <Input
-              label="Duration (minutes)"
-              value={form.durationMin}
-              onChangeText={(v) => setForm({ ...form, durationMin: v })}
-              keyboardType="numeric"
-            />
-          )}
-
-          {params.map((p) => (
-            <Input
-              key={p.id}
-              label={`${p.name}${p.unit ? ` (${p.unit})` : ''}${p.required ? ' *' : ''}`}
-              value={form.paramValues[p.id] ?? ''}
-              onChangeText={(v) => setForm({ ...form, paramValues: { ...form.paramValues, [p.id]: v } })}
-              placeholder={p.required ? 'Required' : 'Optional'}
-            />
-          ))}
-
-          {missingRequired.length > 0 && (
-            <Text style={styles.warn}>Required: {missingRequired.join(', ')}</Text>
-          )}
-
-          <Input
-            label="Notes (optional)"
-            value={form.notes}
-            onChangeText={(v) => setForm({ ...form, notes: v })}
-            placeholder="Any notes"
-          />
-
-          <View style={styles.formRow}>
-            <Button label="Cancel" onPress={onClose} style={styles.flex1} disabled={saving} />
-            <Button label="Save" variant="primary" onPress={save} disabled={saving} style={styles.flex1} />
+    <RNModal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose}>
+        <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+          <View style={styles.header}>
+            <View style={styles.headerText}>
+              <Text style={styles.exerciseName}>{exercise.name}</Text>
+              {form && <Text style={styles.dateText}>{form.date}</Text>}
+            </View>
+            <Pressable onPress={onClose} hitSlop={12}>
+              <MaterialIcons name="close" size={20} color={colors.textMuted} />
+            </Pressable>
           </View>
-        </View>
-      )}
-    </Modal>
+
+          {form && (
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.body}>
+              {!lockDate && (
+                <DatePicker label="Date" value={form.date} onChange={(v) => setForm({ ...form, date: v })} />
+              )}
+
+              {isStrength ? (
+                <View style={styles.grid}>
+                  {/* Weight row */}
+                  <View style={styles.gridRow}>
+                    <Text style={styles.rowLabel}>Weight{'\n'}(kg)</Text>
+                    {form.seriesRows.map((row, i) => (
+                      <TextInput
+                        key={i}
+                        style={[styles.cell, focused === `w${i}` && styles.cellFocused]}
+                        value={row.weight}
+                        onChangeText={(v) => updateRow(i, 'weight', v)}
+                        onFocus={() => setFocused(`w${i}`)}
+                        onBlur={() => setFocused(null)}
+                        keyboardType="decimal-pad"
+                        placeholder={weightPlaceholders[i] || '—'}
+                        placeholderTextColor={weightPlaceholders[i] ? colors.textMuted : colors.textDim}
+                      />
+                    ))}
+                  </View>
+
+                  {/* Reps row */}
+                  <View style={styles.gridRow}>
+                    <Text style={styles.rowLabel}>Reps</Text>
+                    {form.seriesRows.map((row, i) => (
+                      <TextInput
+                        key={i}
+                        style={[styles.cell, focused === `r${i}` && styles.cellFocused]}
+                        value={row.reps}
+                        onChangeText={(v) => updateRow(i, 'reps', v)}
+                        onFocus={() => setFocused(`r${i}`)}
+                        onBlur={() => setFocused(null)}
+                        keyboardType="numeric"
+                        placeholder={repsSuggestion || '—'}
+                        placeholderTextColor={repsSuggestion ? colors.textMuted : colors.textDim}
+                      />
+                    ))}
+                  </View>
+
+                  {/* Checkmarks row */}
+                  <View style={styles.gridRow}>
+                    <View style={styles.labelCell} />
+                    {form.seriesRows.map((row, i) => {
+                      const done = isSeriesDone(row);
+                      return (
+                        <View key={i} style={styles.checkCell}>
+                          <MaterialIcons
+                            name={done ? 'check-circle' : 'radio-button-unchecked'}
+                            size={18}
+                            color={done ? '#22C55E' : colors.textDim}
+                          />
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              ) : (
+                <Input
+                  label="Duration (minutes)"
+                  value={form.durationMin}
+                  onChangeText={(v) => setForm({ ...form, durationMin: v })}
+                  keyboardType="numeric"
+                />
+              )}
+
+              {params.map((p) => (
+                <Input
+                  key={p.id}
+                  label={`${p.name}${p.unit ? ` (${p.unit})` : ''}${p.required ? ' *' : ''}`}
+                  value={form.paramValues[p.id] ?? ''}
+                  onChangeText={(v) => setForm({ ...form, paramValues: { ...form.paramValues, [p.id]: v } })}
+                  placeholder={p.required ? 'Required' : 'Optional'}
+                />
+              ))}
+
+              {missingRequired.length > 0 && (
+                <Text style={styles.warn}>Required: {missingRequired.join(', ')}</Text>
+              )}
+
+              <View style={styles.formRow}>
+                <Button label="Cancel" onPress={onClose} style={styles.flex1} disabled={saving} />
+                <Button label="Save" variant="primary" onPress={save} disabled={saving} style={styles.flex1} />
+              </View>
+            </ScrollView>
+          )}
+        </Pressable>
+      </Pressable>
+    </RNModal>
   );
 }
 
+const LABEL_W = 52;
+
 const styles = StyleSheet.create({
-  form: { gap: spacing.lg },
-  unitRow: { gap: spacing.xs },
-  unitLabel: {
-    fontSize: 11, fontWeight: '600', color: colors.textMuted,
-    textTransform: 'uppercase', letterSpacing: 0.8,
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'center',
+    padding: spacing.lg,
   },
-  seriesRow: {
+  sheet: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    maxHeight: '85%',
+    overflow: 'hidden',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    gap: spacing.md,
+  },
+  headerText: { flex: 1, gap: 2 },
+  exerciseName: { color: colors.text, fontSize: font.lg, fontWeight: '700' },
+  dateText: { color: colors.textMuted, fontSize: font.sm },
+  body: { padding: spacing.lg, gap: spacing.lg },
+  grid: { gap: spacing.sm },
+  gridRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
   },
-  seriesLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    width: 52,
-  },
-  seriesNum: {
+  labelCell: { width: LABEL_W },
+  rowLabel: {
+    width: LABEL_W,
     color: colors.textMuted,
     fontSize: font.sm,
-    fontWeight: '600',
+    lineHeight: 17,
   },
-  seriesInput: {
+  cell: {
     flex: 1,
     backgroundColor: colors.surface2,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 14,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
     color: colors.text,
     fontSize: font.md,
-    textAlign: 'center',
   },
-  progressNote: {
-    color: colors.textMuted,
-    fontSize: font.sm,
-    textAlign: 'center',
-    marginTop: -spacing.sm,
+  cellFocused: {
+    borderColor: colors.accent,
+  },
+  checkCell: {
+    flex: 1,
+    alignItems: 'center',
+    paddingTop: spacing.xs,
   },
   warn: { color: colors.danger, fontSize: font.sm },
   flex1: { flex: 1 },
-  formRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
+  formRow: { flexDirection: 'row', gap: spacing.md },
 });

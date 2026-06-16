@@ -83,7 +83,7 @@ export interface RoutineExecution {
 
 // ── Helpers for reading possibly-legacy exercise docs ───────────────────────
 
-export const STRENGTH_GROUPS = ['Chest', 'Back', 'Shoulders', 'Arms', 'Core', 'Legs', 'Other'];
+export const STRENGTH_GROUPS = ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Arms', 'Core', 'Legs', 'Other'];
 
 export function exerciseType(ex: Exercise): ExerciseType {
   if (ex.type) return ex.type;
