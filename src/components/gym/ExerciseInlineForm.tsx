@@ -50,15 +50,17 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
   );
   const [focused, setFocused] = useState<string | null>(null);
 
-  // Prevent auto-save from firing on initial load from execution
-  const syncingFromExecution = useRef(false);
+  const executionRef = useRef(execution);
+  useEffect(() => { executionRef.current = execution; }, [execution]);
+  const onSaveRef = useRef(onSave);
+  useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
+
   // Queue: if a save is in flight, store the latest rows to save next
   const isSaving = useRef(false);
   const pendingSave = useRef<SeriesRow[] | null>(null);
 
   // Sync rows when execution prop changes (after Firestore update or on open)
   useEffect(() => {
-    syncingFromExecution.current = true;
     const count = exercise.series ?? 3;
     const fmt = (w: number | undefined) => w != null ? w.toFixed(1) : '';
     if (execution?.seriesData && execution.seriesData.length > 0) {
@@ -112,7 +114,7 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
       const data: Omit<ExerciseExecution, 'id' | 'createdAt'> = {
         exerciseId: exercise.id,
         date: dueDate,
-        paramValues: execution?.paramValues ?? [],
+        paramValues: executionRef.current?.paramValues ?? [],
         completed: isStrength ? allDone : true,
         routineExecutionId,
         seriesData,
@@ -120,7 +122,7 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
         ...(seriesData[0]?.reps != null ? { reps: seriesData[0].reps } : {}),
         ...(seriesData[0]?.weight != null ? { weight: seriesData[0].weight, weightUnit: 'kg' as const } : {}),
       };
-      await onSave(data);
+      await onSaveRef.current(data);
     } catch (e: unknown) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Could not save.');
     }
@@ -153,10 +155,9 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
         const n = parseFloat(r.weight);
         return { ...r, weight: isNaN(n) ? r.weight : n.toFixed(1) };
       });
-      if (!syncingFromExecution.current && next.some(isSeriesDone)) {
+      if (next.some(isSeriesDone)) {
         triggerSave(next);
       }
-      syncingFromExecution.current = false;
       return next;
     });
   }
@@ -164,10 +165,9 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
   function onRepsBlur() {
     setFocused(null);
     setRows((prev) => {
-      if (!syncingFromExecution.current && prev.some(isSeriesDone)) {
+      if (prev.some(isSeriesDone)) {
         triggerSave(prev);
       }
-      syncingFromExecution.current = false;
       return prev;
     });
   }

@@ -315,7 +315,10 @@ export function TrackerTab() {
                           routineExecutionId={exec.id}
                           dueDate={exec.dueDate}
                           onSave={async (data) => {
-                            if (exExec) await update(exExec.id, data);
+                            const live = executions.find(
+                              (e) => e.routineExecutionId === exec.id && e.exerciseId === ex.id,
+                            );
+                            if (live) await update(live.id, data);
                             else await add(data);
                           }}
                         />
@@ -359,7 +362,7 @@ const styles = StyleSheet.create({
     flex: 1, textAlign: 'center', color: colors.textMuted,
     fontSize: font.sm, fontWeight: '500', paddingVertical: spacing.sm,
   },
-  dayCell: { flex: 1, alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.xs },
+  dayCell: { flex: 1, alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.xs, height: 48 },
   dayCellToday: { backgroundColor: `${colors.accent}18` },
   dayCellSelected: { backgroundColor: colors.accent },
   dayNumber: { color: colors.text, fontSize: font.md },
