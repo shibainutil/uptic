@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, TextInput, ScrollView, StyleSheet, Alert } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Modal } from '../ui/Modal';
 import { Input } from '../ui/Input';
@@ -59,13 +59,11 @@ export function ExecutionFormModal({
 
       let seriesRows: SeriesRow[];
       if (execution.seriesData && execution.seriesData.length > 0) {
-        // Pad or trim to current exercise series count.
         seriesRows = Array.from({ length: seriesCount }, (_, i) => {
           const s = execution.seriesData![i];
           return { reps: s?.reps != null ? String(s.reps) : '', weight: s?.weight != null ? String(s.weight) : '' };
         });
       } else {
-        // Legacy single-value execution: pre-fill first series.
         seriesRows = Array.from({ length: seriesCount }, (_, i) => ({
           reps: i === 0 && execution.reps != null ? String(execution.reps) : '',
           weight: i === 0 && execution.weight != null ? String(execution.weight) : '',
@@ -104,10 +102,12 @@ export function ExecutionFormModal({
     ? requiredParams.filter((p) => !(form.paramValues[p.id] ?? '').trim()).map((p) => p.name)
     : [];
   const canComplete = allSeriesDone && missingRequired.length === 0;
+  const doneSeries = form ? form.seriesRows.filter(isSeriesDone).length : 0;
+  const totalSeries = form?.seriesRows.length ?? 0;
 
   async function save() {
     if (!form || saving) return;
-    if (isStrength && !canComplete && missingRequired.length > 0) {
+    if (isStrength && missingRequired.length > 0 && allSeriesDone) {
       Alert.alert('Cannot complete', `Fill required parameter(s): ${missingRequired.join(', ')}`);
       return;
     }
@@ -126,20 +126,19 @@ export function ExecutionFormModal({
     };
 
     if (isStrength) {
-      const seriesData: SeriesEntry[] = form.seriesRows.map((r) => ({
-        reps: r.reps.trim() ? parseInt(r.reps) : undefined,
-        weight: r.weight.trim() ? parseFloat(r.weight) : undefined,
-        weightUnit: form.weightUnit,
-      }));
+      // Build seriesData without any undefined values (Firestore rejects them).
+      const seriesData: SeriesEntry[] = form.seriesRows.map((r) => {
+        const entry: SeriesEntry = { weightUnit: form.weightUnit };
+        if (r.reps.trim()) entry.reps = parseInt(r.reps);
+        if (r.weight.trim()) entry.weight = parseFloat(r.weight);
+        return entry;
+      });
       data.seriesData = seriesData;
       data.series = form.seriesRows.length;
-      // Legacy fields for backward compat with TrackerTab summary.
+      // Legacy scalar fields so TrackerTab fallback display works.
       const first = seriesData[0];
-      if (first) {
-        data.reps = first.reps;
-        data.weight = first.weight;
-        data.weightUnit = form.weightUnit;
-      }
+      if (first?.reps != null) data.reps = first.reps;
+      if (first?.weight != null) { data.weight = first.weight; data.weightUnit = form.weightUnit; }
     } else {
       data.durationMin = parseInt(form.durationMin) || undefined;
     }
@@ -155,9 +154,6 @@ export function ExecutionFormModal({
     }
   }
 
-  const doneSeries = form ? form.seriesRows.filter(isSeriesDone).length : 0;
-  const totalSeries = form?.seriesRows.length ?? 0;
-
   return (
     <Modal title={execution ? 'Edit Execution' : 'Log Execution'} visible={visible} onClose={onClose}>
       {form && (
@@ -169,7 +165,7 @@ export function ExecutionFormModal({
           {isStrength ? (
             <>
               <View style={styles.unitRow}>
-                <Text style={styles.formLabel}>Weight unit</Text>
+                <Text style={styles.unitLabel}>Weight unit</Text>
                 <Picker
                   options={['kg', 'lbs']}
                   value={form.weightUnit}
@@ -177,46 +173,41 @@ export function ExecutionFormModal({
                 />
               </View>
 
-              <View style={styles.seriesHeader}>
-                <Text style={styles.seriesColLabel} />
-                <Text style={[styles.seriesColLabel, styles.seriesColInput]}>Reps</Text>
-                <Text style={[styles.seriesColLabel, styles.seriesColInput]}>Weight ({form.weightUnit})</Text>
-                <View style={styles.seriesCheckCol} />
-              </View>
-
               {form.seriesRows.map((row, i) => {
                 const done = isSeriesDone(row);
                 return (
                   <View key={i} style={styles.seriesRow}>
-                    <Text style={styles.seriesLabel}>Series {i + 1}</Text>
-                    <Input
-                      value={row.reps}
-                      onChangeText={(v) => updateRow(i, 'reps', v)}
-                      keyboardType="numeric"
-                      placeholder="—"
-                      style={styles.seriesInput}
-                    />
-                    <Input
-                      value={row.weight}
-                      onChangeText={(v) => updateRow(i, 'weight', v)}
-                      keyboardType="decimal-pad"
-                      placeholder="—"
-                      style={styles.seriesInput}
-                    />
-                    <View style={styles.seriesCheckCol}>
+                    <View style={styles.seriesLeft}>
                       <MaterialIcons
                         name={done ? 'check-circle' : 'radio-button-unchecked'}
                         size={22}
                         color={done ? '#22C55E' : colors.textDim}
                       />
+                      <Text style={styles.seriesNum}>S{i + 1}</Text>
                     </View>
+                    <TextInput
+                      style={styles.seriesInput}
+                      value={row.weight}
+                      onChangeText={(v) => updateRow(i, 'weight', v)}
+                      keyboardType="decimal-pad"
+                      placeholder={`Weight (${form.weightUnit})`}
+                      placeholderTextColor={colors.textDim}
+                    />
+                    <TextInput
+                      style={styles.seriesInput}
+                      value={row.reps}
+                      onChangeText={(v) => updateRow(i, 'reps', v)}
+                      keyboardType="numeric"
+                      placeholder="Reps"
+                      placeholderTextColor={colors.textDim}
+                    />
                   </View>
                 );
               })}
 
               <Text style={styles.progressNote}>
-                {doneSeries}/{totalSeries} series done
-                {doneSeries === totalSeries && totalSeries > 0 ? ' — exercise complete ✓' : ''}
+                {doneSeries}/{totalSeries} series complete
+                {doneSeries === totalSeries && totalSeries > 0 ? ' ✓' : ''}
               </Text>
             </>
           ) : (
@@ -261,34 +252,45 @@ export function ExecutionFormModal({
 
 const styles = StyleSheet.create({
   form: { gap: spacing.lg },
-  formLabel: {
+  unitRow: { gap: spacing.xs },
+  unitLabel: {
     fontSize: 11, fontWeight: '600', color: colors.textMuted,
     textTransform: 'uppercase', letterSpacing: 0.8,
   },
-  unitRow: { gap: spacing.xs },
-  seriesHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: 2,
-  },
-  seriesColLabel: {
-    fontSize: 10, fontWeight: '600', color: colors.textMuted,
-    textTransform: 'uppercase', letterSpacing: 0.6, width: 64,
-  },
-  seriesColInput: { flex: 1 },
   seriesRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.surface2,
-    borderRadius: radius.sm,
-    padding: spacing.sm,
   },
-  seriesLabel: { width: 64, color: colors.text, fontSize: font.sm, fontWeight: '500' },
-  seriesInput: { flex: 1 },
-  seriesCheckCol: { width: 28, alignItems: 'center' },
-  progressNote: { color: colors.textMuted, fontSize: font.sm, textAlign: 'center' },
+  seriesLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    width: 52,
+  },
+  seriesNum: {
+    color: colors.textMuted,
+    fontSize: font.sm,
+    fontWeight: '600',
+  },
+  seriesInput: {
+    flex: 1,
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 14,
+    color: colors.text,
+    fontSize: font.md,
+    textAlign: 'center',
+  },
+  progressNote: {
+    color: colors.textMuted,
+    fontSize: font.sm,
+    textAlign: 'center',
+    marginTop: -spacing.sm,
+  },
   warn: { color: colors.danger, fontSize: font.sm },
   flex1: { flex: 1 },
   formRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
