@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, Pressable, ScrollView, StyleSheet, Alert, Modal as RNModal } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -86,6 +86,7 @@ export function LoggerTab() {
   const [menuExec, setMenuExec] = useState<RoutineExecution | null>(null);
   const [menuY, setMenuY] = useState(0);
   const [reschedulingExec, setReschedulingExec] = useState<RoutineExecution | null>(null);
+  const cardRefs = useRef<Map<string, View | null>>(new Map());
 
   function prevMonth() {
     if (viewMonth === 0) { setViewMonth(11); setViewYear((y) => y - 1); }
@@ -330,7 +331,11 @@ export function LoggerTab() {
             const groupNames = Object.keys(grouped).sort();
 
             return (
-              <View key={exec.id} style={[styles.agendaCard, { marginBottom: spacing.sm }]}>
+              <View
+                key={exec.id}
+                ref={(el) => { if (el) cardRefs.current.set(exec.id, el); else cardRefs.current.delete(exec.id); }}
+                style={[styles.agendaCard, { marginBottom: spacing.sm }]}
+              >
                 <Pressable style={styles.cardHeader} onPress={() => toggleRoutine(exec.id, status)}>
                   <MaterialIcons name={expanded ? 'expand-less' : 'expand-more'} size={22} color={colors.textMuted} />
                   <View style={styles.titleCol}>
@@ -346,8 +351,16 @@ export function LoggerTab() {
                   </View>
                   <Pressable
                     hitSlop={8}
-                    onPressIn={(e) => setMenuY(e.nativeEvent.pageY)}
-                    onPress={(e) => { e.stopPropagation(); setMenuExec(exec); }}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      const card = cardRefs.current.get(exec.id);
+                      if (card) {
+                        card.measureInWindow((_x, y) => { setMenuY(y); setMenuExec(exec); });
+                      } else {
+                        setMenuY(e.nativeEvent.pageY);
+                        setMenuExec(exec);
+                      }
+                    }}
                   >
                     <MaterialIcons name="more-vert" size={22} color={colors.textMuted} />
                   </Pressable>

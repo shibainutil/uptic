@@ -254,21 +254,27 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
             <Text style={styles.rowLabel}>Weight{'\n'}(kg)</Text>
             {rows.map((row, i) => {
               const editable = isEditable(i);
+              const showPlaceholder = editable && row.weight === '' && focused !== `w${i}`;
               return (
-                <TextInput
-                  key={i}
-                  style={[styles.cell, focused === `w${i}` && styles.cellFocused, circles[i] && styles.cellSaved, !editable && styles.cellLocked]}
-                  value={row.weight}
-                  onChangeText={(v) => editable && updateRow(i, 'weight', v)}
-                  onFocus={() => { if (editable) { isEditingRef.current = true; setFocused(`w${i}`); } }}
-                  onBlur={() => { if (editable) formatWeightOnBlur(i); }}
-                  keyboardType="decimal-pad"
-                  returnKeyType="done"
-                  placeholder={editable ? weightPlaceholders[i] : ''}
-                  placeholderTextColor={colors.textMuted}
-                  editable={editable}
-                  textAlign="center"
-                />
+                <View key={i} style={styles.cellOuter}>
+                  <TextInput
+                    style={[styles.cell, focused === `w${i}` && styles.cellFocused, circles[i] && styles.cellSaved, !editable && styles.cellLocked]}
+                    value={row.weight}
+                    onChangeText={(v) => editable && updateRow(i, 'weight', v)}
+                    onFocus={() => { if (editable) { isEditingRef.current = true; setFocused(`w${i}`); } }}
+                    onBlur={() => { if (editable) formatWeightOnBlur(i); }}
+                    keyboardType="decimal-pad"
+                    returnKeyType="done"
+                    placeholder=""
+                    editable={editable}
+                    textAlign="right"
+                  />
+                  {showPlaceholder && (
+                    <View pointerEvents="none" style={styles.cellPlaceholder}>
+                      <Text style={styles.cellPlaceholderText}>{weightPlaceholders[i]}</Text>
+                    </View>
+                  )}
+                </View>
               );
             })}
           </View>
@@ -277,21 +283,27 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
             <Text style={styles.rowLabel}>Reps</Text>
             {rows.map((row, i) => {
               const editable = isEditable(i);
+              const showPlaceholder = editable && row.reps === '' && focused !== `r${i}`;
               return (
-                <TextInput
-                  key={i}
-                  style={[styles.cell, focused === `r${i}` && styles.cellFocused, circles[i] && styles.cellSaved, !editable && styles.cellLocked]}
-                  value={row.reps}
-                  onChangeText={(v) => editable && updateRow(i, 'reps', v)}
-                  onFocus={() => { if (editable) { isEditingRef.current = true; setFocused(`r${i}`); } }}
-                  onBlur={() => { if (editable) onRepsBlur(); else setFocused(null); }}
-                  keyboardType="numeric"
-                  returnKeyType="done"
-                  placeholder={editable ? repsSuggestion : ''}
-                  placeholderTextColor={colors.textMuted}
-                  editable={editable}
-                  textAlign="center"
-                />
+                <View key={i} style={styles.cellOuter}>
+                  <TextInput
+                    style={[styles.cell, focused === `r${i}` && styles.cellFocused, circles[i] && styles.cellSaved, !editable && styles.cellLocked]}
+                    value={row.reps}
+                    onChangeText={(v) => editable && updateRow(i, 'reps', v)}
+                    onFocus={() => { if (editable) { isEditingRef.current = true; setFocused(`r${i}`); } }}
+                    onBlur={() => { if (editable) onRepsBlur(); else setFocused(null); }}
+                    keyboardType="numeric"
+                    returnKeyType="done"
+                    placeholder=""
+                    editable={editable}
+                    textAlign="right"
+                  />
+                  {showPlaceholder && (
+                    <View pointerEvents="none" style={styles.cellPlaceholder}>
+                      <Text style={styles.cellPlaceholderText}>{repsSuggestion}</Text>
+                    </View>
+                  )}
+                </View>
               );
             })}
           </View>
@@ -330,8 +342,9 @@ const styles = StyleSheet.create({
   },
   gridRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   rowLabel: { width: LABEL_W, color: colors.textMuted, fontSize: font.sm, lineHeight: 17 },
+  cellOuter: { flex: 1 },
   cell: {
-    flex: 1,
+    width: '100%',
     backgroundColor: colors.bg,
     borderWidth: 1,
     borderColor: colors.border,
@@ -344,4 +357,14 @@ const styles = StyleSheet.create({
   cellFocused: { borderColor: colors.accent },
   cellSaved: { borderColor: '#22C55E' },
   cellLocked: { opacity: 0.3 },
+  cellPlaceholder: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cellPlaceholderText: {
+    color: colors.textMuted,
+    fontSize: font.md,
+    textAlign: 'center',
+  },
 });
