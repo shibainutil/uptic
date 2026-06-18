@@ -16,6 +16,7 @@ interface Props {
   dueDate: string;
   // data=null means "delete the current execution"; returns the saved/existing exec ID
   onSave: (data: Omit<ExerciseExecution, 'id' | 'createdAt'> | null, currentExecId: string | null) => Promise<string | null>;
+  onUpdateExercise: (data: Partial<Exercise>) => Promise<void>;
 }
 
 function filterWeight(v: string): string {
@@ -40,9 +41,13 @@ function isSeriesDone(row: SeriesRow): boolean {
   return isValidWeight(row.weight) && isValidReps(row.reps);
 }
 
+function isValidDuration(s: string): boolean {
+  return /^\d+(\.\d+)?$/.test(s.trim()) && parseFloat(s) > 0;
+}
+
 const LABEL_W = 52;
 
-export function ExerciseInlineForm({ exercise, execution, lastExecution, routineExecutionId, dueDate, onSave }: Props) {
+export function ExerciseInlineForm({ exercise, execution, lastExecution, routineExecutionId, dueDate, onSave, onUpdateExercise }: Props) {
   const isStrength = exerciseType(exercise) === 'strength';
   const seriesCount = exercise.series ?? 3;
   const [expanded, setExpanded] = useState(false);
@@ -50,6 +55,21 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
     Array.from({ length: seriesCount }, () => ({ weight: '', reps: '' })),
   );
   const [focused, setFocused] = useState<string | null>(null);
+
+  const [notes, setNotes] = useState(exercise.notes ?? exercise.description ?? '');
+  const notesRef = useRef(exercise.notes ?? exercise.description ?? '');
+  const onUpdateExerciseRef = useRef(onUpdateExercise);
+  useEffect(() => { onUpdateExerciseRef.current = onUpdateExercise; }, [onUpdateExercise]);
+
+  const [durationStr, setDurationStr] = useState(() =>
+    execution?.durationMin != null ? String(execution.durationMin) : '',
+  );
+  const durationRef = useRef(durationStr);
+  const [paramStrs, setParamStrs] = useState<string[]>(() =>
+    exercise.params.map((p) => execution?.paramValues.find((pv) => pv.paramId === p.id)?.value ?? ''),
+  );
+  const paramStrsRef = useRef<string[]>(paramStrs);
+  const pendingCardioSave = useRef(false);
 
   const executionRef = useRef(execution);
   useEffect(() => { executionRef.current = execution; }, [execution]);
@@ -89,7 +109,24 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
     } else {
       setRows(Array.from({ length: count }, () => ({ weight: '', reps: '' })));
     }
-  }, [execution, exercise.series]);
+    if (!isStrength) {
+      const d = execution?.durationMin != null ? String(execution.durationMin) : '';
+      setDurationStr(d);
+      durationRef.current = d;
+      const pStrs = exercise.params.map((p) =>
+        execution?.paramValues.find((pv) => pv.paramId === p.id)?.value ?? '',
+      );
+      setParamStrs(pStrs);
+      paramStrsRef.current = pStrs;
+    }
+  }, [execution, exercise.series, exercise.params, isStrength]);
+
+  useEffect(() => {
+    if (isEditingRef.current) return;
+    const n = exercise.notes ?? exercise.description ?? '';
+    setNotes(n);
+    notesRef.current = n;
+  }, [exercise.notes, exercise.description]);
 
   // Collapsing the form drops local-modified state so next expand shows Firestore truth
   useEffect(() => {
@@ -195,6 +232,61 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
     }
   }
 
+  async function doSaveCardio() {
+    const durationValid = isValidDuration(durationRef.current);
+    const everythingEmpty = durationRef.current === ''
+      && paramStrsRef.current.every((s) => s === '')
+      && !notesRef.current;
+
+    if (everythingEmpty) {
+      const currentId = savedExecIdRef.current ?? executionRef.current?.id ?? null;
+      try {
+        await onSaveRef.current(null, currentId);
+        savedExecIdRef.current = null;
+      } catch (e: unknown) {
+        Alert.alert('Error', e instanceof Error ? e.message : 'Could not clear.');
+      }
+      isLocallyModifiedRef.current = false;
+      return;
+    }
+
+    try {
+      const data: Omit<ExerciseExecution, 'id' | 'createdAt'> = {
+        exerciseId: exercise.id,
+        date: dueDate,
+        paramValues: exercise.params
+          .map((p, i) => ({ paramId: p.id, value: paramStrsRef.current[i] }))
+          .filter((pv) => pv.value !== ''),
+        completed: durationValid,
+        routineExecutionId,
+        ...(durationValid ? { durationMin: parseFloat(durationRef.current) } : {}),
+      };
+      const currentId = savedExecIdRef.current ?? executionRef.current?.id ?? null;
+      const returnedId = await onSaveRef.current(data, currentId);
+      if (returnedId) savedExecIdRef.current = returnedId;
+    } catch (e: unknown) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not save.');
+    }
+    isLocallyModifiedRef.current = false;
+  }
+
+  async function triggerSaveCardio() {
+    if (isSaving.current) {
+      pendingCardioSave.current = true;
+      return;
+    }
+    isSaving.current = true;
+    try {
+      await doSaveCardio();
+    } finally {
+      isSaving.current = false;
+      if (pendingCardioSave.current) {
+        pendingCardioSave.current = false;
+        triggerSaveCardio();
+      }
+    }
+  }
+
   function formatWeightOnBlur(i: number) {
     isEditingRef.current = false;
     setFocused(null);
@@ -218,11 +310,21 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
     });
   }
 
-  const circles: boolean[] = rows.map(isSeriesDone);
+  function onNotesChange(v: string) {
+    notesRef.current = v;
+    setNotes(v);
+  }
 
-  const meta = isStrength
-    ? `${exercise.series ?? 3} × ${exercise.repsMin ?? 8}–${exercise.repsMax ?? 10}`
-    : `${exercise.durationMin ?? 30} min`;
+  function onNotesBlur() {
+    isEditingRef.current = false;
+    setFocused(null);
+    onUpdateExerciseRef.current({ notes: notesRef.current || undefined }).catch(() => {
+      Alert.alert('Error', 'Could not save note.');
+    });
+  }
+
+  const circles: boolean[] = rows.map(isSeriesDone);
+  const cardioIsDone = !isStrength && (isValidDuration(durationStr) || (execution?.completed ?? false));
 
   return (
     <View style={styles.container}>
@@ -234,19 +336,94 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
         />
         <View style={styles.info}>
           <Text style={styles.name}>{exercise.name}</Text>
-          <Text style={styles.meta}>{meta}</Text>
         </View>
         <View style={styles.circles}>
-          {circles.map((done, si) => (
-            <MaterialIcons
-              key={si}
-              name={done ? 'check-circle' : 'radio-button-unchecked'}
-              size={16}
-              color={done ? '#22C55E' : colors.textDim}
-            />
-          ))}
+          {isStrength ? (
+            circles.map((done, si) => (
+              <MaterialIcons key={si} name={done ? 'check-circle' : 'radio-button-unchecked'} size={16} color={done ? '#22C55E' : colors.textDim} />
+            ))
+          ) : (
+            <MaterialIcons name={cardioIsDone ? 'check-circle' : 'radio-button-unchecked'} size={16} color={cardioIsDone ? '#22C55E' : colors.textDim} />
+          )}
         </View>
       </Pressable>
+
+      {expanded && !isStrength && (
+        <View style={styles.form}>
+          <View style={styles.gridRow}>
+            <Text style={styles.rowLabel}>Duration{'\n'}(min)</Text>
+            <View style={styles.cellOuter}>
+              <TextInput
+                style={[styles.cell, focused === 'dur' && styles.cellFocused, isValidDuration(durationStr) && styles.cellSaved]}
+                value={durationStr}
+                onChangeText={(v) => {
+                  isLocallyModifiedRef.current = true;
+                  const filtered = filterWeight(v);
+                  durationRef.current = filtered;
+                  setDurationStr(filtered);
+                }}
+                onFocus={() => { isEditingRef.current = true; setFocused('dur'); }}
+                onBlur={() => { isEditingRef.current = false; setFocused(null); triggerSaveCardio(); }}
+                keyboardType="decimal-pad"
+                returnKeyType="done"
+                placeholder=""
+                editable
+              />
+              {durationStr === '' && focused !== 'dur' && (
+                <View pointerEvents="none" style={styles.cellPlaceholder}>
+                  <Text style={styles.cellPlaceholderText}>
+                    {exercise.durationMin != null ? String(exercise.durationMin) : '—'}
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
+
+          {exercise.params.map((param, i) => (
+            <View key={param.id} style={styles.gridRow}>
+              <Text style={styles.rowLabel}>{param.name}{'\n'}({param.unit})</Text>
+              <View style={styles.cellOuter}>
+                <TextInput
+                  style={[styles.cell, focused === `p${i}` && styles.cellFocused]}
+                  value={paramStrs[i]}
+                  onChangeText={(v) => {
+                    isLocallyModifiedRef.current = true;
+                    const next = [...paramStrs];
+                    next[i] = v;
+                    setParamStrs(next);
+                    paramStrsRef.current = next;
+                  }}
+                  onFocus={() => { isEditingRef.current = true; setFocused(`p${i}`); }}
+                  onBlur={() => { isEditingRef.current = false; setFocused(null); triggerSaveCardio(); }}
+                  keyboardType="decimal-pad"
+                  returnKeyType="done"
+                  placeholder=""
+                  editable
+                />
+                {paramStrs[i] === '' && focused !== `p${i}` && (
+                  <View pointerEvents="none" style={styles.cellPlaceholder}>
+                    <Text style={styles.cellPlaceholderText}>{param.defaultValue ?? '—'}</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          ))}
+
+          <View style={styles.gridRow}>
+            <Text style={styles.rowLabel}>Note</Text>
+            <TextInput
+              style={[styles.notesInput, focused === 'notes' && styles.cellFocused]}
+              value={notes}
+              onChangeText={onNotesChange}
+              onFocus={() => { isEditingRef.current = true; setFocused('notes'); }}
+              onBlur={onNotesBlur}
+              placeholder="—"
+              placeholderTextColor={colors.textMuted}
+              multiline
+            />
+          </View>
+        </View>
+      )}
 
       {expanded && isStrength && (
         <View style={styles.form}>
@@ -254,7 +431,6 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
             <Text style={styles.rowLabel}>Weight{'\n'}(kg)</Text>
             {rows.map((row, i) => {
               const editable = isEditable(i);
-              const showPlaceholder = editable && row.weight === '' && focused !== `w${i}`;
               return (
                 <View key={i} style={styles.cellOuter}>
                   <TextInput
@@ -267,9 +443,8 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
                     returnKeyType="done"
                     placeholder=""
                     editable={editable}
-                    textAlign="right"
                   />
-                  {showPlaceholder && (
+                  {editable && row.weight === '' && focused !== `w${i}` && (
                     <View pointerEvents="none" style={styles.cellPlaceholder}>
                       <Text style={styles.cellPlaceholderText}>{weightPlaceholders[i]}</Text>
                     </View>
@@ -283,7 +458,6 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
             <Text style={styles.rowLabel}>Reps</Text>
             {rows.map((row, i) => {
               const editable = isEditable(i);
-              const showPlaceholder = editable && row.reps === '' && focused !== `r${i}`;
               return (
                 <View key={i} style={styles.cellOuter}>
                   <TextInput
@@ -296,9 +470,8 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
                     returnKeyType="done"
                     placeholder=""
                     editable={editable}
-                    textAlign="right"
                   />
-                  {showPlaceholder && (
+                  {editable && row.reps === '' && focused !== `r${i}` && (
                     <View pointerEvents="none" style={styles.cellPlaceholder}>
                       <Text style={styles.cellPlaceholderText}>{repsSuggestion}</Text>
                     </View>
@@ -306,6 +479,20 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
                 </View>
               );
             })}
+          </View>
+
+          <View style={styles.gridRow}>
+            <Text style={styles.rowLabel}>Note</Text>
+            <TextInput
+              style={[styles.notesInput, focused === 'notes' && styles.cellFocused]}
+              value={notes}
+              onChangeText={onNotesChange}
+              onFocus={() => { isEditingRef.current = true; setFocused('notes'); }}
+              onBlur={onNotesBlur}
+              placeholder="—"
+              placeholderTextColor={colors.textMuted}
+              multiline
+            />
           </View>
         </View>
       )}
@@ -332,7 +519,6 @@ const styles = StyleSheet.create({
   },
   info: { flex: 1 },
   name: { color: colors.text, fontSize: font.md },
-  meta: { color: colors.textDim, fontSize: font.sm, marginTop: 1 },
   circles: { flexDirection: 'row', gap: 3 },
   form: {
     paddingLeft: 20 + spacing.sm + spacing.sm,
@@ -342,17 +528,19 @@ const styles = StyleSheet.create({
   },
   gridRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   rowLabel: { width: LABEL_W, color: colors.textMuted, fontSize: font.sm, lineHeight: 17 },
-  cellOuter: { flex: 1 },
+  cellOuter: { flex: 1, height: 36, position: 'relative' },
   cell: {
-    width: '100%',
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: colors.bg,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.sm,
-    paddingVertical: spacing.sm,
     paddingHorizontal: spacing.sm,
     color: colors.text,
     fontSize: font.md,
+    textAlign: 'center',
+    textAlignVertical: 'center',
   },
   cellFocused: { borderColor: colors.accent },
   cellSaved: { borderColor: '#22C55E' },
@@ -366,5 +554,18 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: font.md,
     textAlign: 'center',
+  },
+  notesInput: {
+    flex: 1,
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    color: colors.text,
+    fontSize: font.sm,
+    textAlign: 'center',
+    minHeight: 36,
   },
 });
