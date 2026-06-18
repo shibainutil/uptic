@@ -122,8 +122,9 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
 
   async function doSave(current: SeriesRow[]) {
     const anyDone = current.some(isSeriesDone);
-    // If nothing valid and no existing execution, nothing to do
-    if (!anyDone && !executionRef.current) return;
+    const allEmpty = current.every((r) => r.weight === '' && r.reps === '');
+    if (!anyDone && !allEmpty) return;          // partial — don't overwrite valid Firestore data
+    if (allEmpty && !executionRef.current) return; // nothing to clear
     try {
       const seriesData: SeriesEntry[] = current.map((r) => {
         const entry: SeriesEntry = { weightUnit: 'kg' };
@@ -177,10 +178,7 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
         const n = parseFloat(r.weight);
         return { ...r, weight: isNaN(n) ? r.weight : n.toFixed(1) };
       });
-      const allEmpty = next.every((r) => r.weight === '' && r.reps === '');
-      if (next.some(isSeriesDone) || (executionRef.current && allEmpty)) {
-        triggerSave(next);
-      }
+      triggerSave(next);
       return next;
     });
   }
@@ -189,10 +187,7 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
     isEditingRef.current = false;
     setFocused(null);
     setRows((prev) => {
-      const allEmpty = prev.every((r) => r.weight === '' && r.reps === '');
-      if (prev.some(isSeriesDone) || (executionRef.current && allEmpty)) {
-        triggerSave(prev);
-      }
+      triggerSave(prev);
       return prev;
     });
   }
