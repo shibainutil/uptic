@@ -15,6 +15,7 @@ interface Props {
   routineExecutionId: string;
   dueDate: string;
   onSave: (data: Omit<ExerciseExecution, 'id' | 'createdAt'>) => Promise<void>;
+  onClear: () => Promise<void>;
 }
 
 function filterWeight(v: string): string {
@@ -41,7 +42,7 @@ function isSeriesDone(row: SeriesRow): boolean {
 
 const LABEL_W = 52;
 
-export function ExerciseInlineForm({ exercise, execution, lastExecution, routineExecutionId, dueDate, onSave }: Props) {
+export function ExerciseInlineForm({ exercise, execution, lastExecution, routineExecutionId, dueDate, onSave, onClear }: Props) {
   const isStrength = exerciseType(exercise) === 'strength';
   const seriesCount = exercise.series ?? 3;
   const [expanded, setExpanded] = useState(false);
@@ -54,6 +55,8 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
   useEffect(() => { executionRef.current = execution; }, [execution]);
   const onSaveRef = useRef(onSave);
   useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
+  const onClearRef = useRef(onClear);
+  useEffect(() => { onClearRef.current = onClear; }, [onClear]);
 
   // Queue: if a save is in flight, store the latest rows to save next
   const isSaving = useRef(false);
@@ -123,9 +126,13 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
   async function doSave(current: SeriesRow[]) {
     const anyDone = current.some(isSeriesDone);
     const allEmpty = current.every((r) => r.weight === '' && r.reps === '');
-    if (!anyDone && !allEmpty) return;          // partial — don't overwrite valid Firestore data
-    if (allEmpty && !executionRef.current) return; // nothing to clear
+    if (!anyDone && !allEmpty) return; // partial — skip to avoid overwriting Firestore
     try {
+      if (allEmpty) {
+        // Delete the exercise execution so counter and status reset cleanly
+        if (executionRef.current) await onClearRef.current();
+        return;
+      }
       const seriesData: SeriesEntry[] = current.map((r) => {
         const entry: SeriesEntry = { weightUnit: 'kg' };
         if (isValidWeight(r.weight)) entry.weight = parseFloat(r.weight);

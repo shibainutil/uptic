@@ -382,6 +382,12 @@ export function LoggerTab() {
                                 if (live) await update(live.id, data);
                                 else await add(data);
                               }}
+                              onClear={async () => {
+                                const live = executions.find(
+                                  (e) => e.routineExecutionId === exec.id && e.exerciseId === ex.id,
+                                );
+                                if (live) await removeExecExecution(live.id);
+                              }}
                             />
                           );
                         })}
