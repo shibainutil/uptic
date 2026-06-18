@@ -56,8 +56,7 @@ export function TrackerTab() {
     d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // Mon
     return d;
   });
-  const [weekView, setWeekView] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<Date>(today);
+  const [weekView, setWeekView] = useState(true);
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
   const [closedIds, setClosedIds] = useState<Set<string>>(new Set());
 
@@ -153,12 +152,16 @@ export function TrackerTab() {
   const weeks: (Date | null)[][] = [];
   for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
 
-  const selectedISO = toISO(selectedDate);
   const routineName = (rid: string) => routines.find((r) => r.id === rid)?.name ?? 'Deleted Routine';
 
+  const weekEndISO = toISO(new Date(weekStart.getTime() + 6 * 86400000));
+  const weekStartISO = toISO(weekStart);
+
   const dueRoutines = routineExecutions
-    .filter((e) => e.dueDate === selectedISO)
-    .sort((a, b) => routineName(a.routineId).localeCompare(routineName(b.routineId)));
+    .filter((e) => weekView
+      ? e.dueDate >= weekStartISO && e.dueDate <= weekEndISO
+      : (() => { const d = new Date(e.dueDate); return d.getFullYear() === viewYear && d.getMonth() === viewMonth; })())
+    .sort((a, b) => b.dueDate.localeCompare(a.dueDate));
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -189,21 +192,15 @@ export function TrackerTab() {
           <View style={styles.weekRow}>
             {weekDays().map((date, di) => {
               const isToday = isSameDay(date, today);
-              const isSelected = isSameDay(date, selectedDate);
               const isWeekend = di >= 5;
               const dot = dotByDate.get(toISO(date));
               return (
-                <TouchableOpacity
-                  key={di}
-                  style={[styles.dayCell, isSelected && styles.dayCellSelected, isToday && !isSelected && styles.dayCellToday]}
-                  onPress={() => setSelectedDate(date)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.dayNumber, isWeekend && styles.dayNumberWeekend, isToday && !isSelected && styles.dayNumberToday, isSelected && styles.dayNumberSelected]}>
+                <View key={di} style={[styles.dayCell, isToday && styles.dayCellToday]}>
+                  <Text style={[styles.dayNumber, isWeekend && styles.dayNumberWeekend, isToday && styles.dayNumberToday]}>
                     {date.getDate()}
                   </Text>
-                  <View style={[styles.dot, dot ? { backgroundColor: isSelected ? '#fff' : STATUS_COLOR[dot] } : styles.dotHidden]} />
-                </TouchableOpacity>
+                  <View style={[styles.dot, dot ? { backgroundColor: STATUS_COLOR[dot] } : styles.dotHidden]} />
+                </View>
               );
             })}
           </View>
@@ -213,21 +210,15 @@ export function TrackerTab() {
               {week.map((date, di) => {
                 if (!date) return <View key={di} style={styles.dayCell} />;
                 const isToday = isSameDay(date, today);
-                const isSelected = isSameDay(date, selectedDate);
                 const isWeekend = di >= 5;
                 const dot = dotByDate.get(toISO(date));
                 return (
-                  <TouchableOpacity
-                    key={di}
-                    style={[styles.dayCell, isSelected && styles.dayCellSelected, isToday && !isSelected && styles.dayCellToday]}
-                    onPress={() => setSelectedDate(date)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.dayNumber, isWeekend && styles.dayNumberWeekend, isToday && !isSelected && styles.dayNumberToday, isSelected && styles.dayNumberSelected]}>
+                  <View key={di} style={[styles.dayCell, isToday && styles.dayCellToday]}>
+                    <Text style={[styles.dayNumber, isWeekend && styles.dayNumberWeekend, isToday && styles.dayNumberToday]}>
                       {date.getDate()}
                     </Text>
-                    <View style={[styles.dot, dot ? { backgroundColor: isSelected ? '#fff' : STATUS_COLOR[dot] } : styles.dotHidden]} />
-                  </TouchableOpacity>
+                    <View style={[styles.dot, dot ? { backgroundColor: STATUS_COLOR[dot] } : styles.dotHidden]} />
+                  </View>
                 );
               })}
             </View>
@@ -235,12 +226,8 @@ export function TrackerTab() {
         )}
       </View>
 
-      <Text style={styles.agendaTitle}>
-        {selectedDate.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
-      </Text>
-
       {dueRoutines.length === 0 ? (
-        <Text style={styles.agendaEmpty}>Nothing scheduled for this day.</Text>
+        <Text style={styles.agendaEmpty}>Nothing scheduled for this period.</Text>
       ) : null}
 
       {dueRoutines.map((exec) => {
@@ -284,7 +271,7 @@ export function TrackerTab() {
                   </View>
                 </View>
                 <Text style={styles.progressLabel}>
-                  {done}/{total} exercises · {seriesDone}/{seriesTotal} series
+                  {new Date(exec.dueDate).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })} · {done}/{total} exercises · {seriesDone}/{seriesTotal} series
                 </Text>
               </View>
               <MaterialIcons
@@ -373,14 +360,11 @@ const styles = StyleSheet.create({
   },
   dayCell: { flex: 1, alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.xs, height: 48 },
   dayCellToday: { backgroundColor: `${colors.accent}18` },
-  dayCellSelected: { backgroundColor: colors.accent },
   dayNumber: { color: colors.text, fontSize: font.md },
   dayNumberWeekend: { color: colors.textMuted },
   dayNumberToday: { color: colors.accent, fontWeight: '700' },
-  dayNumberSelected: { color: '#fff', fontWeight: '700' },
   dot: { width: 5, height: 5, borderRadius: 2.5, marginTop: 3 },
   dotHidden: { backgroundColor: 'transparent' },
-  agendaTitle: { color: colors.text, fontSize: font.lg, fontWeight: '700', marginTop: spacing.sm },
   agendaEmpty: { color: colors.textDim, fontSize: font.md, paddingVertical: spacing.md },
   agendaCard: {
     backgroundColor: colors.surface,
