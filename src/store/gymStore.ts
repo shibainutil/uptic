@@ -185,7 +185,11 @@ export function useRoutineExecutions(userId: string | null | undefined) {
     await batch.commit();
   }, [userId]);
 
-  return { routineExecutions, loaded, setStatus, reschedule };
+  const remove = useCallback(async (id: string) => {
+    await deleteDoc(userDoc(userId!, 'routineExecutions', id));
+  }, [userId]);
+
+  return { routineExecutions, loaded, setStatus, reschedule, remove };
 }
 
 /**

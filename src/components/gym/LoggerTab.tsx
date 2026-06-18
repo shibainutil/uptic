@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, Pressable, ScrollView, StyleSheet, Alert, Modal as RNModal } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import {
   useRoutines, useRoutineExecutions, useExercises, useExerciseExecutions,
 } from '../../store/gymStore';
-import { toISO } from '../../lib/schedule';
+import { toISO, todayISO } from '../../lib/schedule';
 import { type Exercise, type RoutineExecution, exerciseMuscleGroup } from '../../types/gym';
 import { colors, font, spacing, radius } from '../../theme';
 import { ExerciseInlineForm } from './ExerciseInlineForm';
@@ -65,9 +65,9 @@ function buildMonthGrid(year: number, month: number): (Date | null)[] {
 export function LoggerTab() {
   const { user } = useAuth();
   const { routines } = useRoutines(user?.uid);
-  const { routineExecutions, reschedule } = useRoutineExecutions(user?.uid);
+  const { routineExecutions, reschedule, remove: removeRoutineExec } = useRoutineExecutions(user?.uid);
   const { exercises } = useExercises(user?.uid);
-  const { executions, add, update } = useExerciseExecutions(user?.uid);
+  const { executions, add, update, remove: removeExecExecution } = useExerciseExecutions(user?.uid);
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -82,7 +82,8 @@ export function LoggerTab() {
   const [weekView, setWeekView] = useState(true);
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
   const [closedIds, setClosedIds] = useState<Set<string>>(new Set());
-  const [reschedulingId, setReschedulingId] = useState<string | null>(null);
+  const [menuExec, setMenuExec] = useState<RoutineExecution | null>(null);
+  const [reschedulingExec, setReschedulingExec] = useState<RoutineExecution | null>(null);
 
   function prevMonth() {
     if (viewMonth === 0) { setViewMonth(11); setViewYear((y) => y - 1); }
@@ -121,7 +122,10 @@ export function LoggerTab() {
       executions.some((e) => e.routineExecutionId === execId && e.exerciseId === eid && e.completed),
     ).length;
     const anyLogged = exerciseIds.filter((eid) =>
-      executions.some((e) => e.routineExecutionId === execId && e.exerciseId === eid),
+      executions.some((e) =>
+        e.routineExecutionId === execId && e.exerciseId === eid &&
+        (e.completed || e.seriesData?.some((s) => s.reps != null && s.weight != null)),
+      ),
     ).length;
     let seriesDone = 0;
     let seriesTotal = 0;
@@ -159,6 +163,27 @@ export function LoggerTab() {
     } else {
       setOpenIds((prev) => { const n = new Set(prev); n.has(execId) ? n.delete(execId) : n.add(execId); return n; });
     }
+  }
+
+  function handleReset(exec: RoutineExecution) {
+    Alert.alert('Reset execution?', 'All logged data for this routine will be removed.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Reset', style: 'destructive', onPress: async () => {
+        const toRemove = executions.filter((e) => e.routineExecutionId === exec.id);
+        await Promise.all(toRemove.map((e) => removeExecExecution(e.id)));
+      }},
+    ]);
+  }
+
+  function handleDelete(exec: RoutineExecution) {
+    Alert.alert('Delete execution?', 'This routine execution and all its data will be permanently deleted.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        const toRemove = executions.filter((e) => e.routineExecutionId === exec.id);
+        await Promise.all(toRemove.map((e) => removeExecExecution(e.id)));
+        await removeRoutineExec(exec.id);
+      }},
+    ]);
   }
 
   const dotByDate = useMemo(() => {
@@ -300,6 +325,7 @@ export function LoggerTab() {
             return (
               <View key={exec.id} style={styles.agendaCard}>
                 <Pressable style={styles.cardHeader} onPress={() => toggleRoutine(exec.id, status)}>
+                  <MaterialIcons name={expanded ? 'expand-less' : 'expand-more'} size={22} color={colors.textMuted} />
                   <View style={styles.titleCol}>
                     <View style={styles.titleRow}>
                       <Text style={styles.agendaName}>{routineName(exec.routineId)}</Text>
@@ -311,31 +337,10 @@ export function LoggerTab() {
                       {new Date(exec.dueDate).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })} · {done}/{total} exercises · {seriesDone}/{seriesTotal} series
                     </Text>
                   </View>
-                  <View style={styles.cardActions}>
-                    {status === 'pending' && (
-                      <Pressable
-                        hitSlop={8}
-                        onPress={(e) => { e.stopPropagation(); setReschedulingId(reschedulingId === exec.id ? null : exec.id); }}
-                      >
-                        <MaterialIcons name="event" size={20} color={colors.textMuted} />
-                      </Pressable>
-                    )}
-                    <MaterialIcons name={expanded ? 'expand-less' : 'expand-more'} size={22} color={colors.textMuted} />
-                  </View>
+                  <Pressable hitSlop={8} onPress={(e) => { e.stopPropagation(); setMenuExec(exec); }}>
+                    <MaterialIcons name="more-vert" size={22} color={colors.textMuted} />
+                  </Pressable>
                 </Pressable>
-
-                {reschedulingId === exec.id && (
-                  <View style={styles.rescheduleRow}>
-                    <Text style={styles.rescheduleLabel}>Move to:</Text>
-                    <DatePicker
-                      value={exec.dueDate}
-                      onChange={async (newDate) => {
-                        if (newDate !== exec.dueDate) await reschedule(exec, newDate);
-                        setReschedulingId(null);
-                      }}
-                    />
-                  </View>
-                )}
 
                 <View style={styles.progressStack}>
                   <View style={styles.progressTrack}>
@@ -384,6 +389,46 @@ export function LoggerTab() {
           })}
         </View>
       ))}
+
+      {/* ── Context menu ─────────────────────────────────────────────── */}
+      <RNModal visible={menuExec !== null} transparent animationType="fade" onRequestClose={() => setMenuExec(null)}>
+        <Pressable style={styles.menuBackdrop} onPress={() => setMenuExec(null)}>
+          <Pressable style={styles.menuCard} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.menuTitle}>{routineName(menuExec?.routineId ?? '')}</Text>
+            <Pressable style={styles.menuItem} onPress={() => { const e = menuExec; setMenuExec(null); setReschedulingExec(e); }}>
+              <MaterialIcons name="event" size={20} color={colors.accent} />
+              <Text style={styles.menuItemText}>Reschedule</Text>
+            </Pressable>
+            <Pressable style={styles.menuItem} onPress={() => { const e = menuExec!; setMenuExec(null); handleReset(e); }}>
+              <MaterialIcons name="refresh" size={20} color={colors.text} />
+              <Text style={styles.menuItemText}>Reset</Text>
+            </Pressable>
+            <Pressable style={styles.menuItem} onPress={() => { const e = menuExec!; setMenuExec(null); handleDelete(e); }}>
+              <MaterialIcons name="delete" size={20} color={colors.danger} />
+              <Text style={[styles.menuItemText, { color: colors.danger }]}>Delete</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </RNModal>
+
+      {/* ── Reschedule modal ─────────────────────────────────────────── */}
+      <RNModal visible={reschedulingExec !== null} transparent animationType="fade" onRequestClose={() => setReschedulingExec(null)}>
+        <Pressable style={styles.menuBackdrop} onPress={() => setReschedulingExec(null)}>
+          <Pressable style={styles.rescheduleCard} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.menuTitle}>Move to</Text>
+            <DatePicker
+              value={reschedulingExec?.dueDate ?? todayISO()}
+              onChange={async (newDate) => {
+                if (reschedulingExec && newDate !== reschedulingExec.dueDate) {
+                  await reschedule(reschedulingExec, newDate);
+                }
+                setReschedulingExec(null);
+              }}
+            />
+          </Pressable>
+        </Pressable>
+      </RNModal>
+
     </ScrollView>
   );
 }
@@ -444,15 +489,49 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     padding: spacing.md,
   },
-  cardActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  rescheduleRow: {
+  menuBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xl,
+  },
+  menuCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    width: '100%',
+    overflow: 'hidden',
+  },
+  menuTitle: {
+    color: colors.textMuted,
+    fontSize: font.sm,
+    fontWeight: '600',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md + 2,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  rescheduleLabel: { color: colors.textMuted, fontSize: font.sm },
+  menuItemText: { color: colors.text, fontSize: font.md },
+  rescheduleCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    width: '100%',
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
   titleCol: { flex: 1, gap: 2 },
   titleRow: {
     flexDirection: 'row',
