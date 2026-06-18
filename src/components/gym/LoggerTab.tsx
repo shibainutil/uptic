@@ -324,7 +324,7 @@ export function LoggerTab() {
             const groupNames = Object.keys(grouped).sort();
 
             return (
-              <View key={exec.id} style={styles.agendaCard}>
+              <View key={exec.id} style={[styles.agendaCard, { marginBottom: spacing.sm }]}>
                 <Pressable style={styles.cardHeader} onPress={() => toggleRoutine(exec.id, status)}>
                   <MaterialIcons name={expanded ? 'expand-less' : 'expand-more'} size={22} color={colors.textMuted} />
                   <View style={styles.titleCol}>
@@ -398,15 +398,13 @@ export function LoggerTab() {
       {/* ── Context menu ─────────────────────────────────────────────── */}
       <RNModal visible={menuExec !== null} transparent animationType="none" onRequestClose={() => setMenuExec(null)}>
         <Pressable style={styles.menuBackdrop} onPress={() => setMenuExec(null)}>
-          <Pressable style={[styles.menuCard, { top: menuY + 4 }]} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.menuHeader}>
-              <Pressable hitSlop={8} onPress={() => setMenuExec(null)}>
-                <MaterialIcons name="close" size={16} color={colors.textMuted} />
-              </Pressable>
-            </View>
+          <Pressable style={[styles.menuCard, { top: menuY + 8 }]} onPress={(e) => e.stopPropagation()}>
             <Pressable style={styles.menuItem} onPress={() => { const e = menuExec; setMenuExec(null); setReschedulingExec(e); }}>
               <MaterialIcons name="event" size={18} color={colors.accent} />
               <Text style={styles.menuItemText}>Reschedule</Text>
+              <Pressable hitSlop={10} onPress={() => setMenuExec(null)} style={styles.menuClose}>
+                <MaterialIcons name="close" size={16} color={colors.textMuted} />
+              </Pressable>
             </Pressable>
             <Pressable style={styles.menuItem} onPress={() => { const e = menuExec!; setMenuExec(null); handleReset(e); }}>
               <MaterialIcons name="refresh" size={18} color={colors.text} />
@@ -516,14 +514,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 6,
   },
-  menuHeader: {
-    alignItems: 'flex-end',
-    paddingHorizontal: spacing.sm,
-    paddingTop: spacing.sm,
-    paddingBottom: 2,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
+  menuClose: { marginLeft: 'auto' },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -177,7 +177,8 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
         const n = parseFloat(r.weight);
         return { ...r, weight: isNaN(n) ? r.weight : n.toFixed(1) };
       });
-      if (next.some(isSeriesDone) || executionRef.current) {
+      const allEmpty = next.every((r) => r.weight === '' && r.reps === '');
+      if (next.some(isSeriesDone) || (executionRef.current && allEmpty)) {
         triggerSave(next);
       }
       return next;
@@ -188,7 +189,8 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
     isEditingRef.current = false;
     setFocused(null);
     setRows((prev) => {
-      if (prev.some(isSeriesDone) || executionRef.current) {
+      const allEmpty = prev.every((r) => r.weight === '' && r.reps === '');
+      if (prev.some(isSeriesDone) || (executionRef.current && allEmpty)) {
         triggerSave(prev);
       }
       return prev;
