@@ -83,6 +83,7 @@ export function LoggerTab() {
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
   const [closedIds, setClosedIds] = useState<Set<string>>(new Set());
   const [menuExec, setMenuExec] = useState<RoutineExecution | null>(null);
+  const [menuY, setMenuY] = useState(0);
   const [reschedulingExec, setReschedulingExec] = useState<RoutineExecution | null>(null);
 
   function prevMonth() {
@@ -337,7 +338,11 @@ export function LoggerTab() {
                       {new Date(exec.dueDate).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })} · {done}/{total} exercises · {seriesDone}/{seriesTotal} series
                     </Text>
                   </View>
-                  <Pressable hitSlop={8} onPress={(e) => { e.stopPropagation(); setMenuExec(exec); }}>
+                  <Pressable
+                    hitSlop={8}
+                    onPressIn={(e) => setMenuY(e.nativeEvent.pageY)}
+                    onPress={(e) => { e.stopPropagation(); setMenuExec(exec); }}
+                  >
                     <MaterialIcons name="more-vert" size={22} color={colors.textMuted} />
                   </Pressable>
                 </Pressable>
@@ -391,20 +396,19 @@ export function LoggerTab() {
       ))}
 
       {/* ── Context menu ─────────────────────────────────────────────── */}
-      <RNModal visible={menuExec !== null} transparent animationType="fade" onRequestClose={() => setMenuExec(null)}>
+      <RNModal visible={menuExec !== null} transparent animationType="none" onRequestClose={() => setMenuExec(null)}>
         <Pressable style={styles.menuBackdrop} onPress={() => setMenuExec(null)}>
-          <Pressable style={styles.menuCard} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.menuTitle}>{routineName(menuExec?.routineId ?? '')}</Text>
+          <Pressable style={[styles.menuCard, { top: menuY + 4 }]} onPress={(e) => e.stopPropagation()}>
             <Pressable style={styles.menuItem} onPress={() => { const e = menuExec; setMenuExec(null); setReschedulingExec(e); }}>
-              <MaterialIcons name="event" size={20} color={colors.accent} />
+              <MaterialIcons name="event" size={18} color={colors.accent} />
               <Text style={styles.menuItemText}>Reschedule</Text>
             </Pressable>
             <Pressable style={styles.menuItem} onPress={() => { const e = menuExec!; setMenuExec(null); handleReset(e); }}>
-              <MaterialIcons name="refresh" size={20} color={colors.text} />
+              <MaterialIcons name="refresh" size={18} color={colors.text} />
               <Text style={styles.menuItemText}>Reset</Text>
             </Pressable>
-            <Pressable style={styles.menuItem} onPress={() => { const e = menuExec!; setMenuExec(null); handleDelete(e); }}>
-              <MaterialIcons name="delete" size={20} color={colors.danger} />
+            <Pressable style={[styles.menuItem, { borderBottomWidth: 0 }]} onPress={() => { const e = menuExec!; setMenuExec(null); handleDelete(e); }}>
+              <MaterialIcons name="delete" size={18} color={colors.danger} />
               <Text style={[styles.menuItemText, { color: colors.danger }]}>Delete</Text>
             </Pressable>
           </Pressable>
@@ -491,38 +495,32 @@ const styles = StyleSheet.create({
   },
   menuBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.xl,
   },
   menuCard: {
+    position: 'absolute',
+    right: spacing.lg,
     backgroundColor: colors.surface,
-    borderRadius: radius.md,
+    borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.border,
-    width: '100%',
+    minWidth: 160,
     overflow: 'hidden',
-  },
-  menuTitle: {
-    color: colors.textMuted,
-    fontSize: font.sm,
-    fontWeight: '600',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md + 2,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  menuItemText: { color: colors.text, fontSize: font.md },
+  menuItemText: { color: colors.text, fontSize: font.sm },
   rescheduleCard: {
     backgroundColor: colors.surface,
     borderRadius: radius.md,

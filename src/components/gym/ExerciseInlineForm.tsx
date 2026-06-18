@@ -122,7 +122,8 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
 
   async function doSave(current: SeriesRow[]) {
     const anyDone = current.some(isSeriesDone);
-    if (!anyDone) return;
+    // If nothing valid and no existing execution, nothing to do
+    if (!anyDone && !executionRef.current) return;
     try {
       const seriesData: SeriesEntry[] = current.map((r) => {
         const entry: SeriesEntry = { weightUnit: 'kg' };
