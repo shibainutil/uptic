@@ -58,9 +58,12 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
   // Queue: if a save is in flight, store the latest rows to save next
   const isSaving = useRef(false);
   const pendingSave = useRef<SeriesRow[] | null>(null);
+  // Tracks whether a field is focused so the sync effect doesn't wipe in-progress input
+  const isEditingRef = useRef(false);
 
-  // Sync rows when execution prop changes (after Firestore update or on open)
+  // Sync rows when execution prop changes — skip if user is actively typing
   useEffect(() => {
+    if (isEditingRef.current) return;
     const count = exercise.series ?? 3;
     const fmt = (w: number | undefined) => w != null ? w.toFixed(1) : '';
     if (execution?.seriesData && execution.seriesData.length > 0) {
@@ -77,6 +80,14 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
       setRows(Array.from({ length: count }, () => ({ weight: '', reps: '' })));
     }
   }, [execution, exercise.series]);
+
+  function isRowSaved(i: number): boolean {
+    const s = executionRef.current?.seriesData?.[i];
+    if (!s) return false;
+    const savedW = s.weight != null ? s.weight.toFixed(1) : '';
+    const savedR = s.reps != null ? String(s.reps) : '';
+    return rows[i].weight === savedW && rows[i].reps === savedR && isSeriesDone(rows[i]);
+  }
 
   // Weight placeholders: per-series from lastExecution
   const weightPlaceholders: string[] = Array.from({ length: seriesCount }, (_, i) => {
@@ -152,6 +163,7 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
   }
 
   function formatWeightOnBlur(i: number) {
+    isEditingRef.current = false;
     setFocused(null);
     setRows((prev) => {
       const next = prev.map((r, idx) => {
@@ -167,6 +179,7 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
   }
 
   function onRepsBlur() {
+    isEditingRef.current = false;
     setFocused(null);
     setRows((prev) => {
       if (prev.some(isSeriesDone)) {
@@ -215,16 +228,16 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
               return (
                 <TextInput
                   key={i}
-                  style={[styles.cell, focused === `w${i}` && styles.cellFocused, !editable && styles.cellLocked]}
+                  style={[styles.cell, focused === `w${i}` && styles.cellFocused, isRowSaved(i) && styles.cellSaved, !editable && styles.cellLocked]}
                   value={row.weight}
                   onChangeText={(v) => editable && updateRow(i, 'weight', v)}
-                  onFocus={() => editable && setFocused(`w${i}`)}
+                  onFocus={() => { if (editable) { isEditingRef.current = true; setFocused(`w${i}`); } }}
                   onBlur={() => { if (editable) formatWeightOnBlur(i); }}
                   keyboardType="decimal-pad"
                   placeholder={editable ? weightPlaceholders[i] : ''}
                   placeholderTextColor={colors.textMuted}
                   editable={editable}
-                  textAlign={row.weight ? 'center' : 'left'}
+                  textAlign="center"
                 />
               );
             })}
@@ -237,16 +250,16 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
               return (
                 <TextInput
                   key={i}
-                  style={[styles.cell, focused === `r${i}` && styles.cellFocused, !editable && styles.cellLocked]}
+                  style={[styles.cell, focused === `r${i}` && styles.cellFocused, isRowSaved(i) && styles.cellSaved, !editable && styles.cellLocked]}
                   value={row.reps}
                   onChangeText={(v) => editable && updateRow(i, 'reps', v)}
-                  onFocus={() => editable && setFocused(`r${i}`)}
+                  onFocus={() => { if (editable) { isEditingRef.current = true; setFocused(`r${i}`); } }}
                   onBlur={() => { if (editable) onRepsBlur(); else setFocused(null); }}
                   keyboardType="numeric"
                   placeholder={editable ? repsSuggestion : ''}
                   placeholderTextColor={colors.textMuted}
                   editable={editable}
-                  textAlign={row.reps ? 'center' : 'left'}
+                  textAlign="center"
                 />
               );
             })}
@@ -298,5 +311,6 @@ const styles = StyleSheet.create({
     fontSize: font.md,
   },
   cellFocused: { borderColor: colors.accent },
+  cellSaved: { borderColor: '#22C55E' },
   cellLocked: { opacity: 0.3 },
 });
