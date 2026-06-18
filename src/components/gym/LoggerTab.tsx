@@ -399,6 +399,11 @@ export function LoggerTab() {
       <RNModal visible={menuExec !== null} transparent animationType="none" onRequestClose={() => setMenuExec(null)}>
         <Pressable style={styles.menuBackdrop} onPress={() => setMenuExec(null)}>
           <Pressable style={[styles.menuCard, { top: menuY + 4 }]} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.menuHeader}>
+              <Pressable hitSlop={8} onPress={() => setMenuExec(null)}>
+                <MaterialIcons name="close" size={16} color={colors.textMuted} />
+              </Pressable>
+            </View>
             <Pressable style={styles.menuItem} onPress={() => { const e = menuExec; setMenuExec(null); setReschedulingExec(e); }}>
               <MaterialIcons name="event" size={18} color={colors.accent} />
               <Text style={styles.menuItemText}>Reschedule</Text>
@@ -510,6 +515,14 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.2,
     shadowRadius: 6,
+  },
+  menuHeader: {
+    alignItems: 'flex-end',
+    paddingHorizontal: spacing.sm,
+    paddingTop: spacing.sm,
+    paddingBottom: 2,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
   menuItem: {
     flexDirection: 'row',
