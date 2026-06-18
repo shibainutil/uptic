@@ -381,15 +381,19 @@ export function LoggerTab() {
                               lastExecution={lastExec}
                               routineExecutionId={exec.id}
                               dueDate={exec.dueDate}
-                              onSave={async (data) => {
+                              onSave={async (data, currentExecId) => {
+                                if (data === null) {
+                                  const idToDelete = currentExecId ?? executions.find(
+                                    (e) => e.routineExecutionId === exec.id && e.exerciseId === ex.id,
+                                  )?.id;
+                                  if (idToDelete) await removeExecExecution(idToDelete);
+                                  return null;
+                                }
                                 const live = executions.find(
                                   (e) => e.routineExecutionId === exec.id && e.exerciseId === ex.id,
                                 );
                                 if (live) { await update(live.id, data); return live.id; }
                                 return await add(data);
-                              }}
-                              onClear={async (execId) => {
-                                await removeExecExecution(execId);
                               }}
                             />
                           );

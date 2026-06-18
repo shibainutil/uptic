@@ -14,8 +14,8 @@ interface Props {
   lastExecution: ExerciseExecution | null;
   routineExecutionId: string;
   dueDate: string;
-  onSave: (data: Omit<ExerciseExecution, 'id' | 'createdAt'>) => Promise<string>;
-  onClear: (execId: string) => Promise<void>;
+  // data=null means "delete the current execution"; returns the saved/existing exec ID
+  onSave: (data: Omit<ExerciseExecution, 'id' | 'createdAt'> | null, currentExecId: string | null) => Promise<string | null>;
 }
 
 function filterWeight(v: string): string {
@@ -42,7 +42,7 @@ function isSeriesDone(row: SeriesRow): boolean {
 
 const LABEL_W = 52;
 
-export function ExerciseInlineForm({ exercise, execution, lastExecution, routineExecutionId, dueDate, onSave, onClear }: Props) {
+export function ExerciseInlineForm({ exercise, execution, lastExecution, routineExecutionId, dueDate, onSave }: Props) {
   const isStrength = exerciseType(exercise) === 'strength';
   const seriesCount = exercise.series ?? 3;
   const [expanded, setExpanded] = useState(false);
@@ -54,9 +54,8 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
   const executionRef = useRef(execution);
   useEffect(() => { executionRef.current = execution; }, [execution]);
 
-  // Tracks the ID of the last successfully saved execution (updated from both
-  // onSave return value and the execution prop from Firestore). Used in the
-  // clear path so we can delete the document even before Firestore fires.
+  // Tracks the saved execution ID from both the prop and the onSave return value so
+  // the clear path can find the document even before Firestore fires after a save.
   const savedExecIdRef = useRef<string | null>(execution?.id ?? null);
   useEffect(() => {
     if (execution?.id) savedExecIdRef.current = execution.id;
@@ -65,20 +64,14 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
 
   const onSaveRef = useRef(onSave);
   useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
-  const onClearRef = useRef(onClear);
-  useEffect(() => { onClearRef.current = onClear; }, [onClear]);
 
-  // Queue: if a save is in flight, store the latest rows to save next
   const isSaving = useRef(false);
   const pendingSave = useRef<SeriesRow[] | null>(null);
 
-  // True while a field is focused (user is actively typing)
+  // Blocks the Firestore sync effect while local unsaved changes exist
   const isEditingRef = useRef(false);
-  // True from first keystroke until save/clear completes — prevents Firestore
-  // snapshots from overwriting locally-cleared or mid-save fields
   const isLocallyModifiedRef = useRef(false);
 
-  // Sync rows when execution prop changes — blocked while user has unsaved local changes
   useEffect(() => {
     if (isEditingRef.current || isLocallyModifiedRef.current) return;
     const count = exercise.series ?? 3;
@@ -98,13 +91,11 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
     }
   }, [execution, exercise.series]);
 
-  // When the form collapses, drop local-modified state so the next expand
-  // shows the authoritative Firestore data
+  // Collapsing the form drops local-modified state so next expand shows Firestore truth
   useEffect(() => {
     if (!expanded) isLocallyModifiedRef.current = false;
   }, [expanded]);
 
-  // Weight placeholders: per-series from lastExecution
   const weightPlaceholders: string[] = Array.from({ length: seriesCount }, (_, i) => {
     for (let j = i - 1; j >= 0; j--) {
       if (isValidWeight(rows[j].weight)) return rows[j].weight;
@@ -117,6 +108,7 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
     }
     return src.weight != null ? src.weight.toFixed(1) : '—';
   });
+
   const repsSuggestion = exercise.repsMin != null
     ? exercise.repsMax != null && exercise.repsMax !== exercise.repsMin
       ? `${exercise.repsMin} - ${exercise.repsMax}`
@@ -135,7 +127,6 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
   }
 
   async function doSave(current: SeriesRow[]) {
-    // Count contiguous done series from start (series i requires series i-1 to be done)
     let doneCount = 0;
     for (const row of current) {
       if (isSeriesDone(row)) doneCount++;
@@ -144,17 +135,15 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
 
     if (doneCount === 0) {
       const series0Empty = current[0].weight === '' && current[0].reps === '';
-      if (!series0Empty) return; // partial input — keep isLocallyModifiedRef=true, block sync
+      if (!series0Empty) return; // partial — keep modification flag, block sync
 
-      // Series 0 is fully blank. Clear the execution if one exists.
-      const execId = savedExecIdRef.current ?? executionRef.current?.id;
-      if (execId) {
-        try {
-          await onClearRef.current(execId);
-          savedExecIdRef.current = null;
-        } catch (e: unknown) {
-          Alert.alert('Error', e instanceof Error ? e.message : 'Could not clear.');
-        }
+      // All inputs blank: tell parent to delete the execution
+      const currentId = savedExecIdRef.current ?? executionRef.current?.id ?? null;
+      try {
+        await onSaveRef.current(null, currentId);
+        savedExecIdRef.current = null;
+      } catch (e: unknown) {
+        Alert.alert('Error', e instanceof Error ? e.message : 'Could not clear.');
       }
       isLocallyModifiedRef.current = false;
       return;
@@ -179,8 +168,9 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
         ...(seriesData[0]?.reps != null ? { reps: seriesData[0].reps } : {}),
         ...(seriesData[0]?.weight != null ? { weight: seriesData[0].weight, weightUnit: 'kg' as const } : {}),
       };
-      const id = await onSaveRef.current(data);
-      savedExecIdRef.current = id;
+      const currentId = savedExecIdRef.current ?? executionRef.current?.id ?? null;
+      const returnedId = await onSaveRef.current(data, currentId);
+      if (returnedId) savedExecIdRef.current = returnedId;
     } catch (e: unknown) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Could not save.');
     }
