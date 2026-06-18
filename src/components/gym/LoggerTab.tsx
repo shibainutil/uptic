@@ -19,6 +19,7 @@ const MONTH_NAMES = [
 
 const STATUS_COLOR = {
   pending: colors.accent,
+  overdue: '#F97316',
   'in-progress': '#F59E0B',
   completed: '#22C55E',
   failed: colors.danger,
@@ -144,12 +145,13 @@ export function LoggerTab() {
     return { done, total, anyLogged, seriesDone, seriesTotal };
   }
 
-  function getDisplayStatus(exec: { id: string; routineId: string; status: string }): DisplayStatus {
+  function getDisplayStatus(exec: { id: string; routineId: string; status: string; dueDate: string }): DisplayStatus {
     if (exec.status === 'failed') return 'failed';
     if (exec.status === 'completed') return 'completed';
     const { done, total, anyLogged } = progressFor(exec.id, exec.routineId);
     if (done === total && total > 0) return 'completed';
     if (anyLogged > 0) return 'in-progress';
+    if (exec.dueDate < todayISO()) return 'overdue';
     return 'pending';
   }
 
@@ -181,19 +183,22 @@ export function LoggerTab() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
         const toRemove = executions.filter((e) => e.routineExecutionId === exec.id);
-        await Promise.all(toRemove.map((e) => removeExecExecution(e.id)));
+        await Promise.allSettled(toRemove.map((e) => removeExecExecution(e.id)));
         await removeRoutineExec(exec.id);
       }},
     ]);
   }
 
   const dotByDate = useMemo(() => {
-    const map = new Map<string, 'pending' | 'completed' | 'failed'>();
+    const today = todayISO();
+    const priority: Record<string, number> = { pending: 4, overdue: 3, failed: 2, completed: 1 };
+    const map = new Map<string, 'pending' | 'overdue' | 'completed' | 'failed'>();
     for (const ex of routineExecutions) {
+      const dotStatus: 'pending' | 'overdue' | 'completed' | 'failed' =
+        ex.status === 'pending' ? (ex.dueDate < today ? 'overdue' : 'pending') :
+        ex.status === 'failed' ? 'failed' : 'completed';
       const prev = map.get(ex.dueDate);
-      if (ex.status === 'pending') map.set(ex.dueDate, 'pending');
-      else if (ex.status === 'failed' && prev !== 'pending') map.set(ex.dueDate, 'failed');
-      else if (!prev) map.set(ex.dueDate, 'completed');
+      if (!prev || priority[dotStatus] > priority[prev]) map.set(ex.dueDate, dotStatus);
     }
     return map;
   }, [routineExecutions]);
@@ -304,6 +309,7 @@ export function LoggerTab() {
 
             const statusLabel =
               status === 'pending' ? 'Pending' :
+              status === 'overdue' ? 'Overdue' :
               status === 'in-progress' ? 'In Progress' :
               status === 'completed' ? 'Completed' : 'Failed';
 

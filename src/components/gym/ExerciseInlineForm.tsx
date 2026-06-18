@@ -84,14 +84,6 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
     }
   }, [execution, exercise.series]);
 
-  function isRowSaved(i: number): boolean {
-    const s = executionRef.current?.seriesData?.[i];
-    if (!s) return false;
-    const savedW = s.weight != null ? s.weight.toFixed(1) : '';
-    const savedR = s.reps != null ? String(s.reps) : '';
-    return rows[i].weight === savedW && rows[i].reps === savedR && isSeriesDone(rows[i]);
-  }
-
   // Weight placeholders: per-series from lastExecution
   const weightPlaceholders: string[] = Array.from({ length: seriesCount }, (_, i) => {
     // First: use weight from an already-filled earlier series in this session
@@ -124,22 +116,32 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
   }
 
   async function doSave(current: SeriesRow[]) {
-    const anyDone = current.some(isSeriesDone);
-    const allEmpty = current.every((r) => r.weight === '' && r.reps === '');
-    if (!anyDone && !allEmpty) return; // partial — skip to avoid overwriting Firestore
-    try {
-      if (allEmpty) {
-        // Delete the exercise execution so counter and status reset cleanly
-        if (executionRef.current) await onClearRef.current();
-        return;
+    // Count contiguous done series from start — series i requires series i-1 to be done
+    let doneCount = 0;
+    for (const row of current) {
+      if (isSeriesDone(row)) doneCount++;
+      else break;
+    }
+
+    if (doneCount === 0) {
+      // Only clear if series 0 is fully blank (not partial weight/reps input)
+      const series0Empty = current[0].weight === '' && current[0].reps === '';
+      if (series0Empty && executionRef.current) {
+        try { await onClearRef.current(); } catch (e: unknown) {
+          Alert.alert('Error', e instanceof Error ? e.message : 'Could not clear.');
+        }
       }
-      const seriesData: SeriesEntry[] = current.map((r) => {
+      return;
+    }
+
+    try {
+      const seriesData: SeriesEntry[] = current.slice(0, doneCount).map((r) => {
         const entry: SeriesEntry = { weightUnit: 'kg' };
         if (isValidWeight(r.weight)) entry.weight = parseFloat(r.weight);
         if (isValidReps(r.reps)) entry.reps = parseInt(r.reps, 10);
         return entry;
       });
-      const allDone = current.every(isSeriesDone);
+      const allDone = doneCount === current.length;
       const data: Omit<ExerciseExecution, 'id' | 'createdAt'> = {
         exerciseId: exercise.id,
         date: dueDate,
@@ -238,7 +240,7 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
               return (
                 <TextInput
                   key={i}
-                  style={[styles.cell, focused === `w${i}` && styles.cellFocused, isRowSaved(i) && styles.cellSaved, !editable && styles.cellLocked]}
+                  style={[styles.cell, focused === `w${i}` && styles.cellFocused, circles[i] && styles.cellSaved, !editable && styles.cellLocked]}
                   value={row.weight}
                   onChangeText={(v) => editable && updateRow(i, 'weight', v)}
                   onFocus={() => { if (editable) { isEditingRef.current = true; setFocused(`w${i}`); } }}
@@ -261,7 +263,7 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
               return (
                 <TextInput
                   key={i}
-                  style={[styles.cell, focused === `r${i}` && styles.cellFocused, isRowSaved(i) && styles.cellSaved, !editable && styles.cellLocked]}
+                  style={[styles.cell, focused === `r${i}` && styles.cellFocused, circles[i] && styles.cellSaved, !editable && styles.cellLocked]}
                   value={row.reps}
                   onChangeText={(v) => editable && updateRow(i, 'reps', v)}
                   onFocus={() => { if (editable) { isEditingRef.current = true; setFocused(`r${i}`); } }}
