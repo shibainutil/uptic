@@ -177,7 +177,15 @@ export function useRoutineExecutions(userId: string | null | undefined) {
     });
   }, [userId]);
 
-  return { routineExecutions, loaded, setStatus };
+  const reschedule = useCallback(async (exec: RoutineExecution, newDate: string) => {
+    const newId = `${exec.routineId}_${newDate}`;
+    const batch = writeBatch(db);
+    batch.delete(userDoc(userId!, 'routineExecutions', exec.id));
+    batch.set(userDoc(userId!, 'routineExecutions', newId), { ...exec, id: newId, dueDate: newDate });
+    await batch.commit();
+  }, [userId]);
+
+  return { routineExecutions, loaded, setStatus, reschedule };
 }
 
 /**

@@ -3,13 +3,13 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExercisesTab } from '../../src/components/gym/ExercisesTab';
 import { RoutinesTab } from '../../src/components/gym/RoutinesTab';
-import { TrackerTab } from '../../src/components/gym/TrackerTab';
+import { LoggerTab } from '../../src/components/gym/LoggerTab';
 import { useAuth } from '../../src/context/AuthContext';
 import { useRoutines, useRoutineExecutions, useRoutineReconcile } from '../../src/store/gymStore';
 import { colors, spacing, font } from '../../src/theme';
 
 const SUB_TABS = [
-  { key: 'tracker',   label: 'Tracker' },
+  { key: 'tracker',   label: 'Logger' },
   { key: 'exercises', label: 'Exercises' },
   { key: 'routines',  label: 'Routines' },
 ] as const;
@@ -42,7 +42,7 @@ export default function FitnessScreen() {
       </View>
 
       <View style={styles.content}>
-        {tab === 'tracker'   && <TrackerTab />}
+        {tab === 'tracker'   && <LoggerTab />}
         {tab === 'exercises' && <ExercisesTab />}
         {tab === 'routines'  && <RoutinesTab />}
       </View>

@@ -6,9 +6,10 @@ import {
   useRoutines, useRoutineExecutions, useExercises, useExerciseExecutions,
 } from '../../store/gymStore';
 import { toISO } from '../../lib/schedule';
-import { type Exercise, exerciseMuscleGroup } from '../../types/gym';
+import { type Exercise, type RoutineExecution, exerciseMuscleGroup } from '../../types/gym';
 import { colors, font, spacing, radius } from '../../theme';
 import { ExerciseInlineForm } from './ExerciseInlineForm';
+import { DatePicker } from '../ui/DatePicker';
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MONTH_NAMES = [
@@ -25,6 +26,28 @@ const STATUS_COLOR = {
 
 type DisplayStatus = keyof typeof STATUS_COLOR;
 
+function getISOWeek(date: Date): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+}
+
+function weekGroupKey(isoDate: string): string {
+  const d = new Date(isoDate);
+  return `${d.getFullYear()}-W${String(getISOWeek(d)).padStart(2, '0')}`;
+}
+
+function weekGroupLabel(isoDate: string): string {
+  const d = new Date(isoDate);
+  const offset = (d.getDay() + 6) % 7;
+  const mon = new Date(d); mon.setDate(d.getDate() - offset);
+  const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+  const fmt = (x: Date) => x.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  return `${fmt(mon)} – ${fmt(sun)}  [W${getISOWeek(d)}]`;
+}
+
 function isSameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
@@ -39,10 +62,10 @@ function buildMonthGrid(year: number, month: number): (Date | null)[] {
   return cells;
 }
 
-export function TrackerTab() {
+export function LoggerTab() {
   const { user } = useAuth();
   const { routines } = useRoutines(user?.uid);
-  const { routineExecutions } = useRoutineExecutions(user?.uid);
+  const { routineExecutions, reschedule } = useRoutineExecutions(user?.uid);
   const { exercises } = useExercises(user?.uid);
   const { executions, add, update } = useExerciseExecutions(user?.uid);
 
@@ -59,6 +82,7 @@ export function TrackerTab() {
   const [weekView, setWeekView] = useState(true);
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
   const [closedIds, setClosedIds] = useState<Set<string>>(new Set());
+  const [reschedulingId, setReschedulingId] = useState<string | null>(null);
 
   function prevMonth() {
     if (viewMonth === 0) { setViewMonth(11); setViewYear((y) => y - 1); }
@@ -163,6 +187,15 @@ export function TrackerTab() {
       : (() => { const d = new Date(e.dueDate); return d.getFullYear() === viewYear && d.getMonth() === viewMonth; })())
     .sort((a, b) => b.dueDate.localeCompare(a.dueDate));
 
+  // Group by ISO week, preserving newest-to-oldest order
+  const weekGroups: { key: string; label: string; items: RoutineExecution[] }[] = [];
+  for (const exec of dueRoutines) {
+    const key = weekGroupKey(exec.dueDate);
+    let g = weekGroups.find((x) => x.key === key);
+    if (!g) { g = { key, label: weekGroupLabel(exec.dueDate), items: [] }; weekGroups.push(g); }
+    g.items.push(exec);
+  }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <View style={styles.calendarCard}>
@@ -230,103 +263,127 @@ export function TrackerTab() {
         <Text style={styles.agendaEmpty}>Nothing scheduled for this period.</Text>
       ) : null}
 
-      {dueRoutines.map((exec) => {
-        const { done, total, anyLogged, seriesDone, seriesTotal } = progressFor(exec.id, exec.routineId);
-        const status = getDisplayStatus(exec);
-        const color = STATUS_COLOR[status];
-        const expanded = isRoutineExpanded(exec.id, status);
-        const exPct = total > 0 ? (done / total) * 100 : 0;
-        const seriesPct = seriesTotal > 0 ? (seriesDone / seriesTotal) * 100 : 0;
-        const routine = routines.find((r) => r.id === exec.routineId);
+      {weekGroups.map((wg) => (
+        <View key={wg.key}>
+          <Text style={styles.weekHeader}>{wg.label}</Text>
 
-        const statusLabel =
-          status === 'pending' ? 'Pending' :
-          status === 'in-progress' ? 'In Progress' :
-          status === 'completed' ? 'Completed' : 'Failed';
+          {wg.items.map((exec) => {
+            const { done, total, seriesDone, seriesTotal } = progressFor(exec.id, exec.routineId);
+            const status = getDisplayStatus(exec);
+            const color = STATUS_COLOR[status];
+            const expanded = isRoutineExpanded(exec.id, status);
+            const exPct = total > 0 ? (done / total) * 100 : 0;
+            const seriesPct = seriesTotal > 0 ? (seriesDone / seriesTotal) * 100 : 0;
+            const routine = routines.find((r) => r.id === exec.routineId);
 
-        const loggedIds = executions
-          .filter((e) => e.routineExecutionId === exec.id)
-          .map((e) => e.exerciseId);
-        const exerciseIds = [...new Set([...(routine?.exerciseIds ?? []), ...loggedIds])];
-        const routineExercises = exerciseIds
-          .map((eid) => exercises.find((e) => e.id === eid))
-          .filter((e): e is Exercise => Boolean(e));
+            const statusLabel =
+              status === 'pending' ? 'Pending' :
+              status === 'in-progress' ? 'In Progress' :
+              status === 'completed' ? 'Completed' : 'Failed';
 
-        const grouped = routineExercises.reduce<Record<string, Exercise[]>>((acc, ex) => {
-          const g = exerciseMuscleGroup(ex);
-          if (!acc[g]) acc[g] = [];
-          acc[g].push(ex);
-          return acc;
-        }, {});
-        const groupNames = Object.keys(grouped).sort();
+            const loggedIds = executions
+              .filter((e) => e.routineExecutionId === exec.id)
+              .map((e) => e.exerciseId);
+            const exerciseIds = [...new Set([...(routine?.exerciseIds ?? []), ...loggedIds])];
+            const routineExercises = exerciseIds
+              .map((eid) => exercises.find((e) => e.id === eid))
+              .filter((e): e is Exercise => Boolean(e));
 
-        return (
-          <View key={exec.id} style={styles.agendaCard}>
-            <Pressable style={styles.cardHeader} onPress={() => toggleRoutine(exec.id, status)}>
-              <View style={styles.titleCol}>
-                <View style={styles.titleRow}>
-                  <Text style={styles.agendaName}>{routineName(exec.routineId)}</Text>
-                  <View style={[styles.statusBadge, { backgroundColor: `${color}22` }]}>
-                    <Text style={[styles.statusBadgeText, { color }]}>{statusLabel}</Text>
+            const grouped = routineExercises.reduce<Record<string, Exercise[]>>((acc, ex) => {
+              const g = exerciseMuscleGroup(ex);
+              if (!acc[g]) acc[g] = [];
+              acc[g].push(ex);
+              return acc;
+            }, {});
+            const groupNames = Object.keys(grouped).sort();
+
+            return (
+              <View key={exec.id} style={styles.agendaCard}>
+                <Pressable style={styles.cardHeader} onPress={() => toggleRoutine(exec.id, status)}>
+                  <View style={styles.titleCol}>
+                    <View style={styles.titleRow}>
+                      <Text style={styles.agendaName}>{routineName(exec.routineId)}</Text>
+                      <View style={[styles.statusBadge, { backgroundColor: `${color}22` }]}>
+                        <Text style={[styles.statusBadgeText, { color }]}>{statusLabel}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.progressLabel}>
+                      {new Date(exec.dueDate).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })} · {done}/{total} exercises · {seriesDone}/{seriesTotal} series
+                    </Text>
+                  </View>
+                  <View style={styles.cardActions}>
+                    {status === 'pending' && (
+                      <Pressable
+                        hitSlop={8}
+                        onPress={(e) => { e.stopPropagation(); setReschedulingId(reschedulingId === exec.id ? null : exec.id); }}
+                      >
+                        <MaterialIcons name="event" size={20} color={colors.textMuted} />
+                      </Pressable>
+                    )}
+                    <MaterialIcons name={expanded ? 'expand-less' : 'expand-more'} size={22} color={colors.textMuted} />
+                  </View>
+                </Pressable>
+
+                {reschedulingId === exec.id && (
+                  <View style={styles.rescheduleRow}>
+                    <Text style={styles.rescheduleLabel}>Move to:</Text>
+                    <DatePicker
+                      value={exec.dueDate}
+                      onChange={async (newDate) => {
+                        if (newDate !== exec.dueDate) await reschedule(exec, newDate);
+                        setReschedulingId(null);
+                      }}
+                    />
+                  </View>
+                )}
+
+                <View style={styles.progressStack}>
+                  <View style={styles.progressTrack}>
+                    <View style={[styles.progressFill, { width: `${seriesPct}%`, backgroundColor: `${color}44` }]} />
+                    <View style={[styles.progressFill, styles.progressFillOverlay, { width: `${exPct}%`, backgroundColor: color }]} />
                   </View>
                 </View>
-                <Text style={styles.progressLabel}>
-                  {new Date(exec.dueDate).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })} · {done}/{total} exercises · {seriesDone}/{seriesTotal} series
-                </Text>
-              </View>
-              <MaterialIcons
-                name={expanded ? 'expand-less' : 'expand-more'}
-                size={22}
-                color={colors.textMuted}
-              />
-            </Pressable>
 
-            {/* Stacked progress bars: series (lighter) behind, exercises (full color) in front */}
-            <View style={styles.progressStack}>
-              <View style={styles.progressTrack}>
-                <View style={[styles.progressFill, { width: `${seriesPct}%`, backgroundColor: `${color}44` }]} />
-                <View style={[styles.progressFill, styles.progressFillOverlay, { width: `${exPct}%`, backgroundColor: color }]} />
-              </View>
-            </View>
-
-            {expanded && routineExercises.length > 0 && (
-              <View style={styles.exerciseList}>
-                {groupNames.map((group) => (
-                  <View key={group}>
-                    <Text style={styles.groupLabel}>{group}</Text>
-                    {grouped[group].map((ex) => {
-                      const exExec = executions.find(
-                        (e) => e.routineExecutionId === exec.id && e.exerciseId === ex.id,
-                      ) ?? null;
-                      const lastExec = executions
-                        .filter((e) => e.exerciseId === ex.id && e.id !== exExec?.id &&
-                          (e.weight != null || e.seriesData?.some((s) => s.weight != null)))
-                        .sort((a, b) => b.date.localeCompare(a.date))[0] ?? null;
-                      return (
-                        <ExerciseInlineForm
-                          key={ex.id}
-                          exercise={ex}
-                          execution={exExec}
-                          lastExecution={lastExec}
-                          routineExecutionId={exec.id}
-                          dueDate={exec.dueDate}
-                          onSave={async (data) => {
-                            const live = executions.find(
-                              (e) => e.routineExecutionId === exec.id && e.exerciseId === ex.id,
-                            );
-                            if (live) await update(live.id, data);
-                            else await add(data);
-                          }}
-                        />
-                      );
-                    })}
+                {expanded && routineExercises.length > 0 && (
+                  <View style={styles.exerciseList}>
+                    {groupNames.map((group) => (
+                      <View key={group}>
+                        <Text style={styles.groupLabel}>{group}</Text>
+                        {grouped[group].map((ex) => {
+                          const exExec = executions.find(
+                            (e) => e.routineExecutionId === exec.id && e.exerciseId === ex.id,
+                          ) ?? null;
+                          const lastExec = executions
+                            .filter((e) => e.exerciseId === ex.id && e.id !== exExec?.id &&
+                              (e.weight != null || e.seriesData?.some((s) => s.weight != null)))
+                            .sort((a, b) => b.date.localeCompare(a.date))[0] ?? null;
+                          return (
+                            <ExerciseInlineForm
+                              key={ex.id}
+                              exercise={ex}
+                              execution={exExec}
+                              lastExecution={lastExec}
+                              routineExecutionId={exec.id}
+                              dueDate={exec.dueDate}
+                              onSave={async (data) => {
+                                const live = executions.find(
+                                  (e) => e.routineExecutionId === exec.id && e.exerciseId === ex.id,
+                                );
+                                if (live) await update(live.id, data);
+                                else await add(data);
+                              }}
+                            />
+                          );
+                        })}
+                      </View>
+                    ))}
                   </View>
-                ))}
+                )}
               </View>
-            )}
-          </View>
-        );
-      })}
+            );
+          })}
+        </View>
+      ))}
     </ScrollView>
   );
 }
@@ -366,6 +423,14 @@ const styles = StyleSheet.create({
   dot: { width: 5, height: 5, borderRadius: 2.5, marginTop: 3 },
   dotHidden: { backgroundColor: 'transparent' },
   agendaEmpty: { color: colors.textDim, fontSize: font.md, paddingVertical: spacing.md },
+  weekHeader: {
+    color: colors.textMuted,
+    fontSize: font.sm,
+    fontWeight: '600',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
+    marginTop: spacing.sm,
+  },
   agendaCard: {
     backgroundColor: colors.surface,
     borderRadius: radius.sm,
@@ -379,6 +444,15 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     padding: spacing.md,
   },
+  cardActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  rescheduleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  rescheduleLabel: { color: colors.textMuted, fontSize: font.sm },
   titleCol: { flex: 1, gap: 2 },
   titleRow: {
     flexDirection: 'row',
