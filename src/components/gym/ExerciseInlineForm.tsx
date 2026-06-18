@@ -14,8 +14,8 @@ interface Props {
   lastExecution: ExerciseExecution | null;
   routineExecutionId: string;
   dueDate: string;
-  onSave: (data: Omit<ExerciseExecution, 'id' | 'createdAt'>) => Promise<void>;
-  onClear: () => Promise<void>;
+  onSave: (data: Omit<ExerciseExecution, 'id' | 'createdAt'>) => Promise<string>;
+  onClear: (execId: string) => Promise<void>;
 }
 
 function filterWeight(v: string): string {
@@ -53,6 +53,16 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
 
   const executionRef = useRef(execution);
   useEffect(() => { executionRef.current = execution; }, [execution]);
+
+  // Tracks the ID of the last successfully saved execution (updated from both
+  // onSave return value and the execution prop from Firestore). Used in the
+  // clear path so we can delete the document even before Firestore fires.
+  const savedExecIdRef = useRef<string | null>(execution?.id ?? null);
+  useEffect(() => {
+    if (execution?.id) savedExecIdRef.current = execution.id;
+    else if (execution === null) savedExecIdRef.current = null;
+  }, [execution]);
+
   const onSaveRef = useRef(onSave);
   useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
   const onClearRef = useRef(onClear);
@@ -61,12 +71,16 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
   // Queue: if a save is in flight, store the latest rows to save next
   const isSaving = useRef(false);
   const pendingSave = useRef<SeriesRow[] | null>(null);
-  // Tracks whether a field is focused so the sync effect doesn't wipe in-progress input
-  const isEditingRef = useRef(false);
 
-  // Sync rows when execution prop changes — skip if user is actively typing
+  // True while a field is focused (user is actively typing)
+  const isEditingRef = useRef(false);
+  // True from first keystroke until save/clear completes — prevents Firestore
+  // snapshots from overwriting locally-cleared or mid-save fields
+  const isLocallyModifiedRef = useRef(false);
+
+  // Sync rows when execution prop changes — blocked while user has unsaved local changes
   useEffect(() => {
-    if (isEditingRef.current) return;
+    if (isEditingRef.current || isLocallyModifiedRef.current) return;
     const count = exercise.series ?? 3;
     const fmt = (w: number | undefined) => w != null ? w.toFixed(1) : '';
     if (execution?.seriesData && execution.seriesData.length > 0) {
@@ -84,13 +98,17 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
     }
   }, [execution, exercise.series]);
 
+  // When the form collapses, drop local-modified state so the next expand
+  // shows the authoritative Firestore data
+  useEffect(() => {
+    if (!expanded) isLocallyModifiedRef.current = false;
+  }, [expanded]);
+
   // Weight placeholders: per-series from lastExecution
   const weightPlaceholders: string[] = Array.from({ length: seriesCount }, (_, i) => {
-    // First: use weight from an already-filled earlier series in this session
     for (let j = i - 1; j >= 0; j--) {
       if (isValidWeight(rows[j].weight)) return rows[j].weight;
     }
-    // Fall back to last execution
     const src = lastExecution;
     if (!src) return '—';
     if (src.seriesData && src.seriesData.length > 0) {
@@ -106,6 +124,7 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
     : '—';
 
   function updateRow(i: number, field: keyof SeriesRow, raw: string) {
+    isLocallyModifiedRef.current = true;
     const value = field === 'weight' ? filterWeight(raw) : filterReps(raw);
     setRows((prev) => prev.map((r, idx) => idx === i ? { ...r, [field]: value } : r));
   }
@@ -116,7 +135,7 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
   }
 
   async function doSave(current: SeriesRow[]) {
-    // Count contiguous done series from start — series i requires series i-1 to be done
+    // Count contiguous done series from start (series i requires series i-1 to be done)
     let doneCount = 0;
     for (const row of current) {
       if (isSeriesDone(row)) doneCount++;
@@ -124,13 +143,20 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
     }
 
     if (doneCount === 0) {
-      // Only clear if series 0 is fully blank (not partial weight/reps input)
       const series0Empty = current[0].weight === '' && current[0].reps === '';
-      if (series0Empty && executionRef.current) {
-        try { await onClearRef.current(); } catch (e: unknown) {
+      if (!series0Empty) return; // partial input — keep isLocallyModifiedRef=true, block sync
+
+      // Series 0 is fully blank. Clear the execution if one exists.
+      const execId = savedExecIdRef.current ?? executionRef.current?.id;
+      if (execId) {
+        try {
+          await onClearRef.current(execId);
+          savedExecIdRef.current = null;
+        } catch (e: unknown) {
           Alert.alert('Error', e instanceof Error ? e.message : 'Could not clear.');
         }
       }
+      isLocallyModifiedRef.current = false;
       return;
     }
 
@@ -153,13 +179,14 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
         ...(seriesData[0]?.reps != null ? { reps: seriesData[0].reps } : {}),
         ...(seriesData[0]?.weight != null ? { weight: seriesData[0].weight, weightUnit: 'kg' as const } : {}),
       };
-      await onSaveRef.current(data);
+      const id = await onSaveRef.current(data);
+      savedExecIdRef.current = id;
     } catch (e: unknown) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Could not save.');
     }
+    isLocallyModifiedRef.current = false;
   }
 
-  // Queue-aware save: if already saving, queue the latest rows
   async function triggerSave(current: SeriesRow[]) {
     if (isSaving.current) {
       pendingSave.current = current;
@@ -246,11 +273,11 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
                   onFocus={() => { if (editable) { isEditingRef.current = true; setFocused(`w${i}`); } }}
                   onBlur={() => { if (editable) formatWeightOnBlur(i); }}
                   keyboardType="decimal-pad"
+                  returnKeyType="done"
                   placeholder={editable ? weightPlaceholders[i] : ''}
                   placeholderTextColor={colors.textMuted}
                   editable={editable}
                   textAlign="center"
-                  selection={row.weight === '' ? { start: 0, end: 0 } : undefined}
                 />
               );
             })}
@@ -269,11 +296,11 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
                   onFocus={() => { if (editable) { isEditingRef.current = true; setFocused(`r${i}`); } }}
                   onBlur={() => { if (editable) onRepsBlur(); else setFocused(null); }}
                   keyboardType="numeric"
+                  returnKeyType="done"
                   placeholder={editable ? repsSuggestion : ''}
                   placeholderTextColor={colors.textMuted}
                   editable={editable}
                   textAlign="center"
-                  selection={row.reps === '' ? { start: 0, end: 0 } : undefined}
                 />
               );
             })}
