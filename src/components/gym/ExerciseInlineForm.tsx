@@ -81,14 +81,18 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
   // Weight placeholders: per-series from lastExecution
   const weightPlaceholders: string[] = Array.from({ length: seriesCount }, (_, i) => {
     const src = lastExecution;
-    if (!src) return '';
+    if (!src) return '—';
     if (src.seriesData && src.seriesData.length > 0) {
       const w = src.seriesData[i]?.weight;
-      return w != null ? w.toFixed(1) : '';
+      return w != null ? w.toFixed(1) : '—';
     }
-    return i === 0 && src.weight != null ? src.weight.toFixed(1) : '';
+    return i === 0 && src.weight != null ? src.weight.toFixed(1) : '—';
   });
-  const repsSuggestion = exercise.repsMin != null ? String(exercise.repsMin) : '';
+  const repsSuggestion = exercise.repsMin != null
+    ? exercise.repsMax != null && exercise.repsMax !== exercise.repsMin
+      ? `${exercise.repsMin} - ${exercise.repsMax}`
+      : String(exercise.repsMin)
+    : '—';
 
   function updateRow(i: number, field: keyof SeriesRow, raw: string) {
     const value = field === 'weight' ? filterWeight(raw) : filterReps(raw);
@@ -217,10 +221,10 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
                   onFocus={() => editable && setFocused(`w${i}`)}
                   onBlur={() => { if (editable) formatWeightOnBlur(i); }}
                   keyboardType="decimal-pad"
-                  placeholder={editable ? (weightPlaceholders[i] || '—') : ''}
-                  placeholderTextColor={weightPlaceholders[i] ? colors.textMuted : colors.textDim}
+                  placeholder={editable ? weightPlaceholders[i] : ''}
+                  placeholderTextColor={colors.textMuted}
                   editable={editable}
-                  textAlign="center"
+                  textAlign={row.weight ? 'center' : 'left'}
                 />
               );
             })}
@@ -239,10 +243,10 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
                   onFocus={() => editable && setFocused(`r${i}`)}
                   onBlur={() => { if (editable) onRepsBlur(); else setFocused(null); }}
                   keyboardType="numeric"
-                  placeholder={editable ? (repsSuggestion || '—') : ''}
-                  placeholderTextColor={repsSuggestion ? colors.textMuted : colors.textDim}
+                  placeholder={editable ? repsSuggestion : ''}
+                  placeholderTextColor={colors.textMuted}
                   editable={editable}
-                  textAlign="center"
+                  textAlign={row.reps ? 'center' : 'left'}
                 />
               );
             })}

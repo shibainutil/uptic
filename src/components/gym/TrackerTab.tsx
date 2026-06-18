@@ -88,17 +88,19 @@ export function TrackerTab() {
     seriesDone: number; seriesTotal: number;
   } {
     const r = routines.find((x) => x.id === routineId);
-    const total = r?.exerciseIds.length ?? 0;
-    const done = (r?.exerciseIds ?? []).filter((eid) =>
+    // If routine was deleted, fall back to exercise IDs from logged executions
+    const exerciseIds = r?.exerciseIds ??
+      executions.filter((e) => e.routineExecutionId === execId).map((e) => e.exerciseId);
+    const total = exerciseIds.length;
+    const done = exerciseIds.filter((eid) =>
       executions.some((e) => e.routineExecutionId === execId && e.exerciseId === eid && e.completed),
     ).length;
-    const anyLogged = (r?.exerciseIds ?? []).filter((eid) =>
+    const anyLogged = exerciseIds.filter((eid) =>
       executions.some((e) => e.routineExecutionId === execId && e.exerciseId === eid),
     ).length;
-    // Series progress: sum up completed series across all exercises
     let seriesDone = 0;
     let seriesTotal = 0;
-    for (const eid of (r?.exerciseIds ?? [])) {
+    for (const eid of exerciseIds) {
       const ex = exercises.find((e) => e.id === eid);
       const count = ex?.series ?? 3;
       seriesTotal += count;
@@ -150,7 +152,7 @@ export function TrackerTab() {
   for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
 
   const selectedISO = toISO(selectedDate);
-  const routineName = (rid: string) => routines.find((r) => r.id === rid)?.name ?? 'Routine';
+  const routineName = (rid: string) => routines.find((r) => r.id === rid)?.name ?? 'Deleted Routine';
 
   const dueRoutines = routineExecutions
     .filter((e) => e.dueDate === selectedISO)
@@ -253,7 +255,9 @@ export function TrackerTab() {
           status === 'in-progress' ? 'In Progress' :
           status === 'completed' ? 'Completed' : 'Failed';
 
-        const routineExercises = (routine?.exerciseIds ?? [])
+        const exerciseIds = routine?.exerciseIds ??
+          executions.filter((e) => e.routineExecutionId === exec.id).map((e) => e.exerciseId);
+        const routineExercises = exerciseIds
           .map((eid) => exercises.find((e) => e.id === eid))
           .filter((e): e is Exercise => Boolean(e));
 
