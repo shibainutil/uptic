@@ -238,6 +238,7 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
                   placeholderTextColor={colors.textMuted}
                   editable={editable}
                   textAlign="center"
+                  selection={row.weight === '' ? { start: 0, end: 0 } : undefined}
                 />
               );
             })}
@@ -260,6 +261,7 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
                   placeholderTextColor={colors.textMuted}
                   editable={editable}
                   textAlign="center"
+                  selection={row.reps === '' ? { start: 0, end: 0 } : undefined}
                 />
               );
             })}
