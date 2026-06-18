@@ -352,9 +352,9 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
         <View style={styles.form}>
           <View style={styles.gridRow}>
             <Text style={styles.rowLabel}>Duration{'\n'}(min)</Text>
-            <View style={styles.cellOuter}>
+            <View style={[styles.cellOuter, focused === 'dur' && styles.cellFocused, isValidDuration(durationStr) && styles.cellSaved]}>
               <TextInput
-                style={[styles.cell, focused === 'dur' && styles.cellFocused, isValidDuration(durationStr) && styles.cellSaved]}
+                style={styles.cell}
                 value={durationStr}
                 onChangeText={(v) => {
                   isLocallyModifiedRef.current = true;
@@ -382,9 +382,9 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
           {exercise.params.map((param, i) => (
             <View key={param.id} style={styles.gridRow}>
               <Text style={styles.rowLabel}>{param.name}{'\n'}({param.unit})</Text>
-              <View style={styles.cellOuter}>
+              <View style={[styles.cellOuter, focused === `p${i}` && styles.cellFocused]}>
                 <TextInput
-                  style={[styles.cell, focused === `p${i}` && styles.cellFocused]}
+                  style={styles.cell}
                   value={paramStrs[i]}
                   onChangeText={(v) => {
                     isLocallyModifiedRef.current = true;
@@ -432,9 +432,9 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
             {rows.map((row, i) => {
               const editable = isEditable(i);
               return (
-                <View key={i} style={styles.cellOuter}>
+                <View key={i} style={[styles.cellOuter, focused === `w${i}` && styles.cellFocused, circles[i] && styles.cellSaved, !editable && styles.cellLocked]}>
                   <TextInput
-                    style={[styles.cell, focused === `w${i}` && styles.cellFocused, circles[i] && styles.cellSaved, !editable && styles.cellLocked]}
+                    style={styles.cell}
                     value={row.weight}
                     onChangeText={(v) => editable && updateRow(i, 'weight', v)}
                     onFocus={() => { if (editable) { isEditingRef.current = true; setFocused(`w${i}`); } }}
@@ -459,9 +459,9 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
             {rows.map((row, i) => {
               const editable = isEditable(i);
               return (
-                <View key={i} style={styles.cellOuter}>
+                <View key={i} style={[styles.cellOuter, focused === `r${i}` && styles.cellFocused, circles[i] && styles.cellSaved, !editable && styles.cellLocked]}>
                   <TextInput
-                    style={[styles.cell, focused === `r${i}` && styles.cellFocused, circles[i] && styles.cellSaved, !editable && styles.cellLocked]}
+                    style={styles.cell}
                     value={row.reps}
                     onChangeText={(v) => editable && updateRow(i, 'reps', v)}
                     onFocus={() => { if (editable) { isEditingRef.current = true; setFocused(`r${i}`); } }}
@@ -528,14 +528,19 @@ const styles = StyleSheet.create({
   },
   gridRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   rowLabel: { width: LABEL_W, color: colors.textMuted, fontSize: font.sm, lineHeight: 17 },
-  cellOuter: { flex: 1, height: 36, position: 'relative' },
-  cell: {
-    position: 'absolute',
-    top: 0, left: 0, right: 0, bottom: 0,
+  cellOuter: {
+    flex: 1,
+    height: 36,
+    position: 'relative',
     backgroundColor: colors.bg,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.sm,
+  },
+  cell: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'transparent',
     paddingHorizontal: spacing.sm,
     color: colors.text,
     fontSize: font.md,
