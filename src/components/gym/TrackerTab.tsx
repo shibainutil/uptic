@@ -124,12 +124,12 @@ export function TrackerTab() {
   }
 
   function isRoutineExpanded(execId: string, status: DisplayStatus): boolean {
-    if (status === 'in-progress') return !closedIds.has(execId);
+    if (status === 'in-progress' || status === 'completed') return !closedIds.has(execId);
     return openIds.has(execId);
   }
 
   function toggleRoutine(execId: string, status: DisplayStatus) {
-    if (status === 'in-progress') {
+    if (status === 'in-progress' || status === 'completed') {
       setClosedIds((prev) => { const n = new Set(prev); n.has(execId) ? n.delete(execId) : n.add(execId); return n; });
     } else {
       setOpenIds((prev) => { const n = new Set(prev); n.has(execId) ? n.delete(execId) : n.add(execId); return n; });
@@ -308,7 +308,8 @@ export function TrackerTab() {
                         (e) => e.routineExecutionId === exec.id && e.exerciseId === ex.id,
                       ) ?? null;
                       const lastExec = executions
-                        .filter((e) => e.exerciseId === ex.id && e.completed && e.id !== exExec?.id)
+                        .filter((e) => e.exerciseId === ex.id && e.id !== exExec?.id &&
+                          (e.weight != null || e.seriesData?.some((s) => s.weight != null)))
                         .sort((a, b) => b.date.localeCompare(a.date))[0] ?? null;
                       return (
                         <ExerciseInlineForm

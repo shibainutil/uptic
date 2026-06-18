@@ -91,13 +91,18 @@ export function ExerciseInlineForm({ exercise, execution, lastExecution, routine
 
   // Weight placeholders: per-series from lastExecution
   const weightPlaceholders: string[] = Array.from({ length: seriesCount }, (_, i) => {
+    // First: use weight from an already-filled earlier series in this session
+    for (let j = i - 1; j >= 0; j--) {
+      if (isValidWeight(rows[j].weight)) return rows[j].weight;
+    }
+    // Fall back to last execution
     const src = lastExecution;
     if (!src) return '—';
     if (src.seriesData && src.seriesData.length > 0) {
-      const w = src.seriesData[i]?.weight;
+      const w = src.seriesData[i]?.weight ?? src.seriesData.find((s) => s.weight != null)?.weight;
       return w != null ? w.toFixed(1) : '—';
     }
-    return i === 0 && src.weight != null ? src.weight.toFixed(1) : '—';
+    return src.weight != null ? src.weight.toFixed(1) : '—';
   });
   const repsSuggestion = exercise.repsMin != null
     ? exercise.repsMax != null && exercise.repsMax !== exercise.repsMin
