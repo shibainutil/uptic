@@ -88,9 +88,11 @@ export function TrackerTab() {
     seriesDone: number; seriesTotal: number;
   } {
     const r = routines.find((x) => x.id === routineId);
-    // If routine was deleted, fall back to exercise IDs from logged executions
-    const exerciseIds = r?.exerciseIds ??
-      executions.filter((e) => e.routineExecutionId === execId).map((e) => e.exerciseId);
+    const loggedIds = executions
+      .filter((e) => e.routineExecutionId === execId)
+      .map((e) => e.exerciseId);
+    // Union: keep logged exercises even if removed from the routine
+    const exerciseIds = [...new Set([...(r?.exerciseIds ?? []), ...loggedIds])];
     const total = exerciseIds.length;
     const done = exerciseIds.filter((eid) =>
       executions.some((e) => e.routineExecutionId === execId && e.exerciseId === eid && e.completed),
@@ -255,8 +257,10 @@ export function TrackerTab() {
           status === 'in-progress' ? 'In Progress' :
           status === 'completed' ? 'Completed' : 'Failed';
 
-        const exerciseIds = routine?.exerciseIds ??
-          executions.filter((e) => e.routineExecutionId === exec.id).map((e) => e.exerciseId);
+        const loggedIds = executions
+          .filter((e) => e.routineExecutionId === exec.id)
+          .map((e) => e.exerciseId);
+        const exerciseIds = [...new Set([...(routine?.exerciseIds ?? []), ...loggedIds])];
         const routineExercises = exerciseIds
           .map((eid) => exercises.find((e) => e.id === eid))
           .filter((e): e is Exercise => Boolean(e));
