@@ -559,6 +559,7 @@ const styles = StyleSheet.create({
   cellPlaceholderText: {
     color: colors.textMuted,
     fontSize: font.md,
+    lineHeight: font.md,
     textAlign: 'center',
   },
   notesInput: {
