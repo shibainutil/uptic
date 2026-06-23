@@ -44,7 +44,10 @@
     "updates": {
       "url": "https://u.expo.dev/bedf55f1-d06f-47e3-9156-77e99ab6b710",
       "enabled": true,
-      "checkAutomatically": "ON_LOAD"
+      "checkAutomatically": "ON_LOAD",
+      "requestHeaders": {
+        "expo-channel-name": "master"
+      }
     },
     "runtimeVersion": {
       "policy": "appVersion"
