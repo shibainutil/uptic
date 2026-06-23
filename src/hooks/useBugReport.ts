@@ -1,10 +1,9 @@
 import { useRef, useState, useCallback } from 'react';
-import { PanResponder } from 'react-native';
+import { Gesture } from 'react-native-gesture-handler';
 import ViewShot from 'react-native-view-shot';
 import { usePathname } from 'expo-router';
 
 const SWIPE_DOWN_THRESHOLD = 80;
-const MIN_FINGERS = 3;
 
 interface BugReportState {
   visible: boolean;
@@ -32,17 +31,14 @@ export function useBugReport() {
     setState({ visible: false, screenshotUri: null });
   }, []);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponderCapture: (_, gs) => gs.numberActiveTouches >= MIN_FINGERS,
-      onMoveShouldSetPanResponderCapture: (_, gs) => gs.numberActiveTouches >= MIN_FINGERS,
-      onPanResponderRelease: (_, gs) => {
-        if (gs.dy > SWIPE_DOWN_THRESHOLD && Math.abs(gs.dx) < 60) {
-          trigger();
-        }
-      },
-    })
-  ).current;
+  const panGesture = Gesture.Pan()
+    .minPointers(3)
+    .runOnJS(true)
+    .onEnd((event) => {
+      if (event.translationY > SWIPE_DOWN_THRESHOLD && Math.abs(event.translationX) < 60) {
+        trigger();
+      }
+    });
 
-  return { viewShotRef, panResponder, state, dismiss, currentScreen: pathname };
+  return { viewShotRef, panGesture, state, dismiss, currentScreen: pathname };
 }
