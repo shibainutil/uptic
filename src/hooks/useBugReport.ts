@@ -40,7 +40,14 @@ export function useBugReport() {
         .maxPointers(5)
         .activeOffsetY(10)
         .runOnJS(true)
+        .onBegin((event) => {
+          console.log('[BugReport] gesture begin, pointers=', event.numberOfPointers);
+        })
+        .onStart(() => {
+          console.log('[BugReport] gesture ACTIVATED (3-finger pan recognized)');
+        })
         .onEnd((event) => {
+          console.log('[BugReport] gesture end, translationY=', event.translationY);
           if (event.translationY > SWIPE_DOWN_THRESHOLD) {
             trigger();
           }

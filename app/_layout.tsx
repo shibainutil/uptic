@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView, GestureDetector } from 'react-native-gesture-handler';
@@ -26,21 +26,23 @@ function RootNavigator() {
 
   return (
     <GestureDetector gesture={panGesture}>
-      <ViewShot ref={viewShotRef} style={styles.fill} options={{ format: 'jpg', quality: 0.8 }}>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="fitness/exercise/[id]" options={{ presentation: 'card' }} />
-          <Stack.Screen name="fitness/routine/[id]" options={{ presentation: 'card' }} />
-          <Stack.Screen name="fitness/routine-execution/[id]" options={{ presentation: 'card' }} />
-        </Stack>
-        <BugReportModal
-          visible={state.visible}
-          screenshotUri={state.screenshotUri}
-          currentScreen={currentScreen}
-          onClose={dismiss}
-        />
-      </ViewShot>
+      <View style={styles.fill} collapsable={false}>
+        <ViewShot ref={viewShotRef} style={styles.fill} options={{ format: 'jpg', quality: 0.8 }}>
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(auth)" />
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="fitness/exercise/[id]" options={{ presentation: 'card' }} />
+            <Stack.Screen name="fitness/routine/[id]" options={{ presentation: 'card' }} />
+            <Stack.Screen name="fitness/routine-execution/[id]" options={{ presentation: 'card' }} />
+          </Stack>
+          <BugReportModal
+            visible={state.visible}
+            screenshotUri={state.screenshotUri}
+            currentScreen={currentScreen}
+            onClose={dismiss}
+          />
+        </ViewShot>
+      </View>
     </GestureDetector>
   );
 }
