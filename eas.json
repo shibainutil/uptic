@@ -9,8 +9,10 @@
       "distribution": "internal",
       "channel": "beta",
       "android": {
-        "buildType": "apk",
-        "applicationId": "com.uptic.app.dev"
+        "buildType": "apk"
+      },
+      "env": {
+        "APP_VARIANT": "development"
       }
     },
     "beta": {
