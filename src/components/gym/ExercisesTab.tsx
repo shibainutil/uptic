@@ -33,14 +33,14 @@ interface FormState {
   repsMin: string;
   repsMax: string;
   durationMin: string;
-  description: string;
+  notes: string;
   params: ExerciseParam[];
 }
 
 const EMPTY_FORM: FormState = {
   name: '', type: 'strength', muscleGroup: 'Other',
   series: '3', repsMin: '8', repsMax: '10', durationMin: '30',
-  description: '', params: [],
+  notes: '', params: [],
 };
 
 async function uploadExerciseImage(userId: string, exerciseId: string, localUri: string): Promise<string> {
@@ -76,7 +76,7 @@ export function ExercisesTab() {
       repsMin: String(ex.repsMin ?? 8),
       repsMax: String(ex.repsMax ?? 10),
       durationMin: String(ex.durationMin ?? 30),
-      description: ex.description ?? '',
+      notes: ex.notes ?? ex.description ?? '',
       params: (ex.params ?? []).map((p) => ({ ...p })),
     });
     setPendingImage(null);
@@ -159,13 +159,16 @@ export function ExercisesTab() {
       const uid = user?.uid;
       const cleanParams = form.params
         .filter((p) => p.name.trim())
-        .map((p) => ({ id: p.id, name: p.name.trim(), unit: p.unit.trim(), required: p.required }));
+        .map((p) => ({
+          id: p.id, name: p.name.trim(), unit: p.unit.trim(), required: p.required,
+          ...(p.defaultValue?.trim() ? { defaultValue: p.defaultValue.trim() } : {}),
+        }));
 
       const base: Partial<Exercise> = {
         name: form.name.trim(),
         type: form.type,
         params: cleanParams,
-        description: form.description.trim() || undefined,
+        notes: form.notes.trim() || undefined,
       };
       if (form.type === 'strength') {
         base.muscleGroup = form.muscleGroup;
@@ -372,20 +375,28 @@ export function ExercisesTab() {
               <Text style={styles.paramHint}>Optional custom fields recorded per execution (e.g. Weight · kg).</Text>
             ) : null}
             {form.params.map((p) => (
-              <View key={p.id} style={styles.paramRow}>
-                <View style={styles.paramName}>
-                  <Input value={p.name} onChangeText={(v) => updateParam(p.id, { name: v })} placeholder="Name" />
+              <View key={p.id} style={styles.paramBlock}>
+                <View style={styles.paramRow}>
+                  <View style={styles.paramName}>
+                    <Input value={p.name} onChangeText={(v) => updateParam(p.id, { name: v })} placeholder="Name" />
+                  </View>
+                  <View style={styles.paramUnit}>
+                    <Input value={p.unit} onChangeText={(v) => updateParam(p.id, { unit: v })} placeholder="Unit" />
+                  </View>
+                  <View style={styles.paramReq}>
+                    <Toggle value={p.required} onChange={(v) => updateParam(p.id, { required: v })} />
+                    <Text style={styles.paramReqLabel}>Req</Text>
+                  </View>
+                  <Pressable onPress={() => removeParam(p.id)} hitSlop={8} style={styles.paramDelete}>
+                    <MaterialIcons name="close" size={18} color={colors.danger} />
+                  </Pressable>
                 </View>
-                <View style={styles.paramUnit}>
-                  <Input value={p.unit} onChangeText={(v) => updateParam(p.id, { unit: v })} placeholder="Unit" />
-                </View>
-                <View style={styles.paramReq}>
-                  <Toggle value={p.required} onChange={(v) => updateParam(p.id, { required: v })} />
-                  <Text style={styles.paramReqLabel}>Req</Text>
-                </View>
-                <Pressable onPress={() => removeParam(p.id)} hitSlop={8} style={styles.paramDelete}>
-                  <MaterialIcons name="close" size={18} color={colors.danger} />
-                </Pressable>
+                <Input
+                  label="Default value (placeholder in logger)"
+                  value={p.defaultValue ?? ''}
+                  onChangeText={(v) => updateParam(p.id, { defaultValue: v || undefined })}
+                  placeholder="—"
+                />
               </View>
             ))}
             <Pressable onPress={addParam} style={styles.addParamBtn}>
@@ -395,10 +406,10 @@ export function ExercisesTab() {
           </View>
 
           <Input
-            label="Description (optional)"
-            value={form.description}
-            onChangeText={(v) => setForm({ ...form, description: v })}
-            placeholder="Notes about this exercise"
+            label="Note (optional)"
+            value={form.notes}
+            onChangeText={(v) => setForm({ ...form, notes: v })}
+            placeholder="—"
           />
 
           <View style={styles.formRow}>
@@ -507,7 +518,8 @@ const styles = StyleSheet.create({
   flex1: { flex: 1 },
   row3: { flexDirection: 'row', gap: spacing.md },
   paramHint: { color: colors.textDim, fontSize: font.sm, marginBottom: spacing.xs },
-  paramRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, marginBottom: spacing.sm },
+  paramBlock: { gap: spacing.sm, marginBottom: spacing.sm },
+  paramRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm },
   paramName: { flex: 2 },
   paramUnit: { flex: 1 },
   paramReq: { alignItems: 'center', gap: 2 },

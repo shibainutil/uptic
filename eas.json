@@ -7,14 +7,15 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "channel": "preview",
+      "channel": "beta",
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "applicationId": "com.uptic.app.dev"
       }
     },
-    "preview": {
+    "beta": {
       "distribution": "internal",
-      "channel": "preview",
+      "channel": "beta",
       "android": {
         "buildType": "apk"
       }

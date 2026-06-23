@@ -5,6 +5,7 @@ export interface ExerciseParam {
   name: string;          // e.g. "Weight"
   unit: string;          // e.g. "kg"
   required: boolean;
+  defaultValue?: string; // shown as placeholder in logger
 }
 
 export interface Exercise {
@@ -18,7 +19,8 @@ export interface Exercise {
   repsMax?: number;              // strength, default 10
   durationMin?: number;          // cardio, default 30
   params: ExerciseParam[];       // default []
-  description?: string;
+  notes?: string;                // exercise-level note shown in logger
+  description?: string;          // legacy alias for notes; read-only
   category?: string;             // legacy read-only
   createdAt: string;
 }
@@ -47,7 +49,6 @@ export interface ExerciseExecution {
   seriesData?: SeriesEntry[];    // per-series reps + weight; replaces series/reps/weight for strength
   paramValues: ParamValue[];
   completed: boolean;
-  notes?: string;
   createdAt: string;
 }
 

@@ -6,7 +6,7 @@ import {
   useRoutines, useRoutineExecutions, useExercises, useExerciseExecutions,
 } from '../../store/gymStore';
 import { toISO, todayISO } from '../../lib/schedule';
-import { type Exercise, type RoutineExecution, exerciseMuscleGroup } from '../../types/gym';
+import { type Exercise, type RoutineExecution, exerciseMuscleGroup, exerciseType } from '../../types/gym';
 import { colors, font, spacing, radius } from '../../theme';
 import { ExerciseInlineForm } from './ExerciseInlineForm';
 import { DatePicker } from '../ui/DatePicker';
@@ -67,7 +67,7 @@ export function LoggerTab() {
   const { user } = useAuth();
   const { routines } = useRoutines(user?.uid);
   const { routineExecutions, reschedule, remove: removeRoutineExec } = useRoutineExecutions(user?.uid);
-  const { exercises } = useExercises(user?.uid);
+  const { exercises, update: updateExercise } = useExercises(user?.uid);
   const { executions, add, update, remove: removeExecExecution } = useExerciseExecutions(user?.uid);
 
   const today = new Date();
@@ -134,10 +134,11 @@ export function LoggerTab() {
     let seriesTotal = 0;
     for (const eid of exerciseIds) {
       const ex = exercises.find((e) => e.id === eid);
-      const count = ex?.series ?? 3;
+      const isCardio = ex ? exerciseType(ex) === 'cardio' : false;
+      const count = isCardio ? 1 : (ex?.series ?? 3);
       seriesTotal += count;
       const exExec = executions.find((e) => e.routineExecutionId === execId && e.exerciseId === eid);
-      if (exExec?.seriesData) {
+      if (!isCardio && exExec?.seriesData) {
         seriesDone += exExec.seriesData.filter((s) => s.reps != null && s.weight != null).length;
       } else if (exExec?.completed) {
         seriesDone += count;
@@ -323,12 +324,16 @@ export function LoggerTab() {
               .filter((e): e is Exercise => Boolean(e));
 
             const grouped = routineExercises.reduce<Record<string, Exercise[]>>((acc, ex) => {
-              const g = exerciseMuscleGroup(ex);
+              const g = exerciseType(ex) === 'cardio' ? 'Cardio' : exerciseMuscleGroup(ex);
               if (!acc[g]) acc[g] = [];
               acc[g].push(ex);
               return acc;
             }, {});
-            const groupNames = Object.keys(grouped).sort();
+            const groupNames = Object.keys(grouped).sort((a, b) => {
+              if (a === 'Cardio') return -1;
+              if (b === 'Cardio') return 1;
+              return a.localeCompare(b);
+            });
 
             return (
               <View
@@ -394,6 +399,7 @@ export function LoggerTab() {
                               lastExecution={lastExec}
                               routineExecutionId={exec.id}
                               dueDate={exec.dueDate}
+                              onUpdateExercise={async (data) => { await updateExercise(ex.id, data); }}
                               onSave={async (data, currentExecId) => {
                                 if (data === null) {
                                   const idToDelete = currentExecId ?? executions.find(

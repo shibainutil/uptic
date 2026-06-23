@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Slot, usePathname, useRouter } from 'expo-router';
 import {
   View, Text, TouchableOpacity, TouchableWithoutFeedback,
@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Updates from 'expo-updates';
 import { useAuth } from '../../src/context/AuthContext';
 import { colors, font, spacing, radius } from '../../src/theme';
 
@@ -23,12 +24,35 @@ const TABS: { name: string; title: string; icon: IconName }[] = [
   { name: 'fitness',   title: 'Fitness',   icon: 'fitness-center' },
 ];
 
+function useUpdateAvailable() {
+  const [updateReady, setUpdateReady] = useState(false);
+
+  useEffect(() => {
+    // expo-updates is a no-op in dev client / Expo Go — guard against it
+    if (__DEV__ || !Updates.isEnabled) return;
+    if (Updates.isUpdateAvailable) {
+      setUpdateReady(true);
+    }
+  }, [Updates.isUpdateAvailable]);
+
+  async function applyUpdate() {
+    try {
+      await Updates.reloadAsync();
+    } catch {
+      // if reload fails, silently ignore — next cold start will pick it up
+    }
+  }
+
+  return { updateReady, applyUpdate };
+}
+
 export default function TabsLayout() {
   const pathname = usePathname();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const { updateReady, applyUpdate } = useUpdateAvailable();
 
   const activeTab = TABS.find((t) => pathname === `/${t.name}` || pathname.startsWith(`/${t.name}/`)) ?? TABS[0];
 
@@ -51,8 +75,16 @@ export default function TabsLayout() {
           <Text style={styles.activeLabel}>{activeTab.title}</Text>
         </TouchableOpacity>
 
-        {/* Right: settings + profile */}
+        {/* Right: update indicator + settings + profile */}
         <View style={styles.rightButtons}>
+          {updateReady && (
+            <TouchableOpacity style={styles.iconBtn} onPress={applyUpdate} activeOpacity={0.7}>
+              <View style={styles.updateBadgeWrap}>
+                <MaterialIcons name="system-update" size={24} color={colors.accent} />
+                <View style={styles.updateDot} />
+              </View>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.iconBtn} activeOpacity={0.7}>
             <MaterialIcons name="settings" size={24} color={colors.textMuted} />
           </TouchableOpacity>
@@ -132,6 +164,20 @@ const styles = StyleSheet.create({
   },
   iconBtn: {
     padding: spacing.xs,
+  },
+  updateBadgeWrap: {
+    position: 'relative',
+  },
+  updateDot: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.danger,
+    borderWidth: 1.5,
+    borderColor: colors.surface,
   },
   profileBtn: {
     width: 32,
