@@ -34,15 +34,10 @@ export function useBugReport() {
 
   const panResponder = useRef(
     PanResponder.create({
-      // claim the responder only for 3-finger touches
-      onMoveShouldSetPanResponder: (_, gs) => gs.numberActiveTouches === MIN_FINGERS,
-      onMoveShouldSetPanResponderCapture: (_, gs) => gs.numberActiveTouches === MIN_FINGERS,
+      onStartShouldSetPanResponderCapture: (_, gs) => gs.numberActiveTouches >= MIN_FINGERS,
+      onMoveShouldSetPanResponderCapture: (_, gs) => gs.numberActiveTouches >= MIN_FINGERS,
       onPanResponderRelease: (_, gs) => {
-        if (
-          gs.numberActiveTouches === 0 &&
-          gs.dy > SWIPE_DOWN_THRESHOLD &&
-          Math.abs(gs.dx) < 60
-        ) {
+        if (gs.dy > SWIPE_DOWN_THRESHOLD && Math.abs(gs.dx) < 60) {
           trigger();
         }
       },
