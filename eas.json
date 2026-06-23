@@ -7,7 +7,7 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "channel": "beta",
+      "channel": "development",
       "android": {
         "buildType": "apk"
       },
@@ -15,7 +15,7 @@
         "APP_VARIANT": "development"
       }
     },
-    "beta": {
+    "master": {
       "distribution": "internal",
       "channel": "master",
       "android": {
