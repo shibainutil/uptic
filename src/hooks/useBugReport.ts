@@ -1,5 +1,5 @@
-import { useRef, useState, useCallback, useMemo } from 'react';
-import { Gesture } from 'react-native-gesture-handler';
+import { useRef, useState, useCallback } from 'react';
+import { PanResponder } from 'react-native';
 import ViewShot from 'react-native-view-shot';
 import { usePathname } from 'expo-router';
 
@@ -32,20 +32,22 @@ export function useBugReport() {
     setState({ visible: false, screenshotUri: null });
   }, []);
 
-  const gesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .minPointers(MIN_FINGERS)
-        .maxPointers(MIN_FINGERS)
-        .onEnd((e) => {
-          'worklet';
-          if (e.translationY > SWIPE_DOWN_THRESHOLD && Math.abs(e.translationX) < 60) {
-            trigger();
-          }
-        })
-        .runOnJS(true),
-    [trigger]
-  );
+  const panResponder = useRef(
+    PanResponder.create({
+      // claim the responder only for 3-finger touches
+      onMoveShouldSetPanResponder: (_, gs) => gs.numberActiveTouches === MIN_FINGERS,
+      onMoveShouldSetPanResponderCapture: (_, gs) => gs.numberActiveTouches === MIN_FINGERS,
+      onPanResponderRelease: (_, gs) => {
+        if (
+          gs.numberActiveTouches === 0 &&
+          gs.dy > SWIPE_DOWN_THRESHOLD &&
+          Math.abs(gs.dx) < 60
+        ) {
+          trigger();
+        }
+      },
+    })
+  ).current;
 
-  return { viewShotRef, gesture, state, dismiss, currentScreen: pathname };
+  return { viewShotRef, panResponder, state, dismiss, currentScreen: pathname };
 }
