@@ -1,9 +1,9 @@
-import { useRef, useState, useCallback } from 'react';
-import { GestureResponderEvent } from 'react-native';
-import ViewShot from 'react-native-view-shot';
+import { useRef, useState, useCallback, useMemo } from 'react';
+import { Gesture } from 'react-native-gesture-handler';
+import ViewShot, { ViewShotRef } from 'react-native-view-shot';
 import { usePathname } from 'expo-router';
 
-const SWIPE_DOWN_THRESHOLD = 60;
+const SWIPE_DOWN_THRESHOLD = 50;
 const MIN_FINGERS = 3;
 
 interface BugReportState {
@@ -11,12 +11,12 @@ interface BugReportState {
   screenshotUri: string | null;
 }
 
-function averageY(touches: { pageY: number }[]): number {
-  return touches.reduce((sum, t) => sum + t.pageY, 0) / touches.length;
+function averageY(touches: { absoluteY: number }[]): number {
+  return touches.reduce((sum, t) => sum + t.absoluteY, 0) / touches.length;
 }
 
 export function useBugReport() {
-  const viewShotRef = useRef<ViewShot>(null);
+  const viewShotRef = useRef<ViewShotRef>(null);
   const pathname = usePathname();
   const [state, setState] = useState<BugReportState>({ visible: false, screenshotUri: null });
 
@@ -30,7 +30,7 @@ export function useBugReport() {
         uri = await viewShotRef.current.capture();
       }
     } catch {
-      // screenshot optional — proceed without it
+      // screenshot optional
     }
     setState({ visible: true, screenshotUri: uri });
   }, []);
@@ -39,42 +39,45 @@ export function useBugReport() {
     setState({ visible: false, screenshotUri: null });
   }, []);
 
-  // Raw RN touch events instead of a gesture-handler Pan. RNGH's Pan loses
-  // arbitration to the child ScrollViews (it gets cancelled ~2ms after the 3rd
-  // finger lands, before any move), and the manualActivation workaround depends
-  // on worklets that aren't reliable here (Reanimated 4, no babel config). These
-  // onTouch* events fire on the JS thread and bubble to this ancestor view even
-  // while a descendant ScrollView is the responder — no arbitration involved.
-  const onTouchStart = useCallback((e: GestureResponderEvent) => {
-    const touches = e.nativeEvent.touches;
-    console.log('[BugReport] touchStart n=', touches.length);
-    if (touches.length >= MIN_FINGERS && startY.current === null) {
-      startY.current = averageY(touches);
-      fired.current = false;
-      console.log('[BugReport] armed, startY=', Math.round(startY.current));
-    }
-  }, []);
+  // Gesture.Manual() + stateManager.begin() is the key:
+  //   - Pan().manualActivation(true) stays in UNDETERMINED until activated, and
+  //     RNGH does not deliver onTouchesMove in UNDETERMINED state (observed in logs:
+  //     touchesDown fires but touchesMove never does).
+  //   - Manual() + begin() explicitly transitions to BEGAN, which enables move delivery.
+  const gesture = useMemo(
+    () =>
+      Gesture.Manual()
+        .runOnJS(true)
+        .onTouchesDown((event, stateManager) => {
+          console.log('[BugReport] touchesDown n=', event.numberOfTouches);
+          if (event.numberOfTouches >= MIN_FINGERS && startY.current === null) {
+            startY.current = averageY(event.allTouches);
+            fired.current = false;
+            stateManager.begin(); // transition to BEGAN so onTouchesMove starts firing
+            console.log('[BugReport] armed + began, startY=', Math.round(startY.current));
+          }
+        })
+        .onTouchesMove((event, stateManager) => {
+          if (fired.current || startY.current === null) return;
+          if (event.numberOfTouches < MIN_FINGERS) return;
+          const dy = averageY(event.allTouches) - startY.current;
+          console.log('[BugReport] move n=', event.numberOfTouches, 'dy=', Math.round(dy));
+          if (dy > SWIPE_DOWN_THRESHOLD) {
+            fired.current = true;
+            stateManager.activate();
+            console.log('[BugReport] FIRING');
+            trigger();
+          }
+        })
+        .onTouchesUp((event, stateManager) => {
+          if (event.numberOfTouches < MIN_FINGERS) {
+            stateManager.end();
+            startY.current = null;
+            fired.current = false;
+          }
+        }),
+    [trigger]
+  );
 
-  const onTouchMove = useCallback((e: GestureResponderEvent) => {
-    const touches = e.nativeEvent.touches;
-    if (fired.current || startY.current === null || touches.length < MIN_FINGERS) return;
-    const dy = averageY(touches) - startY.current;
-    console.log('[BugReport] move n=', touches.length, 'dy=', Math.round(dy));
-    if (dy > SWIPE_DOWN_THRESHOLD) {
-      fired.current = true;
-      console.log('[BugReport] FIRING trigger');
-      trigger();
-    }
-  }, [trigger]);
-
-  const onTouchEnd = useCallback((e: GestureResponderEvent) => {
-    if (e.nativeEvent.touches.length < MIN_FINGERS) {
-      startY.current = null;
-      fired.current = false;
-    }
-  }, []);
-
-  const rootTouchHandlers = { onTouchStart, onTouchMove, onTouchEnd };
-
-  return { viewShotRef, rootTouchHandlers, state, dismiss, currentScreen: pathname };
+  return { viewShotRef, gesture, state, dismiss, currentScreen: pathname };
 }
