@@ -70,23 +70,18 @@ export function LoggerTab() {
   const { exercises } = useExercises(user?.uid);
   const { executions, add, update, remove: removeExecExecution } = useExerciseExecutions(user?.uid);
 
-  // Auto-complete routine executions where every exercise has been logged,
-  // even if the reconciler previously marked them failed (grace period elapsed).
-  const completingRef = useRef<Set<string>>(new Set());
+  // Write 'completed' to Firestore when every exercise in a routine execution has
+  // been logged, even if the reconciler previously marked it 'failed'.
   useEffect(() => {
     for (const exec of routineExecutions) {
-      if (exec.status === 'completed' || completingRef.current.has(exec.id)) continue;
+      if (exec.status === 'completed') continue;
       const r = routines.find((x) => x.id === exec.routineId);
-      const loggedIds = executions.filter((e) => e.routineExecutionId === exec.id).map((e) => e.exerciseId);
-      const exerciseIds = [...new Set([...(r?.exerciseIds ?? []), ...loggedIds])];
+      const exerciseIds = r?.exerciseIds ?? [];
       if (exerciseIds.length === 0) continue;
       const allDone = exerciseIds.every((eid) =>
         executions.some((e) => e.routineExecutionId === exec.id && e.exerciseId === eid && e.completed),
       );
-      if (allDone) {
-        completingRef.current.add(exec.id);
-        setStatus(exec.id, 'completed').catch(() => completingRef.current.delete(exec.id));
-      }
+      if (allDone) setStatus(exec.id, 'completed').catch(() => {});
     }
   }, [routineExecutions, executions, routines, setStatus]);
 
@@ -167,10 +162,10 @@ export function LoggerTab() {
   }
 
   function getDisplayStatus(exec: { id: string; routineId: string; status: string; dueDate: string }): DisplayStatus {
+    if (exec.status === 'completed') return 'completed';
+    if (exec.status === 'failed') return 'failed';
     const { done, total, anyLogged } = progressFor(exec.id, exec.routineId);
     if (done === total && total > 0) return 'completed';
-    if (exec.status === 'failed') return 'failed';
-    if (exec.status === 'completed') return 'completed';
     if (anyLogged > 0) return 'in-progress';
     if (exec.dueDate < todayISO()) return 'overdue';
     return 'pending';
