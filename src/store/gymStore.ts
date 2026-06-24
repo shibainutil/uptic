@@ -177,19 +177,25 @@ export function useRoutineExecutions(userId: string | null | undefined) {
     });
   }, [userId]);
 
+  // Reschedule by moving the dueDate only. The doc id stays anchored to the
+  // original scheduled occurrence so (a) the reconciler doesn't regenerate the
+  // original date and (b) logged exercise executions keep their routineExecutionId.
   const reschedule = useCallback(async (exec: RoutineExecution, newDate: string) => {
-    const newId = `${exec.routineId}_${newDate}`;
-    const batch = writeBatch(db);
-    batch.delete(userDoc(userId!, 'routineExecutions', exec.id));
-    batch.set(userDoc(userId!, 'routineExecutions', newId), { ...exec, id: newId, dueDate: newDate });
-    await batch.commit();
+    await updateDoc(userDoc(userId!, 'routineExecutions', exec.id), { dueDate: newDate });
+  }, [userId]);
+
+  // Cancel = tombstone. Hard-deleting would let the reconciler regenerate the
+  // occurrence (its scheduled date would have no doc); keeping a 'cancelled'
+  // doc preserves the id so it stays gone.
+  const cancel = useCallback(async (id: string) => {
+    await updateDoc(userDoc(userId!, 'routineExecutions', id), { status: 'cancelled', completedAt: null });
   }, [userId]);
 
   const remove = useCallback(async (id: string) => {
     await deleteDoc(userDoc(userId!, 'routineExecutions', id));
   }, [userId]);
 
-  return { routineExecutions, loaded, setStatus, reschedule, remove };
+  return { routineExecutions, loaded, setStatus, reschedule, cancel, remove };
 }
 
 /**

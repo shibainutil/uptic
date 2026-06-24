@@ -27,6 +27,7 @@ const STATUS_COLOR: Record<RoutineExecution['status'], string> = {
   pending: colors.textMuted,
   completed: '#22C55E',
   failed: colors.danger,
+  cancelled: colors.textMuted,
 };
 
 export default function RoutineEditScreen() {

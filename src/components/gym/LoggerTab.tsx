@@ -9,7 +9,7 @@ import { toISO, todayISO } from '../../lib/schedule';
 import { type Exercise, type RoutineExecution, exerciseMuscleGroup } from '../../types/gym';
 import { colors, font, spacing, radius } from '../../theme';
 import { ExerciseInlineForm } from './ExerciseInlineForm';
-import { DatePicker } from '../ui/DatePicker';
+import { CalendarModal } from '../ui/CalendarModal';
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MONTH_NAMES = [
@@ -66,7 +66,7 @@ function buildMonthGrid(year: number, month: number): (Date | null)[] {
 export function LoggerTab() {
   const { user } = useAuth();
   const { routines } = useRoutines(user?.uid);
-  const { routineExecutions, setStatus, reschedule, remove: removeRoutineExec } = useRoutineExecutions(user?.uid);
+  const { routineExecutions, setStatus, reschedule, cancel } = useRoutineExecutions(user?.uid);
   const { exercises } = useExercises(user?.uid);
   const { executions, add, update, remove: removeExecExecution } = useExerciseExecutions(user?.uid);
 
@@ -74,7 +74,7 @@ export function LoggerTab() {
   // been logged, even if the reconciler previously marked it 'failed'.
   useEffect(() => {
     for (const exec of routineExecutions) {
-      if (exec.status === 'completed') continue;
+      if (exec.status === 'completed' || exec.status === 'cancelled') continue;
       const r = routines.find((x) => x.id === exec.routineId);
       const exerciseIds = r?.exerciseIds ?? [];
       if (exerciseIds.length === 0) continue;
@@ -200,7 +200,9 @@ export function LoggerTab() {
       { text: 'Delete', style: 'destructive', onPress: async () => {
         const toRemove = executions.filter((e) => e.routineExecutionId === exec.id);
         await Promise.allSettled(toRemove.map((e) => removeExecExecution(e.id)));
-        await removeRoutineExec(exec.id);
+        // Tombstone rather than hard-delete: the reconciler would otherwise
+        // regenerate this occurrence from the routine's schedule.
+        await cancel(exec.id);
       }},
     ]);
   }
@@ -210,6 +212,7 @@ export function LoggerTab() {
     const priority: Record<string, number> = { pending: 4, overdue: 3, failed: 2, completed: 1 };
     const map = new Map<string, 'pending' | 'overdue' | 'completed' | 'failed'>();
     for (const ex of routineExecutions) {
+      if (ex.status === 'cancelled') continue;
       const dotStatus: 'pending' | 'overdue' | 'completed' | 'failed' =
         ex.status === 'pending' ? (ex.dueDate < today ? 'overdue' : 'pending') :
         ex.status === 'failed' ? 'failed' : 'completed';
@@ -229,6 +232,7 @@ export function LoggerTab() {
   const weekStartISO = toISO(weekStart);
 
   const dueRoutines = routineExecutions
+    .filter((e) => e.status !== 'cancelled')
     .filter((e) => weekView
       ? e.dueDate >= weekStartISO && e.dueDate <= weekEndISO
       : (() => { const d = new Date(e.dueDate); return d.getFullYear() === viewYear && d.getMonth() === viewMonth; })())
@@ -460,22 +464,17 @@ export function LoggerTab() {
       </RNModal>
 
       {/* ── Reschedule modal ─────────────────────────────────────────── */}
-      <RNModal visible={reschedulingExec !== null} transparent animationType="fade" onRequestClose={() => setReschedulingExec(null)}>
-        <Pressable style={styles.menuBackdrop} onPress={() => setReschedulingExec(null)}>
-          <Pressable style={styles.rescheduleCard} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.menuTitle}>Move to</Text>
-            <DatePicker
-              value={reschedulingExec?.dueDate ?? todayISO()}
-              onChange={async (newDate) => {
-                if (reschedulingExec && newDate !== reschedulingExec.dueDate) {
-                  await reschedule(reschedulingExec, newDate);
-                }
-                setReschedulingExec(null);
-              }}
-            />
-          </Pressable>
-        </Pressable>
-      </RNModal>
+      <CalendarModal
+        title="Reschedule to"
+        visible={reschedulingExec !== null}
+        value={reschedulingExec?.dueDate ?? todayISO()}
+        onSelect={async (newDate) => {
+          const exec = reschedulingExec;
+          setReschedulingExec(null);
+          if (exec && newDate !== exec.dueDate) await reschedule(exec, newDate);
+        }}
+        onClose={() => setReschedulingExec(null)}
+      />
 
     </ScrollView>
   );
@@ -566,15 +565,6 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   menuItemText: { color: colors.text, fontSize: font.sm },
-  rescheduleCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    width: '100%',
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
   titleCol: { flex: 1, gap: 2 },
   titleRow: {
     flexDirection: 'row',
