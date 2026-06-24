@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, Pressable, ScrollView, StyleSheet, Alert, Modal as RNModal } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -66,9 +66,29 @@ function buildMonthGrid(year: number, month: number): (Date | null)[] {
 export function LoggerTab() {
   const { user } = useAuth();
   const { routines } = useRoutines(user?.uid);
-  const { routineExecutions, reschedule, remove: removeRoutineExec } = useRoutineExecutions(user?.uid);
+  const { routineExecutions, setStatus, reschedule, remove: removeRoutineExec } = useRoutineExecutions(user?.uid);
   const { exercises } = useExercises(user?.uid);
   const { executions, add, update, remove: removeExecExecution } = useExerciseExecutions(user?.uid);
+
+  // Auto-complete routine executions where every exercise has been logged,
+  // even if the reconciler previously marked them failed (grace period elapsed).
+  const completingRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const exec of routineExecutions) {
+      if (exec.status === 'completed' || completingRef.current.has(exec.id)) continue;
+      const r = routines.find((x) => x.id === exec.routineId);
+      const loggedIds = executions.filter((e) => e.routineExecutionId === exec.id).map((e) => e.exerciseId);
+      const exerciseIds = [...new Set([...(r?.exerciseIds ?? []), ...loggedIds])];
+      if (exerciseIds.length === 0) continue;
+      const allDone = exerciseIds.every((eid) =>
+        executions.some((e) => e.routineExecutionId === exec.id && e.exerciseId === eid && e.completed),
+      );
+      if (allDone) {
+        completingRef.current.add(exec.id);
+        setStatus(exec.id, 'completed').catch(() => completingRef.current.delete(exec.id));
+      }
+    }
+  }, [routineExecutions, executions, routines, setStatus]);
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -147,10 +167,10 @@ export function LoggerTab() {
   }
 
   function getDisplayStatus(exec: { id: string; routineId: string; status: string; dueDate: string }): DisplayStatus {
-    if (exec.status === 'failed') return 'failed';
-    if (exec.status === 'completed') return 'completed';
     const { done, total, anyLogged } = progressFor(exec.id, exec.routineId);
     if (done === total && total > 0) return 'completed';
+    if (exec.status === 'failed') return 'failed';
+    if (exec.status === 'completed') return 'completed';
     if (anyLogged > 0) return 'in-progress';
     if (exec.dueDate < todayISO()) return 'overdue';
     return 'pending';
