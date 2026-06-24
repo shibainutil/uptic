@@ -200,11 +200,12 @@ export function useRoutineReconcile(
   userId: string | null | undefined,
   routines: Routine[],
   routineExecutions: RoutineExecution[],
+  executionsLoaded: boolean,
 ) {
   const running = useRef(false);
 
   useEffect(() => {
-    if (!userId || routines.length === 0 || running.current) return;
+    if (!userId || routines.length === 0 || !executionsLoaded || running.current) return;
     const { toCreate, toFail } = reconcileRoutineExecutions(routines, routineExecutions, todayISO());
     if (toCreate.length === 0 && toFail.length === 0) return;
 
@@ -216,5 +217,5 @@ export function useRoutineReconcile(
       .commit()
       .catch(() => { /* surfaced on next reconcile */ })
       .finally(() => { running.current = false; });
-  }, [userId, routines, routineExecutions]);
+  }, [userId, routines, routineExecutions, executionsLoaded]);
 }
