@@ -1,8 +1,10 @@
+import * as FileSystem from 'expo-file-system';
+
 const NOTION_API_URL = 'https://api.notion.com/v1/pages';
+const NOTION_FILE_UPLOAD_URL = 'https://api.notion.com/v1/file-uploads';
 const NOTION_VERSION = '2022-06-28';
 const DATABASE_ID = '388c5e96-9f25-80e3-a846-c55945bf4651';
 
-// Set EXPO_PUBLIC_NOTION_TOKEN in your .env or app.config.js
 const TOKEN = process.env.EXPO_PUBLIC_NOTION_TOKEN ?? '';
 
 export type BugSeverity = 'Critical' | 'High' | 'Medium' | 'Low';
@@ -12,10 +14,63 @@ export interface BugReportPayload {
   description: string;
   screen: string;
   severity: BugSeverity;
+  capturedUri?: string;
+  mediaType?: 'image' | 'video';
+}
+
+async function uploadFileToNotion(uri: string, mediaType: 'image' | 'video'): Promise<string | null> {
+  const isImage = mediaType === 'image';
+  const filename = isImage ? `screenshot-${Date.now()}.jpg` : `recording-${Date.now()}.mp4`;
+  const contentType = isImage ? 'image/jpeg' : 'video/mp4';
+
+  // Step 1: Init the upload — Notion returns a presigned S3 URL
+  const initRes = await fetch(NOTION_FILE_UPLOAD_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${TOKEN}`,
+      'Content-Type': 'application/json',
+      'Notion-Version': NOTION_VERSION,
+    },
+    body: JSON.stringify({ name: filename, content_type: contentType }),
+  });
+
+  if (!initRes.ok) return null;
+  const { id, upload_url } = await initRes.json();
+  if (!id || !upload_url) return null;
+
+  // Step 2: PUT binary to the presigned URL
+  const uploadRes = await FileSystem.uploadAsync(upload_url, uri, {
+    httpMethod: 'PUT',
+    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+    headers: { 'Content-Type': contentType },
+  });
+
+  if (uploadRes.status >= 400) return null;
+  return id;
 }
 
 export async function fileBugReport(payload: BugReportPayload): Promise<void> {
   if (!TOKEN) throw new Error('EXPO_PUBLIC_NOTION_TOKEN is not set');
+
+  // Upload media to Notion first (on submit, not on capture)
+  let fileUploadId: string | null = null;
+  if (payload.capturedUri && payload.mediaType) {
+    try {
+      fileUploadId = await uploadFileToNotion(payload.capturedUri, payload.mediaType);
+    } catch {
+      // Proceed without attachment — report still goes through
+    }
+  }
+
+  const mediaBlock = fileUploadId && payload.mediaType
+    ? [{
+        type: payload.mediaType,
+        [payload.mediaType]: {
+          type: 'file_upload',
+          file_upload: { id: fileUploadId },
+        },
+      }]
+    : [];
 
   const body = {
     parent: { database_id: DATABASE_ID },
@@ -26,6 +81,7 @@ export async function fileBugReport(payload: BugReportPayload): Promise<void> {
       Status: { select: { name: 'Open' } },
       Severity: { select: { name: payload.severity } },
     },
+    children: mediaBlock,
   };
 
   const res = await fetch(NOTION_API_URL, {

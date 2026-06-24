@@ -1,18 +1,14 @@
 import { useEffect } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
-import ViewShot from 'react-native-view-shot';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider, useAuth } from '../src/context/AuthContext';
-import { useBugReport } from '../src/hooks/useBugReport';
-import BugReportModal from '../src/components/BugReportModal';
 
 function RootNavigator() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const segments = useSegments();
-  const { viewShotRef, gesture, state, dismiss, currentScreen } = useBugReport();
 
   useEffect(() => {
     if (loading) return;
@@ -24,29 +20,14 @@ function RootNavigator() {
     }
   }, [user, loading, segments]);
 
-  // GestureDetector's direct child MUST be a single host <View> so RNGH can bind the
-  // handler to a real native view. ViewShot (class component) and Stack (navigator)
-  // are NOT host views — wrapping them is why earlier attempts never fired.
   return (
-    <GestureDetector gesture={gesture}>
-      <View style={styles.fill} collapsable={false}>
-        <ViewShot ref={viewShotRef} style={styles.fill} options={{ format: 'jpg', quality: 0.8 }}>
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(auth)" />
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="fitness/exercise/[id]" options={{ presentation: 'card' }} />
-            <Stack.Screen name="fitness/routine/[id]" options={{ presentation: 'card' }} />
-            <Stack.Screen name="fitness/routine-execution/[id]" options={{ presentation: 'card' }} />
-          </Stack>
-          <BugReportModal
-            visible={state.visible}
-            screenshotUri={state.screenshotUri}
-            currentScreen={currentScreen}
-            onClose={dismiss}
-          />
-        </ViewShot>
-      </View>
-    </GestureDetector>
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="(auth)" />
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="fitness/exercise/[id]" options={{ presentation: 'card' }} />
+      <Stack.Screen name="fitness/routine/[id]" options={{ presentation: 'card' }} />
+      <Stack.Screen name="fitness/routine-execution/[id]" options={{ presentation: 'card' }} />
+    </Stack>
   );
 }
 

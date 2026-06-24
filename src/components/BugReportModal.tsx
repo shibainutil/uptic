@@ -18,12 +18,13 @@ const SEVERITY_COLOR: Record<BugSeverity, string> = {
 
 interface Props {
   visible: boolean;
-  screenshotUri: string | null;
+  capturedUri: string | null;
+  capturedType: 'image' | 'video' | null;
   currentScreen: string;
   onClose: () => void;
 }
 
-export default function BugReportModal({ visible, screenshotUri, currentScreen, onClose }: Props) {
+export default function BugReportModal({ visible, capturedUri, capturedType, currentScreen, onClose }: Props) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [severity, setSeverity] = useState<BugSeverity>('Medium');
@@ -55,6 +56,8 @@ export default function BugReportModal({ visible, screenshotUri, currentScreen, 
         description: description.trim(),
         screen: currentScreen,
         severity,
+        capturedUri: capturedUri ?? undefined,
+        mediaType: capturedType ?? undefined,
       });
       setSubmitted(true);
       setTimeout(handleClose, 1500);
@@ -82,8 +85,15 @@ export default function BugReportModal({ visible, screenshotUri, currentScreen, 
             </View>
           ) : (
             <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-              {screenshotUri && (
-                <Image source={{ uri: screenshotUri }} style={styles.screenshot} resizeMode="contain" />
+              {/* Media preview */}
+              {capturedType === 'image' && capturedUri && (
+                <Image source={{ uri: capturedUri }} style={styles.screenshot} resizeMode="contain" />
+              )}
+              {capturedType === 'video' && (
+                <View style={styles.videoPreview}>
+                  <MaterialIcons name="videocam" size={32} color={colors.accent} />
+                  <Text style={styles.videoPreviewText}>Screen recording attached</Text>
+                </View>
               )}
 
               <Text style={styles.label}>Screen</Text>
@@ -196,6 +206,20 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     marginBottom: spacing.sm,
     backgroundColor: colors.surface2,
+  },
+  videoPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.surface2,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  videoPreviewText: {
+    color: colors.text,
+    fontSize: font.md,
+    fontWeight: '500',
   },
   label: {
     color: colors.textMuted,
