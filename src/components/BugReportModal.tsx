@@ -21,10 +21,11 @@ interface Props {
   capturedUri: string | null;
   capturedType: 'image' | 'video' | null;
   currentScreen: string;
+  reporterEmail: string;
   onClose: () => void;
 }
 
-export default function BugReportModal({ visible, capturedUri, capturedType, currentScreen, onClose }: Props) {
+export default function BugReportModal({ visible, capturedUri, capturedType, currentScreen, reporterEmail, onClose }: Props) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [severity, setSeverity] = useState<BugSeverity>('Medium');
@@ -56,6 +57,7 @@ export default function BugReportModal({ visible, capturedUri, capturedType, cur
         description: description.trim(),
         screen: currentScreen,
         severity,
+        reporter: reporterEmail,
         capturedUri: capturedUri ?? undefined,
         mediaType: capturedType ?? undefined,
       });

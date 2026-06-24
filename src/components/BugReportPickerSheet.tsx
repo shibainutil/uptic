@@ -6,6 +6,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { captureScreen } from 'react-native-view-shot';
 import { usePathname } from 'expo-router';
+import { useAuth } from '../context/AuthContext';
 import { MaterialIcons } from '@expo/vector-icons';
 import { colors, spacing, radius, font } from '../theme';
 import BugReportModal from './BugReportModal';
@@ -19,6 +20,7 @@ type Phase = 'idle' | 'recording-instructions' | 'capturing' | 'report-ready';
 
 export default function BugReportPickerSheet({ visible, onClose }: Props) {
   const pathname = usePathname();
+  const { user } = useAuth();
   const [phase, setPhase] = useState<Phase>('idle');
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
   const [capturedType, setCapturedType] = useState<'image' | 'video' | null>(null);
@@ -88,6 +90,7 @@ export default function BugReportPickerSheet({ visible, onClose }: Props) {
         capturedUri={capturedUri}
         capturedType={capturedType}
         currentScreen={pathname}
+        reporterEmail={user?.email ?? ''}
         onClose={handleDismissReport}
       />
     );

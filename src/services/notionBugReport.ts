@@ -14,8 +14,14 @@ export interface BugReportPayload {
   description: string;
   screen: string;
   severity: BugSeverity;
+  reporter: string;
   capturedUri?: string;
   mediaType?: 'image' | 'video';
+}
+
+function pathnameToModule(pathname: string): string {
+  const segment = pathname.split('/').filter(Boolean)[0] ?? '';
+  return segment.charAt(0).toUpperCase() + segment.slice(1);
 }
 
 async function uploadFileToNotion(uri: string, mediaType: 'image' | 'video'): Promise<string | null> {
@@ -77,9 +83,10 @@ export async function fileBugReport(payload: BugReportPayload): Promise<void> {
     properties: {
       Name: { title: [{ text: { content: payload.title } }] },
       Description: { rich_text: [{ text: { content: payload.description } }] },
-      Screen: { rich_text: [{ text: { content: payload.screen } }] },
-      Status: { select: { name: 'Open' } },
+      Module: { select: { name: pathnameToModule(payload.screen) } },
+      Status: { select: { name: 'New' } },
       Severity: { select: { name: payload.severity } },
+      Reporter: { email: payload.reporter || null },
     },
     children: mediaBlock,
   };
