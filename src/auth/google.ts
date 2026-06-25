@@ -48,20 +48,21 @@ export async function signInWithGoogle(): Promise<void> {
     const idToken: string | undefined = response?.data?.idToken ?? response?.idToken;
     if (!idToken) throw new Error('Google did not return an ID token.');
 
-    const credential = GoogleAuthProvider.credential(idToken);
-    await signInWithCredential(auth, credential);
-
-    // Also sign in to the native Firebase instance so @react-native-firebase/storage is authenticated.
+    // Sign into native Firebase FIRST so onAuthStateChanged (web) sees nativeAuth.currentUser
+    // already set when it fires — otherwise the guard in AuthContext signs us back out.
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { getAuth, signInWithCredential: nativeSignInWithCredential, GoogleAuthProvider: NativeGoogleAuthProvider } = require('@react-native-firebase/auth');
+      const { getAuth, signInWithCredential: nativeSignIn, GoogleAuthProvider: NativeGA } = require('@react-native-firebase/auth');
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { getApp } = require('@react-native-firebase/app');
-      const nativeCred = NativeGoogleAuthProvider.credential(idToken);
-      await nativeSignInWithCredential(getAuth(getApp()), nativeCred);
+      const nativeCred = NativeGA.credential(idToken);
+      await nativeSignIn(getAuth(getApp()), nativeCred);
     } catch {
-      // Native auth module not compiled into this build yet — safe until rebuild installs it.
+      // Native auth module not compiled into this build yet — safe until rebuild.
     }
+
+    const credential = GoogleAuthProvider.credential(idToken);
+    await signInWithCredential(auth, credential);
   } catch (e: unknown) {
     // Swallow the explicit user-cancelled case so it isn't surfaced as an error.
     const code = (e as { code?: string })?.code;

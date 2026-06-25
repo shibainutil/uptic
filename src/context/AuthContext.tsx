@@ -67,17 +67,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loginWithEmail = async (email: string, password: string) => {
-    await signInWithEmailAndPassword(auth, email, password);
+    // Native first so onAuthStateChanged guard passes when web fires.
     const na = getNativeAuth();
     const fns = nativeAuthFns();
     if (na && fns) await fns.signInWithEmailAndPassword(na, email, password);
+    await signInWithEmailAndPassword(auth, email, password);
   };
 
   const registerWithEmail = async (email: string, password: string) => {
-    await createUserWithEmailAndPassword(auth, email, password);
     const na = getNativeAuth();
     const fns = nativeAuthFns();
     if (na && fns) await fns.createUserWithEmailAndPassword(na, email, password);
+    await createUserWithEmailAndPassword(auth, email, password);
   };
 
   const loginWithGoogle = async () => {
