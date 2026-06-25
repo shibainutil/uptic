@@ -5,7 +5,6 @@ export interface ExerciseParam {
   name: string;          // e.g. "Weight"
   unit: string;          // e.g. "kg"
   required: boolean;
-  defaultValue?: string; // shown as placeholder in logger
 }
 
 export interface Exercise {
@@ -19,8 +18,7 @@ export interface Exercise {
   repsMax?: number;              // strength, default 10
   durationMin?: number;          // cardio, default 30
   params: ExerciseParam[];       // default []
-  notes?: string;                // exercise-level note shown in logger
-  description?: string;          // legacy alias for notes; read-only
+  description?: string;
   category?: string;             // legacy read-only
   createdAt: string;
 }
@@ -49,6 +47,7 @@ export interface ExerciseExecution {
   seriesData?: SeriesEntry[];    // per-series reps + weight; replaces series/reps/weight for strength
   paramValues: ParamValue[];
   completed: boolean;
+  notes?: string;
   createdAt: string;
 }
 
@@ -74,12 +73,13 @@ export interface Routine {
 export type RoutineExecStatus = 'pending' | 'completed' | 'failed';
 
 export interface RoutineExecution {
-  id: string;                    // deterministic `${routineId}_${dueDate}`
+  id: string;                    // deterministic `${routineId}_${scheduledDate}` — stable across reschedules
   routineId: string;
-  dueDate: string;               // ISO yyyy-mm-dd
+  dueDate: string;               // ISO yyyy-mm-dd; may differ from the id's date after a reschedule
   status: RoutineExecStatus;
   completedAt?: string;
   createdAt: string;
+  rescheduledTo?: string;        // set when rescheduled; keeps doc alive so reconciler won't recreate it
 }
 
 // ── Helpers for reading possibly-legacy exercise docs ───────────────────────

@@ -177,16 +177,35 @@ export function useRoutineExecutions(userId: string | null | undefined) {
     });
   }, [userId]);
 
+  // Reschedule: delete old doc, create new one at newDate, move exercise execution refs.
+  // The reconciler won't recreate the original date because it's past grace (grace-window
+  // fix in schedule.ts). The new doc's id prevents a duplicate at the new date.
   const reschedule = useCallback(async (exec: RoutineExecution, newDate: string) => {
     const newId = `${exec.routineId}_${newDate}`;
+    const exSnap = await getDocs(
+      query(userCol(userId!, 'exerciseExecutions'), where('routineExecutionId', '==', exec.id)),
+    );
     const batch = writeBatch(db);
-    batch.delete(userDoc(userId!, 'routineExecutions', exec.id));
-    batch.set(userDoc(userId!, 'routineExecutions', newId), { ...exec, id: newId, dueDate: newDate });
+    // Mark old doc rescheduledTo instead of deleting so the reconciler won't recreate it
+    // (reconciler skips dates where a doc already exists, even with rescheduledTo set).
+    batch.update(userDoc(userId!, 'routineExecutions', exec.id), { rescheduledTo: newDate });
+    batch.set(userDoc(userId!, 'routineExecutions', newId), stripUndefined({
+      ...exec, id: newId, dueDate: newDate, status: 'pending', completedAt: null, rescheduledTo: undefined,
+    }));
+    exSnap.docs.forEach((d) => batch.update(d.ref, { routineExecutionId: newId }));
     await batch.commit();
   }, [userId]);
 
+  // Hard-delete the routine execution and all its logged exercise executions.
+  // The reconciler won't regenerate past-grace occurrences (grace-window fix in schedule.ts).
   const remove = useCallback(async (id: string) => {
-    await deleteDoc(userDoc(userId!, 'routineExecutions', id));
+    const exSnap = await getDocs(
+      query(userCol(userId!, 'exerciseExecutions'), where('routineExecutionId', '==', id)),
+    );
+    const batch = writeBatch(db);
+    exSnap.docs.forEach((d) => batch.delete(d.ref));
+    batch.delete(userDoc(userId!, 'routineExecutions', id));
+    await batch.commit();
   }, [userId]);
 
   return { routineExecutions, loaded, setStatus, reschedule, remove };
@@ -200,11 +219,12 @@ export function useRoutineReconcile(
   userId: string | null | undefined,
   routines: Routine[],
   routineExecutions: RoutineExecution[],
+  executionsLoaded: boolean,
 ) {
   const running = useRef(false);
 
   useEffect(() => {
-    if (!userId || routines.length === 0 || running.current) return;
+    if (!userId || routines.length === 0 || !executionsLoaded || running.current) return;
     const { toCreate, toFail } = reconcileRoutineExecutions(routines, routineExecutions, todayISO());
     if (toCreate.length === 0 && toFail.length === 0) return;
 
@@ -216,5 +236,5 @@ export function useRoutineReconcile(
       .commit()
       .catch(() => { /* surfaced on next reconcile */ })
       .finally(() => { running.current = false; });
-  }, [userId, routines, routineExecutions]);
+  }, [userId, routines, routineExecutions, executionsLoaded]);
 }

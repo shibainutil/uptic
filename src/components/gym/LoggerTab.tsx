@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, Pressable, ScrollView, StyleSheet, Alert, Modal as RNModal } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -6,10 +6,10 @@ import {
   useRoutines, useRoutineExecutions, useExercises, useExerciseExecutions,
 } from '../../store/gymStore';
 import { toISO, todayISO } from '../../lib/schedule';
-import { type Exercise, type RoutineExecution, exerciseMuscleGroup, exerciseType } from '../../types/gym';
+import { type Exercise, type RoutineExecution, exerciseMuscleGroup } from '../../types/gym';
 import { colors, font, spacing, radius } from '../../theme';
 import { ExerciseInlineForm } from './ExerciseInlineForm';
-import { DatePicker } from '../ui/DatePicker';
+import { CalendarModal } from '../ui/CalendarModal';
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MONTH_NAMES = [
@@ -66,9 +66,24 @@ function buildMonthGrid(year: number, month: number): (Date | null)[] {
 export function LoggerTab() {
   const { user } = useAuth();
   const { routines } = useRoutines(user?.uid);
-  const { routineExecutions, reschedule, remove: removeRoutineExec } = useRoutineExecutions(user?.uid);
-  const { exercises, update: updateExercise } = useExercises(user?.uid);
+  const { routineExecutions, setStatus, reschedule, remove: removeRoutineExec } = useRoutineExecutions(user?.uid);
+  const { exercises } = useExercises(user?.uid);
   const { executions, add, update, remove: removeExecExecution } = useExerciseExecutions(user?.uid);
+
+  // Write 'completed' to Firestore when every exercise in a routine execution has
+  // been logged, even if the reconciler previously marked it 'failed'.
+  useEffect(() => {
+    for (const exec of routineExecutions) {
+      if (exec.status === 'completed' || exec.rescheduledTo) continue;
+      const r = routines.find((x) => x.id === exec.routineId);
+      const exerciseIds = r?.exerciseIds ?? [];
+      if (exerciseIds.length === 0) continue;
+      const allDone = exerciseIds.every((eid) =>
+        executions.some((e) => e.routineExecutionId === exec.id && e.exerciseId === eid && e.completed),
+      );
+      if (allDone) setStatus(exec.id, 'completed').catch(() => {});
+    }
+  }, [routineExecutions, executions, routines, setStatus]);
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -82,11 +97,9 @@ export function LoggerTab() {
   });
   const [weekView, setWeekView] = useState(true);
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
-  const [closedIds, setClosedIds] = useState<Set<string>>(new Set());
   const [menuExec, setMenuExec] = useState<RoutineExecution | null>(null);
-  const [menuY, setMenuY] = useState(0);
+  const [menuDotY, setMenuDotY] = useState(0);
   const [reschedulingExec, setReschedulingExec] = useState<RoutineExecution | null>(null);
-  const cardRefs = useRef<Map<string, View | null>>(new Map());
 
   function prevMonth() {
     if (viewMonth === 0) { setViewMonth(11); setViewYear((y) => y - 1); }
@@ -134,11 +147,10 @@ export function LoggerTab() {
     let seriesTotal = 0;
     for (const eid of exerciseIds) {
       const ex = exercises.find((e) => e.id === eid);
-      const isCardio = ex ? exerciseType(ex) === 'cardio' : false;
-      const count = isCardio ? 1 : (ex?.series ?? 3);
+      const count = ex?.series ?? 3;
       seriesTotal += count;
       const exExec = executions.find((e) => e.routineExecutionId === execId && e.exerciseId === eid);
-      if (!isCardio && exExec?.seriesData) {
+      if (exExec?.seriesData) {
         seriesDone += exExec.seriesData.filter((s) => s.reps != null && s.weight != null).length;
       } else if (exExec?.completed) {
         seriesDone += count;
@@ -148,8 +160,8 @@ export function LoggerTab() {
   }
 
   function getDisplayStatus(exec: { id: string; routineId: string; status: string; dueDate: string }): DisplayStatus {
-    if (exec.status === 'failed') return 'failed';
     if (exec.status === 'completed') return 'completed';
+    if (exec.status === 'failed') return 'failed';
     const { done, total, anyLogged } = progressFor(exec.id, exec.routineId);
     if (done === total && total > 0) return 'completed';
     if (anyLogged > 0) return 'in-progress';
@@ -157,17 +169,12 @@ export function LoggerTab() {
     return 'pending';
   }
 
-  function isRoutineExpanded(execId: string, status: DisplayStatus): boolean {
-    if (status === 'in-progress' || status === 'completed') return !closedIds.has(execId);
+  function isRoutineExpanded(execId: string): boolean {
     return openIds.has(execId);
   }
 
-  function toggleRoutine(execId: string, status: DisplayStatus) {
-    if (status === 'in-progress' || status === 'completed') {
-      setClosedIds((prev) => { const n = new Set(prev); n.has(execId) ? n.delete(execId) : n.add(execId); return n; });
-    } else {
-      setOpenIds((prev) => { const n = new Set(prev); n.has(execId) ? n.delete(execId) : n.add(execId); return n; });
-    }
+  function toggleRoutine(execId: string) {
+    setOpenIds((prev) => { const n = new Set(prev); n.has(execId) ? n.delete(execId) : n.add(execId); return n; });
   }
 
   function handleReset(exec: RoutineExecution) {
@@ -183,11 +190,7 @@ export function LoggerTab() {
   function handleDelete(exec: RoutineExecution) {
     Alert.alert('Delete execution?', 'This routine execution and all its data will be permanently deleted.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        const toRemove = executions.filter((e) => e.routineExecutionId === exec.id);
-        await Promise.allSettled(toRemove.map((e) => removeExecExecution(e.id)));
-        await removeRoutineExec(exec.id);
-      }},
+      { text: 'Delete', style: 'destructive', onPress: () => removeRoutineExec(exec.id) },
     ]);
   }
 
@@ -195,7 +198,7 @@ export function LoggerTab() {
     const today = todayISO();
     const priority: Record<string, number> = { pending: 4, overdue: 3, failed: 2, completed: 1 };
     const map = new Map<string, 'pending' | 'overdue' | 'completed' | 'failed'>();
-    for (const ex of routineExecutions) {
+    for (const ex of routineExecutions.filter((e) => !e.rescheduledTo)) {
       const dotStatus: 'pending' | 'overdue' | 'completed' | 'failed' =
         ex.status === 'pending' ? (ex.dueDate < today ? 'overdue' : 'pending') :
         ex.status === 'failed' ? 'failed' : 'completed';
@@ -215,9 +218,9 @@ export function LoggerTab() {
   const weekStartISO = toISO(weekStart);
 
   const dueRoutines = routineExecutions
-    .filter((e) => weekView
+    .filter((e) => !e.rescheduledTo && (weekView
       ? e.dueDate >= weekStartISO && e.dueDate <= weekEndISO
-      : (() => { const d = new Date(e.dueDate); return d.getFullYear() === viewYear && d.getMonth() === viewMonth; })())
+      : (() => { const d = new Date(e.dueDate); return d.getFullYear() === viewYear && d.getMonth() === viewMonth; })()))
     .sort((a, b) => b.dueDate.localeCompare(a.dueDate));
 
   // Group by ISO week, preserving newest-to-oldest order
@@ -304,7 +307,7 @@ export function LoggerTab() {
             const { done, total, seriesDone, seriesTotal } = progressFor(exec.id, exec.routineId);
             const status = getDisplayStatus(exec);
             const color = STATUS_COLOR[status];
-            const expanded = isRoutineExpanded(exec.id, status);
+            const expanded = isRoutineExpanded(exec.id);
             const exPct = total > 0 ? (done / total) * 100 : 0;
             const seriesPct = seriesTotal > 0 ? (seriesDone / seriesTotal) * 100 : 0;
             const routine = routines.find((r) => r.id === exec.routineId);
@@ -324,24 +327,19 @@ export function LoggerTab() {
               .filter((e): e is Exercise => Boolean(e));
 
             const grouped = routineExercises.reduce<Record<string, Exercise[]>>((acc, ex) => {
-              const g = exerciseType(ex) === 'cardio' ? 'Cardio' : exerciseMuscleGroup(ex);
+              const g = exerciseMuscleGroup(ex);
               if (!acc[g]) acc[g] = [];
               acc[g].push(ex);
               return acc;
             }, {});
-            const groupNames = Object.keys(grouped).sort((a, b) => {
-              if (a === 'Cardio') return -1;
-              if (b === 'Cardio') return 1;
-              return a.localeCompare(b);
-            });
+            const groupNames = Object.keys(grouped).sort();
 
             return (
               <View
                 key={exec.id}
-                ref={(el) => { if (el) cardRefs.current.set(exec.id, el); else cardRefs.current.delete(exec.id); }}
                 style={[styles.agendaCard, { marginBottom: spacing.sm }]}
               >
-                <Pressable style={styles.cardHeader} onPress={() => toggleRoutine(exec.id, status)}>
+                <Pressable style={styles.cardHeader} onPress={() => toggleRoutine(exec.id)}>
                   <MaterialIcons name={expanded ? 'expand-less' : 'expand-more'} size={22} color={colors.textMuted} />
                   <View style={styles.titleCol}>
                     <View style={styles.titleRow}>
@@ -358,13 +356,8 @@ export function LoggerTab() {
                     hitSlop={8}
                     onPress={(e) => {
                       e.stopPropagation();
-                      const card = cardRefs.current.get(exec.id);
-                      if (card) {
-                        card.measureInWindow((_x, y) => { setMenuY(y); setMenuExec(exec); });
-                      } else {
-                        setMenuY(e.nativeEvent.pageY);
-                        setMenuExec(exec);
-                      }
+                      setMenuDotY(e.nativeEvent.pageY);
+                      setMenuExec(exec);
                     }}
                   >
                     <MaterialIcons name="more-vert" size={22} color={colors.textMuted} />
@@ -399,7 +392,6 @@ export function LoggerTab() {
                               lastExecution={lastExec}
                               routineExecutionId={exec.id}
                               dueDate={exec.dueDate}
-                              onUpdateExercise={async (data) => { await updateExercise(ex.id, data); }}
                               onSave={async (data, currentExecId) => {
                                 if (data === null) {
                                   const idToDelete = currentExecId ?? executions.find(
@@ -430,13 +422,15 @@ export function LoggerTab() {
       {/* ── Context menu ─────────────────────────────────────────────── */}
       <RNModal visible={menuExec !== null} transparent animationType="none" onRequestClose={() => setMenuExec(null)}>
         <Pressable style={styles.menuBackdrop} onPress={() => setMenuExec(null)}>
-          <Pressable style={[styles.menuCard, { top: menuY + 8 }]} onPress={(e) => e.stopPropagation()}>
+          {/* Position card so the close row's centre sits exactly where the dots icon was. */}
+          <Pressable style={[styles.menuCard, { top: menuDotY - 21 }]} onPress={(e) => e.stopPropagation()}>
+            {/* Close row — same height as a menu item, X icon right-aligned to match the dots */}
+            <Pressable style={styles.menuCloseRow} onPress={() => setMenuExec(null)}>
+              <MaterialIcons name="close" size={22} color={colors.textMuted} />
+            </Pressable>
             <Pressable style={styles.menuItem} onPress={() => { const e = menuExec; setMenuExec(null); setReschedulingExec(e); }}>
               <MaterialIcons name="event" size={18} color={colors.accent} />
               <Text style={styles.menuItemText}>Reschedule</Text>
-              <Pressable hitSlop={10} onPress={() => setMenuExec(null)} style={styles.menuClose}>
-                <MaterialIcons name="close" size={16} color={colors.textMuted} />
-              </Pressable>
             </Pressable>
             <Pressable style={styles.menuItem} onPress={() => { const e = menuExec!; setMenuExec(null); handleReset(e); }}>
               <MaterialIcons name="refresh" size={18} color={colors.text} />
@@ -451,22 +445,17 @@ export function LoggerTab() {
       </RNModal>
 
       {/* ── Reschedule modal ─────────────────────────────────────────── */}
-      <RNModal visible={reschedulingExec !== null} transparent animationType="fade" onRequestClose={() => setReschedulingExec(null)}>
-        <Pressable style={styles.menuBackdrop} onPress={() => setReschedulingExec(null)}>
-          <Pressable style={styles.rescheduleCard} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.menuTitle}>Move to</Text>
-            <DatePicker
-              value={reschedulingExec?.dueDate ?? todayISO()}
-              onChange={async (newDate) => {
-                if (reschedulingExec && newDate !== reschedulingExec.dueDate) {
-                  await reschedule(reschedulingExec, newDate);
-                }
-                setReschedulingExec(null);
-              }}
-            />
-          </Pressable>
-        </Pressable>
-      </RNModal>
+      <CalendarModal
+        title="Reschedule to"
+        visible={reschedulingExec !== null}
+        value={reschedulingExec?.dueDate ?? todayISO()}
+        onSelect={async (newDate) => {
+          const exec = reschedulingExec;
+          setReschedulingExec(null);
+          if (exec && newDate !== exec.dueDate) await reschedule(exec, newDate);
+        }}
+        onClose={() => setReschedulingExec(null)}
+      />
 
     </ScrollView>
   );
@@ -546,7 +535,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 6,
   },
-  menuClose: { marginLeft: 'auto' },
+  menuCloseRow: {
+    alignItems: 'flex-end',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -557,15 +552,6 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   menuItemText: { color: colors.text, fontSize: font.sm },
-  rescheduleCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    width: '100%',
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
   titleCol: { flex: 1, gap: 2 },
   titleRow: {
     flexDirection: 'row',

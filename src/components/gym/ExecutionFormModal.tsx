@@ -53,19 +53,20 @@ export function ExecutionFormModal({
   const [saving, setSaving] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
 
-  // Per-series weight placeholders from last execution
+  // Per-series weight placeholders: all slots show the last series weight from previous execution.
   const weightPlaceholders: string[] = (() => {
     const src = lastExecution ?? execution;
     if (!src) return [];
     const count = exercise.series ?? 3;
+    let lastWeight: number | undefined;
     if (src.seriesData && src.seriesData.length > 0) {
-      return Array.from({ length: count }, (_, i) => {
-        const w = src.seriesData![i]?.weight;
-        return w != null ? String(w) : '';
-      });
+      const lastEntry = [...src.seriesData].reverse().find((s) => s.weight != null);
+      lastWeight = lastEntry?.weight;
+    } else {
+      lastWeight = src.weight ?? undefined;
     }
-    // Legacy: first series only
-    return Array.from({ length: count }, (_, i) => (i === 0 && src.weight != null ? String(src.weight) : ''));
+    const placeholder = lastWeight != null ? String(lastWeight) : '';
+    return Array.from({ length: count }, () => placeholder);
   })();
 
   const repsSuggestion = exercise.repsMin != null

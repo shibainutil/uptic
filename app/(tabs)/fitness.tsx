@@ -22,8 +22,8 @@ export default function FitnessScreen() {
   // Generate/expire routine executions while the fitness module is open.
   const { user } = useAuth();
   const { routines } = useRoutines(user?.uid);
-  const { routineExecutions } = useRoutineExecutions(user?.uid);
-  useRoutineReconcile(user?.uid, routines, routineExecutions);
+  const { routineExecutions, loaded: executionsLoaded } = useRoutineExecutions(user?.uid);
+  useRoutineReconcile(user?.uid, routines, routineExecutions, executionsLoaded);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
