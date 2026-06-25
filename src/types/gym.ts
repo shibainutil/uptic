@@ -70,13 +70,13 @@ export interface Routine {
   createdAt: string;
 }
 
-export type RoutineExecStatus = 'pending' | 'completed' | 'failed' | 'cancelled';
+export type RoutineExecStatus = 'pending' | 'completed' | 'failed';
 
 export interface RoutineExecution {
   id: string;                    // deterministic `${routineId}_${scheduledDate}` — stable across reschedules
   routineId: string;
   dueDate: string;               // ISO yyyy-mm-dd; may differ from the id's date after a reschedule
-  status: RoutineExecStatus;     // 'cancelled' is a tombstone: hidden in UI, keeps the reconciler from regenerating
+  status: RoutineExecStatus;
   completedAt?: string;
   createdAt: string;
 }

@@ -66,7 +66,7 @@ function buildMonthGrid(year: number, month: number): (Date | null)[] {
 export function LoggerTab() {
   const { user } = useAuth();
   const { routines } = useRoutines(user?.uid);
-  const { routineExecutions, setStatus, reschedule, cancel } = useRoutineExecutions(user?.uid);
+  const { routineExecutions, setStatus, reschedule, remove: removeRoutineExec } = useRoutineExecutions(user?.uid);
   const { exercises } = useExercises(user?.uid);
   const { executions, add, update, remove: removeExecExecution } = useExerciseExecutions(user?.uid);
 
@@ -74,7 +74,7 @@ export function LoggerTab() {
   // been logged, even if the reconciler previously marked it 'failed'.
   useEffect(() => {
     for (const exec of routineExecutions) {
-      if (exec.status === 'completed' || exec.status === 'cancelled') continue;
+      if (exec.status === 'completed') continue;
       const r = routines.find((x) => x.id === exec.routineId);
       const exerciseIds = r?.exerciseIds ?? [];
       if (exerciseIds.length === 0) continue;
@@ -97,7 +97,6 @@ export function LoggerTab() {
   });
   const [weekView, setWeekView] = useState(true);
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
-  const [closedIds, setClosedIds] = useState<Set<string>>(new Set());
   const [menuExec, setMenuExec] = useState<RoutineExecution | null>(null);
   const [menuY, setMenuY] = useState(0);
   const [reschedulingExec, setReschedulingExec] = useState<RoutineExecution | null>(null);
@@ -171,17 +170,12 @@ export function LoggerTab() {
     return 'pending';
   }
 
-  function isRoutineExpanded(execId: string, status: DisplayStatus): boolean {
-    if (status === 'in-progress' || status === 'completed') return !closedIds.has(execId);
+  function isRoutineExpanded(execId: string): boolean {
     return openIds.has(execId);
   }
 
-  function toggleRoutine(execId: string, status: DisplayStatus) {
-    if (status === 'in-progress' || status === 'completed') {
-      setClosedIds((prev) => { const n = new Set(prev); n.has(execId) ? n.delete(execId) : n.add(execId); return n; });
-    } else {
-      setOpenIds((prev) => { const n = new Set(prev); n.has(execId) ? n.delete(execId) : n.add(execId); return n; });
-    }
+  function toggleRoutine(execId: string) {
+    setOpenIds((prev) => { const n = new Set(prev); n.has(execId) ? n.delete(execId) : n.add(execId); return n; });
   }
 
   function handleReset(exec: RoutineExecution) {
@@ -197,13 +191,7 @@ export function LoggerTab() {
   function handleDelete(exec: RoutineExecution) {
     Alert.alert('Delete execution?', 'This routine execution and all its data will be permanently deleted.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        const toRemove = executions.filter((e) => e.routineExecutionId === exec.id);
-        await Promise.allSettled(toRemove.map((e) => removeExecExecution(e.id)));
-        // Tombstone rather than hard-delete: the reconciler would otherwise
-        // regenerate this occurrence from the routine's schedule.
-        await cancel(exec.id);
-      }},
+      { text: 'Delete', style: 'destructive', onPress: () => removeRoutineExec(exec.id) },
     ]);
   }
 
@@ -212,7 +200,6 @@ export function LoggerTab() {
     const priority: Record<string, number> = { pending: 4, overdue: 3, failed: 2, completed: 1 };
     const map = new Map<string, 'pending' | 'overdue' | 'completed' | 'failed'>();
     for (const ex of routineExecutions) {
-      if (ex.status === 'cancelled') continue;
       const dotStatus: 'pending' | 'overdue' | 'completed' | 'failed' =
         ex.status === 'pending' ? (ex.dueDate < today ? 'overdue' : 'pending') :
         ex.status === 'failed' ? 'failed' : 'completed';
@@ -232,7 +219,6 @@ export function LoggerTab() {
   const weekStartISO = toISO(weekStart);
 
   const dueRoutines = routineExecutions
-    .filter((e) => e.status !== 'cancelled')
     .filter((e) => weekView
       ? e.dueDate >= weekStartISO && e.dueDate <= weekEndISO
       : (() => { const d = new Date(e.dueDate); return d.getFullYear() === viewYear && d.getMonth() === viewMonth; })())
@@ -322,7 +308,7 @@ export function LoggerTab() {
             const { done, total, seriesDone, seriesTotal } = progressFor(exec.id, exec.routineId);
             const status = getDisplayStatus(exec);
             const color = STATUS_COLOR[status];
-            const expanded = isRoutineExpanded(exec.id, status);
+            const expanded = isRoutineExpanded(exec.id);
             const exPct = total > 0 ? (done / total) * 100 : 0;
             const seriesPct = seriesTotal > 0 ? (seriesDone / seriesTotal) * 100 : 0;
             const routine = routines.find((r) => r.id === exec.routineId);
@@ -355,7 +341,7 @@ export function LoggerTab() {
                 ref={(el) => { if (el) cardRefs.current.set(exec.id, el); else cardRefs.current.delete(exec.id); }}
                 style={[styles.agendaCard, { marginBottom: spacing.sm }]}
               >
-                <Pressable style={styles.cardHeader} onPress={() => toggleRoutine(exec.id, status)}>
+                <Pressable style={styles.cardHeader} onPress={() => toggleRoutine(exec.id)}>
                   <MaterialIcons name={expanded ? 'expand-less' : 'expand-more'} size={22} color={colors.textMuted} />
                   <View style={styles.titleCol}>
                     <View style={styles.titleRow}>

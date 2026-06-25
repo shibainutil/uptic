@@ -14,7 +14,7 @@ import { colors, spacing, font, radius } from '../../../src/theme';
 import { fromISO, withinGrace, todayISO, diffDays } from '../../../src/lib/schedule';
 import { type Exercise, type ExerciseExecution, exerciseType, type SeriesEntry } from '../../../src/types/gym';
 
-const STATUS_COLOR = { pending: colors.accent, completed: '#22C55E', failed: colors.danger, cancelled: colors.textMuted } as const;
+const STATUS_COLOR = { pending: colors.accent, completed: '#22C55E', failed: colors.danger } as const;
 
 export default function RoutineExecutionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();

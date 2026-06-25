@@ -83,9 +83,13 @@ export function reconcileRoutineExecutions(
 
   for (const routine of routines) {
     const dueDates = enumerateDueDates(routine.schedule, routine.startDate, today);
+    const grace = routine.graceDays ?? 0;
     for (const dueDate of dueDates) {
       const id = `${routine.id}_${dueDate}`;
       if (existingIds.has(id)) continue;
+      // Skip dates past the grace window — they can no longer be completed and
+      // we must not recreate executions the user intentionally deleted.
+      if (diffDays(today, dueDate) > grace) continue;
       toCreate.push({ id, routineId: routine.id, dueDate, status: 'pending', createdAt: now });
     }
   }

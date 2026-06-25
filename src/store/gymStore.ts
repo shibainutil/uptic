@@ -177,25 +177,36 @@ export function useRoutineExecutions(userId: string | null | undefined) {
     });
   }, [userId]);
 
-  // Reschedule by moving the dueDate only. The doc id stays anchored to the
-  // original scheduled occurrence so (a) the reconciler doesn't regenerate the
-  // original date and (b) logged exercise executions keep their routineExecutionId.
+  // Reschedule: delete old doc, create new one at newDate, move exercise execution refs.
+  // The reconciler won't recreate the original date because it's past grace (grace-window
+  // fix in schedule.ts). The new doc's id prevents a duplicate at the new date.
   const reschedule = useCallback(async (exec: RoutineExecution, newDate: string) => {
-    await updateDoc(userDoc(userId!, 'routineExecutions', exec.id), { dueDate: newDate });
+    const newId = `${exec.routineId}_${newDate}`;
+    const exSnap = await getDocs(
+      query(userCol(userId!, 'exerciseExecutions'), where('routineExecutionId', '==', exec.id)),
+    );
+    const batch = writeBatch(db);
+    batch.delete(userDoc(userId!, 'routineExecutions', exec.id));
+    batch.set(userDoc(userId!, 'routineExecutions', newId), stripUndefined({
+      ...exec, id: newId, dueDate: newDate, status: 'pending', completedAt: null,
+    }));
+    exSnap.docs.forEach((d) => batch.update(d.ref, { routineExecutionId: newId }));
+    await batch.commit();
   }, [userId]);
 
-  // Cancel = tombstone. Hard-deleting would let the reconciler regenerate the
-  // occurrence (its scheduled date would have no doc); keeping a 'cancelled'
-  // doc preserves the id so it stays gone.
-  const cancel = useCallback(async (id: string) => {
-    await updateDoc(userDoc(userId!, 'routineExecutions', id), { status: 'cancelled', completedAt: null });
-  }, [userId]);
-
+  // Hard-delete the routine execution and all its logged exercise executions.
+  // The reconciler won't regenerate past-grace occurrences (grace-window fix in schedule.ts).
   const remove = useCallback(async (id: string) => {
-    await deleteDoc(userDoc(userId!, 'routineExecutions', id));
+    const exSnap = await getDocs(
+      query(userCol(userId!, 'exerciseExecutions'), where('routineExecutionId', '==', id)),
+    );
+    const batch = writeBatch(db);
+    exSnap.docs.forEach((d) => batch.delete(d.ref));
+    batch.delete(userDoc(userId!, 'routineExecutions', id));
+    await batch.commit();
   }, [userId]);
 
-  return { routineExecutions, loaded, setStatus, reschedule, cancel, remove };
+  return { routineExecutions, loaded, setStatus, reschedule, remove };
 }
 
 /**
