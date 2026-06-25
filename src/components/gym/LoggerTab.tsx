@@ -74,7 +74,7 @@ export function LoggerTab() {
   // been logged, even if the reconciler previously marked it 'failed'.
   useEffect(() => {
     for (const exec of routineExecutions) {
-      if (exec.status === 'completed') continue;
+      if (exec.status === 'completed' || exec.rescheduledTo) continue;
       const r = routines.find((x) => x.id === exec.routineId);
       const exerciseIds = r?.exerciseIds ?? [];
       if (exerciseIds.length === 0) continue;
@@ -198,7 +198,7 @@ export function LoggerTab() {
     const today = todayISO();
     const priority: Record<string, number> = { pending: 4, overdue: 3, failed: 2, completed: 1 };
     const map = new Map<string, 'pending' | 'overdue' | 'completed' | 'failed'>();
-    for (const ex of routineExecutions) {
+    for (const ex of routineExecutions.filter((e) => !e.rescheduledTo)) {
       const dotStatus: 'pending' | 'overdue' | 'completed' | 'failed' =
         ex.status === 'pending' ? (ex.dueDate < today ? 'overdue' : 'pending') :
         ex.status === 'failed' ? 'failed' : 'completed';
@@ -218,9 +218,9 @@ export function LoggerTab() {
   const weekStartISO = toISO(weekStart);
 
   const dueRoutines = routineExecutions
-    .filter((e) => weekView
+    .filter((e) => !e.rescheduledTo && (weekView
       ? e.dueDate >= weekStartISO && e.dueDate <= weekEndISO
-      : (() => { const d = new Date(e.dueDate); return d.getFullYear() === viewYear && d.getMonth() === viewMonth; })())
+      : (() => { const d = new Date(e.dueDate); return d.getFullYear() === viewYear && d.getMonth() === viewMonth; })()))
     .sort((a, b) => b.dueDate.localeCompare(a.dueDate));
 
   // Group by ISO week, preserving newest-to-oldest order

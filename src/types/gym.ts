@@ -79,6 +79,7 @@ export interface RoutineExecution {
   status: RoutineExecStatus;
   completedAt?: string;
   createdAt: string;
+  rescheduledTo?: string;        // set when rescheduled; keeps doc alive so reconciler won't recreate it
 }
 
 // ── Helpers for reading possibly-legacy exercise docs ───────────────────────

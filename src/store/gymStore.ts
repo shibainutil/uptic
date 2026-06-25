@@ -186,9 +186,11 @@ export function useRoutineExecutions(userId: string | null | undefined) {
       query(userCol(userId!, 'exerciseExecutions'), where('routineExecutionId', '==', exec.id)),
     );
     const batch = writeBatch(db);
-    batch.delete(userDoc(userId!, 'routineExecutions', exec.id));
+    // Mark old doc rescheduledTo instead of deleting so the reconciler won't recreate it
+    // (reconciler skips dates where a doc already exists, even with rescheduledTo set).
+    batch.update(userDoc(userId!, 'routineExecutions', exec.id), { rescheduledTo: newDate });
     batch.set(userDoc(userId!, 'routineExecutions', newId), stripUndefined({
-      ...exec, id: newId, dueDate: newDate, status: 'pending', completedAt: null,
+      ...exec, id: newId, dueDate: newDate, status: 'pending', completedAt: null, rescheduledTo: undefined,
     }));
     exSnap.docs.forEach((d) => batch.update(d.ref, { routineExecutionId: newId }));
     await batch.commit();
