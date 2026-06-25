@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, Pressable, ScrollView, StyleSheet, Alert, Modal as RNModal } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -98,9 +98,8 @@ export function LoggerTab() {
   const [weekView, setWeekView] = useState(true);
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
   const [menuExec, setMenuExec] = useState<RoutineExecution | null>(null);
-  const [menuY, setMenuY] = useState(0);
+  const [menuDotY, setMenuDotY] = useState(0);
   const [reschedulingExec, setReschedulingExec] = useState<RoutineExecution | null>(null);
-  const cardRefs = useRef<Map<string, View | null>>(new Map());
 
   function prevMonth() {
     if (viewMonth === 0) { setViewMonth(11); setViewYear((y) => y - 1); }
@@ -338,7 +337,6 @@ export function LoggerTab() {
             return (
               <View
                 key={exec.id}
-                ref={(el) => { if (el) cardRefs.current.set(exec.id, el); else cardRefs.current.delete(exec.id); }}
                 style={[styles.agendaCard, { marginBottom: spacing.sm }]}
               >
                 <Pressable style={styles.cardHeader} onPress={() => toggleRoutine(exec.id)}>
@@ -358,13 +356,8 @@ export function LoggerTab() {
                     hitSlop={8}
                     onPress={(e) => {
                       e.stopPropagation();
-                      const card = cardRefs.current.get(exec.id);
-                      if (card) {
-                        card.measureInWindow((_x, y) => { setMenuY(y); setMenuExec(exec); });
-                      } else {
-                        setMenuY(e.nativeEvent.pageY);
-                        setMenuExec(exec);
-                      }
+                      setMenuDotY(e.nativeEvent.pageY);
+                      setMenuExec(exec);
                     }}
                   >
                     <MaterialIcons name="more-vert" size={22} color={colors.textMuted} />
@@ -429,13 +422,15 @@ export function LoggerTab() {
       {/* ── Context menu ─────────────────────────────────────────────── */}
       <RNModal visible={menuExec !== null} transparent animationType="none" onRequestClose={() => setMenuExec(null)}>
         <Pressable style={styles.menuBackdrop} onPress={() => setMenuExec(null)}>
-          <Pressable style={[styles.menuCard, { top: menuY + 8 }]} onPress={(e) => e.stopPropagation()}>
+          {/* Position card so the close row's centre sits exactly where the dots icon was. */}
+          <Pressable style={[styles.menuCard, { top: menuDotY - 21 }]} onPress={(e) => e.stopPropagation()}>
+            {/* Close row — same height as a menu item, X icon right-aligned to match the dots */}
+            <Pressable style={styles.menuCloseRow} onPress={() => setMenuExec(null)}>
+              <MaterialIcons name="close" size={22} color={colors.textMuted} />
+            </Pressable>
             <Pressable style={styles.menuItem} onPress={() => { const e = menuExec; setMenuExec(null); setReschedulingExec(e); }}>
               <MaterialIcons name="event" size={18} color={colors.accent} />
               <Text style={styles.menuItemText}>Reschedule</Text>
-              <Pressable hitSlop={10} onPress={() => setMenuExec(null)} style={styles.menuClose}>
-                <MaterialIcons name="close" size={16} color={colors.textMuted} />
-              </Pressable>
             </Pressable>
             <Pressable style={styles.menuItem} onPress={() => { const e = menuExec!; setMenuExec(null); handleReset(e); }}>
               <MaterialIcons name="refresh" size={18} color={colors.text} />
@@ -540,7 +535,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 6,
   },
-  menuClose: { marginLeft: 'auto' },
+  menuCloseRow: {
+    alignItems: 'flex-end',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
