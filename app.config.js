@@ -1,12 +1,17 @@
-// Dynamic config: merges with app.json.
-// Set EXPO_UPDATE_CHANNEL=staging (dev build) or EXPO_UPDATE_CHANNEL=master (release build).
-// Defaults to 'staging' so a plain local build gets the dev channel.
+const IS_DEV = process.env.APP_VARIANT === 'development';
+
 module.exports = ({ config }) => ({
   ...config,
+  name: IS_DEV ? 'Uptic Dev' : 'Uptic',
+  scheme: IS_DEV ? 'uptic-dev' : 'uptic',
+  android: {
+    ...config.android,
+    package: IS_DEV ? 'com.uptic.app.dev' : 'com.uptic.app',
+  },
   updates: {
     ...config.updates,
     requestHeaders: {
-      'expo-channel-name': process.env.EXPO_UPDATE_CHANNEL ?? 'staging',
+      'expo-channel-name': IS_DEV ? 'staging' : 'master',
     },
   },
 });
