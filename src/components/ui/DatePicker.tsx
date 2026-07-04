@@ -11,9 +11,10 @@ interface Props {
   /** Selected date as ISO yyyy-mm-dd. */
   value: string;
   onChange: (iso: string) => void;
+  disabled?: boolean;
 }
 
-export function DatePicker({ label, value, onChange }: Props) {
+export function DatePicker({ label, value, onChange, disabled }: Props) {
   const [open, setOpen] = useState(false);
   const selected = fromISO(value);
 
@@ -24,17 +25,22 @@ export function DatePicker({ label, value, onChange }: Props) {
   return (
     <View style={styles.field}>
       {label ? <Text style={styles.label}>{label}</Text> : null}
-      <Pressable style={styles.trigger} onPress={() => setOpen(true)}>
-        <MaterialIcons name="event" size={18} color={colors.accent} />
-        <Text style={styles.triggerText}>{display}</Text>
+      <Pressable
+        style={[styles.trigger, disabled && styles.triggerDisabled]}
+        onPress={() => !disabled && setOpen(true)}
+      >
+        <MaterialIcons name={disabled ? 'lock' : 'event'} size={18} color={disabled ? colors.textDim : colors.accent} />
+        <Text style={[styles.triggerText, disabled && styles.triggerTextDisabled]}>{display}</Text>
       </Pressable>
 
-      <CalendarModal
-        visible={open}
-        value={value}
-        onSelect={(iso) => { onChange(iso); setOpen(false); }}
-        onClose={() => setOpen(false)}
-      />
+      {!disabled && (
+        <CalendarModal
+          visible={open}
+          value={value}
+          onSelect={(iso) => { onChange(iso); setOpen(false); }}
+          onClose={() => setOpen(false)}
+        />
+      )}
     </View>
   );
 }
@@ -60,4 +66,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   triggerText: { color: colors.text, fontSize: font.md },
+  triggerDisabled: { opacity: 0.6 },
+  triggerTextDisabled: { color: colors.textDim },
 });

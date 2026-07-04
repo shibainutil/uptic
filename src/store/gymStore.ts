@@ -37,6 +37,21 @@ function stripUndefined(obj: object): Record<string, unknown> {
   return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
 }
 
+// Firestore docs written before the series -> set rename still use the old field
+// names. Read-time fallback so old data keeps displaying correctly; the next save
+// writes it back out under the new field names.
+function normalizeExercise(raw: Record<string, unknown>): Exercise {
+  return { ...raw, sets: raw.sets ?? raw.series } as Exercise;
+}
+
+function normalizeExerciseExecution(raw: Record<string, unknown>): ExerciseExecution {
+  return {
+    ...raw,
+    sets: raw.sets ?? raw.series,
+    setData: raw.setData ?? raw.seriesData,
+  } as ExerciseExecution;
+}
+
 // ── Exercises ──────────────────────────────────────────────────────────────
 
 export function useExercises(userId: string | null | undefined) {
@@ -48,7 +63,7 @@ export function useExercises(userId: string | null | undefined) {
       return;
     }
     const unsub = onSnapshot(userCol(userId, 'exercises'), (snap) => {
-      setExercises(snap.docs.map((d) => d.data() as Exercise));
+      setExercises(snap.docs.map((d) => normalizeExercise(d.data())));
     });
     return unsub;
   }, [userId]);
@@ -82,7 +97,7 @@ export function useExerciseExecutions(userId: string | null | undefined) {
       return;
     }
     const unsub = onSnapshot(userCol(userId, 'exerciseExecutions'), (snap) => {
-      setExecutions(snap.docs.map((d) => d.data() as ExerciseExecution));
+      setExecutions(snap.docs.map((d) => normalizeExerciseExecution(d.data())));
     });
     return unsub;
   }, [userId]);
@@ -178,8 +193,8 @@ export function useRoutineExecutions(userId: string | null | undefined) {
   }, [userId]);
 
   // Reschedule: delete old doc, create new one at newDate, move exercise execution refs.
-  // The reconciler won't recreate the original date because it's past grace (grace-window
-  // fix in schedule.ts). The new doc's id prevents a duplicate at the new date.
+  // The reconciler won't recreate the original date since a doc already exists for it
+  // (rescheduledTo tombstone). The new doc's id prevents a duplicate at the new date.
   const reschedule = useCallback(async (exec: RoutineExecution, newDate: string) => {
     const newId = `${exec.routineId}_${newDate}`;
     const exSnap = await getDocs(
@@ -196,19 +211,67 @@ export function useRoutineExecutions(userId: string | null | undefined) {
     await batch.commit();
   }, [userId]);
 
-  // Hard-delete the routine execution and all its logged exercise executions.
-  // The reconciler won't regenerate past-grace occurrences (grace-window fix in schedule.ts).
+  // Deletes all logged exercise executions, but keeps the routine execution doc itself
+  // (marked `deleted`) rather than removing it — deleting it outright would free up its
+  // id, and the reconciler would immediately recreate a fresh pending occurrence on the
+  // next check, making the delete look like it "undid itself". The tombstone is filtered
+  // out of every UI list, same as a reschedule.
   const remove = useCallback(async (id: string) => {
     const exSnap = await getDocs(
       query(userCol(userId!, 'exerciseExecutions'), where('routineExecutionId', '==', id)),
     );
     const batch = writeBatch(db);
     exSnap.docs.forEach((d) => batch.delete(d.ref));
-    batch.delete(userDoc(userId!, 'routineExecutions', id));
+    batch.update(userDoc(userId!, 'routineExecutions', id), { deleted: true });
     await batch.commit();
   }, [userId]);
 
-  return { routineExecutions, loaded, setStatus, reschedule, remove };
+  // Adds an exercise to this execution only — the routine template is untouched.
+  const addExerciseToExecution = useCallback(async (exec: RoutineExecution, exerciseId: string) => {
+    const added = new Set(exec.addedExerciseIds ?? []);
+    added.add(exerciseId);
+    const removed = (exec.removedExerciseIds ?? []).filter((id) => id !== exerciseId);
+    await updateDoc(userDoc(userId!, 'routineExecutions', exec.id), stripUndefined({
+      addedExerciseIds: [...added],
+      removedExerciseIds: removed,
+    }));
+  }, [userId]);
+
+  // Removes an exercise from this execution only (hides it even though the routine still lists it),
+  // and deletes any logged data for it on this execution so nothing orphaned is left behind.
+  const removeExerciseFromExecution = useCallback(async (exec: RoutineExecution, exerciseId: string) => {
+    const removed = new Set(exec.removedExerciseIds ?? []);
+    removed.add(exerciseId);
+    const added = (exec.addedExerciseIds ?? []).filter((id) => id !== exerciseId);
+    const exSnap = await getDocs(query(
+      userCol(userId!, 'exerciseExecutions'),
+      where('routineExecutionId', '==', exec.id),
+      where('exerciseId', '==', exerciseId),
+    ));
+    const batch = writeBatch(db);
+    exSnap.docs.forEach((d) => batch.delete(d.ref));
+    batch.update(userDoc(userId!, 'routineExecutions', exec.id), stripUndefined({
+      removedExerciseIds: [...removed],
+      addedExerciseIds: added,
+    }));
+    await batch.commit();
+  }, [userId]);
+
+  // Swaps one exercise for another on this execution only.
+  const replaceExerciseInExecution = useCallback(async (
+    exec: RoutineExecution, oldExerciseId: string, newExerciseId: string,
+  ) => {
+    await removeExerciseFromExecution(exec, oldExerciseId);
+    await addExerciseToExecution(
+      { ...exec, removedExerciseIds: [...(exec.removedExerciseIds ?? []), oldExerciseId] },
+      newExerciseId,
+    );
+  }, [removeExerciseFromExecution, addExerciseToExecution]);
+
+  return {
+    routineExecutions, loaded, setStatus, reschedule, remove,
+    addExerciseToExecution, removeExerciseFromExecution, replaceExerciseInExecution,
+  };
 }
 
 /**
@@ -219,22 +282,28 @@ export function useRoutineReconcile(
   userId: string | null | undefined,
   routines: Routine[],
   routineExecutions: RoutineExecution[],
+  exerciseExecutions: ExerciseExecution[],
   executionsLoaded: boolean,
 ) {
   const running = useRef(false);
 
   useEffect(() => {
     if (!userId || routines.length === 0 || !executionsLoaded || running.current) return;
-    const { toCreate, toFail } = reconcileRoutineExecutions(routines, routineExecutions, todayISO());
-    if (toCreate.length === 0 && toFail.length === 0) return;
+    const { toCreate, toFail, exerciseExecsToSkip, exerciseExecsToCreateSkipped } =
+      reconcileRoutineExecutions(routines, routineExecutions, exerciseExecutions, todayISO());
+    if (toCreate.length === 0 && toFail.length === 0 && exerciseExecsToSkip.length === 0
+      && exerciseExecsToCreateSkipped.length === 0) return;
 
     running.current = true;
     const batch = writeBatch(db);
     toCreate.forEach((exec) => batch.set(userDoc(userId, 'routineExecutions', exec.id), stripUndefined(exec)));
     toFail.forEach((id) => batch.update(userDoc(userId, 'routineExecutions', id), { status: 'failed' }));
+    exerciseExecsToSkip.forEach((id) => batch.update(userDoc(userId, 'exerciseExecutions', id), { skipped: true }));
+    exerciseExecsToCreateSkipped.forEach((exec) =>
+      batch.set(userDoc(userId, 'exerciseExecutions', exec.id), stripUndefined(exec)));
     batch
       .commit()
       .catch(() => { /* surfaced on next reconcile */ })
       .finally(() => { running.current = false; });
-  }, [userId, routines, routineExecutions, executionsLoaded]);
+  }, [userId, routines, routineExecutions, exerciseExecutions, executionsLoaded]);
 }

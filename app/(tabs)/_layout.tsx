@@ -8,6 +8,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/context/AuthContext';
 import { colors, font, spacing, radius } from '../../src/theme';
+import BugReportPickerSheet from '../../src/components/BugReportPickerSheet';
 
 type IconName = React.ComponentProps<typeof MaterialIcons>['name'];
 
@@ -29,6 +30,7 @@ export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [bugSheetOpen, setBugSheetOpen] = useState(false);
 
   const activeTab = TABS.find((t) => pathname === `/${t.name}` || pathname.startsWith(`/${t.name}/`)) ?? TABS[0];
 
@@ -51,8 +53,11 @@ export default function TabsLayout() {
           <Text style={styles.activeLabel}>{activeTab.title}</Text>
         </TouchableOpacity>
 
-        {/* Right: settings + profile */}
+        {/* Right: bug report + settings + profile */}
         <View style={styles.rightButtons}>
+          <TouchableOpacity style={styles.iconBtn} onPress={() => setBugSheetOpen(true)} activeOpacity={0.7}>
+            <MaterialIcons name="bug-report" size={24} color={colors.textMuted} />
+          </TouchableOpacity>
           <TouchableOpacity style={styles.iconBtn} activeOpacity={0.7}>
             <MaterialIcons name="settings" size={24} color={colors.textMuted} />
           </TouchableOpacity>
@@ -92,6 +97,8 @@ export default function TabsLayout() {
       <View style={styles.content}>
         <Slot />
       </View>
+
+      <BugReportPickerSheet visible={bugSheetOpen} onClose={() => setBugSheetOpen(false)} />
     </View>
   );
 }

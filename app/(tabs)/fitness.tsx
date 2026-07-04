@@ -5,7 +5,7 @@ import { ExercisesTab } from '../../src/components/gym/ExercisesTab';
 import { RoutinesTab } from '../../src/components/gym/RoutinesTab';
 import { LoggerTab } from '../../src/components/gym/LoggerTab';
 import { useAuth } from '../../src/context/AuthContext';
-import { useRoutines, useRoutineExecutions, useRoutineReconcile } from '../../src/store/gymStore';
+import { useRoutines, useRoutineExecutions, useExerciseExecutions, useRoutineReconcile } from '../../src/store/gymStore';
 import { colors, spacing, font } from '../../src/theme';
 
 const SUB_TABS = [
@@ -23,7 +23,8 @@ export default function FitnessScreen() {
   const { user } = useAuth();
   const { routines } = useRoutines(user?.uid);
   const { routineExecutions, loaded: executionsLoaded } = useRoutineExecutions(user?.uid);
-  useRoutineReconcile(user?.uid, routines, routineExecutions, executionsLoaded);
+  const { executions: exerciseExecutions } = useExerciseExecutions(user?.uid);
+  useRoutineReconcile(user?.uid, routines, routineExecutions, exerciseExecutions, executionsLoaded);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>

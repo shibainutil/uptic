@@ -14,11 +14,11 @@
       },
       "oauth_client": [
         {
-          "client_id": "752330312289-itgkraovedcsjmk7cke1af4g1c98te5r.apps.googleusercontent.com",
+          "client_id": "752330312289-pqte2j8fncogp63082calpt2lfak7r1g.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.uptic.app",
-            "certificate_hash": "8771ea17bdd465894b1bcc0313610975566609ea"
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
           }
         },
         {
@@ -44,12 +44,20 @@
     },
     {
       "client_info": {
-        "mobilesdk_app_id": "1:752330312289:android:80f6d7c2d7f203e90e3820",
+        "mobilesdk_app_id": "1:752330312289:android:e709bf174ed733e30e3820",
         "android_client_info": {
           "package_name": "com.uptic.app.dev"
         }
       },
       "oauth_client": [
+        {
+          "client_id": "752330312289-p20de8bvrks6i6r6vopb5qards9ppqa1.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.uptic.app.dev",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
         {
           "client_id": "752330312289-3habolld4fn9olio688d6l7afbafmfeh.apps.googleusercontent.com",
           "client_type": 3

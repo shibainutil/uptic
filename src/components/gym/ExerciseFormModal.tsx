@@ -26,7 +26,7 @@ interface FormState {
   name: string;
   type: ExerciseType;
   muscleGroup: string;
-  series: string;
+  sets: string;
   repsMin: string;
   repsMax: string;
   durationMin: string;
@@ -36,7 +36,7 @@ interface FormState {
 
 const EMPTY_FORM: FormState = {
   name: '', type: 'strength', muscleGroup: 'Other',
-  series: '3', repsMin: '8', repsMax: '10', durationMin: '30',
+  sets: '3', repsMin: '8', repsMax: '10', durationMin: '30',
   description: '', params: [],
 };
 
@@ -61,7 +61,7 @@ export function ExerciseFormModal({ exercise, visible, onClose, onSave }: Props)
       name: ex.name,
       type: exerciseType(ex),
       muscleGroup: exerciseMuscleGroup(ex),
-      series: String(ex.series ?? 3),
+      sets: String(ex.sets ?? 3),
       repsMin: String(ex.repsMin ?? 8),
       repsMax: String(ex.repsMax ?? 10),
       durationMin: String(ex.durationMin ?? 30),
@@ -152,7 +152,7 @@ export function ExerciseFormModal({ exercise, visible, onClose, onSave }: Props)
         ...(form.type === 'strength'
           ? {
               muscleGroup: form.muscleGroup,
-              series: parseInt(form.series) || 3,
+              sets: parseInt(form.sets) || 3,
               repsMin: parseInt(form.repsMin) || 1,
               repsMax: parseInt(form.repsMax) || (parseInt(form.repsMin) || 1),
               durationMin: undefined,
@@ -160,7 +160,7 @@ export function ExerciseFormModal({ exercise, visible, onClose, onSave }: Props)
           : {
               durationMin: parseInt(form.durationMin) || 30,
               muscleGroup: undefined,
-              series: undefined,
+              sets: undefined,
               repsMin: undefined,
               repsMax: undefined,
             }),
@@ -212,7 +212,7 @@ export function ExerciseFormModal({ exercise, visible, onClose, onSave }: Props)
               <Picker options={STRENGTH_GROUPS} value={form.muscleGroup} onChange={(v) => setForm({ ...form, muscleGroup: v })} />
             </View>
             <View style={styles.row3}>
-              <Input label="Series" value={form.series} onChangeText={(v) => setForm({ ...form, series: v })} keyboardType="numeric" style={styles.flex1} />
+              <Input label="Sets" value={form.sets} onChangeText={(v) => setForm({ ...form, sets: v })} keyboardType="numeric" style={styles.flex1} />
               <Input label="Reps min" value={form.repsMin} onChangeText={(v) => setForm({ ...form, repsMin: v })} keyboardType="numeric" style={styles.flex1} />
               <Input label="Reps max" value={form.repsMax} onChangeText={(v) => setForm({ ...form, repsMax: v })} keyboardType="numeric" style={styles.flex1} />
             </View>

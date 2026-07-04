@@ -6,8 +6,8 @@ export const colors = {
   text: '#F0F0F0',
   textMuted: '#888888',
   textDim: '#555555',
-  accent: '#6366F1',
-  accentDark: '#4F52D1',
+  accent: '#3B82F6',
+  accentDark: '#2563EB',
   danger: '#EF4444',
   dangerDim: 'rgba(239,68,68,0.15)',
 };
