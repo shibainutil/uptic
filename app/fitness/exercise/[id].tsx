@@ -11,11 +11,11 @@ import { ExecutionFormModal } from '../../../src/components/gym/ExecutionFormMod
 import { ExerciseFormModal, uploadExerciseImage } from '../../../src/components/gym/ExerciseFormModal';
 import { colors, spacing, font, radius } from '../../../src/theme';
 import { fromISO, todayISO, addDays } from '../../../src/lib/schedule';
-import { type ExerciseExecution, type Exercise, type SeriesEntry, exerciseType, exerciseMuscleGroup } from '../../../src/types/gym';
+import { type ExerciseExecution, type Exercise, type SetEntry, exerciseType, exerciseMuscleGroup } from '../../../src/types/gym';
 
 function totalScore(exec: ExerciseExecution): number {
-  if (exec.seriesData && exec.seriesData.length > 0) {
-    return exec.seriesData.reduce((s: number, e: SeriesEntry) => s + (e.reps ?? 0) * (e.weight ?? 0), 0);
+  if (exec.setData && exec.setData.length > 0) {
+    return exec.setData.reduce((s: number, e: SetEntry) => s + (e.reps ?? 0) * (e.weight ?? 0), 0);
   }
   return (exec.reps ?? 0) * (exec.weight ?? 0);
 }
@@ -102,7 +102,7 @@ export default function ExerciseDetailScreen() {
   }
 
   const summaryDefaults = isStrength
-    ? `${exercise.series ?? 3} × ${exercise.repsMin ?? 8}–${exercise.repsMax ?? 10}`
+    ? `${exercise.sets ?? 3} × ${exercise.repsMin ?? 8}–${exercise.repsMax ?? 10}`
     : `${exercise.durationMin ?? 30} min`;
 
   const summarySubtitle = isStrength
@@ -186,7 +186,7 @@ export default function ExerciseDetailScreen() {
         ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
         renderItem={({ item }) => {
           const score = totalScore(item);
-          const hasSeriesData = item.seriesData && item.seriesData.length > 0;
+          const hasSetData = item.setData && item.setData.length > 0;
           return (
             <View style={styles.card}>
               <View style={styles.cardHeader}>
@@ -197,15 +197,15 @@ export default function ExerciseDetailScreen() {
               </View>
 
               {isStrength && (
-                <View style={styles.seriesList}>
-                  {hasSeriesData
-                    ? item.seriesData!.map((s, idx) => (
-                        <Text key={idx} style={styles.seriesRow}>
+                <View style={styles.setList}>
+                  {hasSetData
+                    ? item.setData!.map((s, idx) => (
+                        <Text key={idx} style={styles.setRow}>
                           {'Set ' + (idx + 1) + '  ·  ' + (s.weight != null ? s.weight + 'kg' : '—') + ' × ' + (s.reps ?? '—') + ' reps'}
                         </Text>
                       ))
-                    : (item.reps != null || item.series != null) && (
-                        <Text style={styles.seriesRow}>
+                    : (item.reps != null || item.sets != null) && (
+                        <Text style={styles.setRow}>
                           {'Set 1  ·  ' + (item.weight != null ? item.weight + (item.weightUnit ?? 'kg') : '—') + ' × ' + (item.reps ?? '—') + ' reps'}
                         </Text>
                       )}
@@ -327,8 +327,8 @@ const styles = StyleSheet.create({
   cardStatus: { fontSize: font.sm, fontWeight: '600' },
   statusDone: { color: '#22C55E' },
   statusPending: { color: colors.textMuted },
-  seriesList: { gap: 3 },
-  seriesRow: { color: colors.textMuted, fontSize: font.sm },
+  setList: { gap: 3 },
+  setRow: { color: colors.textMuted, fontSize: font.sm },
   totalRow: { color: colors.accent, fontSize: font.sm, fontWeight: '600', marginTop: 2 },
   cardMeta: { color: colors.textMuted, fontSize: font.sm },
   cardNotes: { color: colors.textDim, fontSize: font.sm },

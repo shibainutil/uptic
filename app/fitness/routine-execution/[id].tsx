@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, Image, ScrollView, Pressable, StyleSheet,
+  View, Text, Image, ScrollView, Pressable, StyleSheet, Modal as RNModal,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -11,8 +11,8 @@ import {
 } from '../../../src/store/gymStore';
 import { ExecutionFormModal } from '../../../src/components/gym/ExecutionFormModal';
 import { colors, spacing, font, radius } from '../../../src/theme';
-import { fromISO, withinGrace, todayISO, diffDays } from '../../../src/lib/schedule';
-import { type Exercise, type ExerciseExecution, exerciseType, type SeriesEntry } from '../../../src/types/gym';
+import { fromISO, todayISO, diffDays } from '../../../src/lib/schedule';
+import { type Exercise, type ExerciseExecution, exerciseType, type SetEntry, effectiveExerciseIds } from '../../../src/types/gym';
 
 const STATUS_COLOR = { pending: colors.accent, completed: '#22C55E', failed: colors.danger } as const;
 
@@ -21,12 +21,18 @@ export default function RoutineExecutionScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const { routines } = useRoutines(user?.uid);
-  const { routineExecutions, loaded, setStatus } = useRoutineExecutions(user?.uid);
+  const {
+    routineExecutions, loaded, setStatus,
+    addExerciseToExecution, removeExerciseFromExecution, replaceExerciseInExecution,
+  } = useRoutineExecutions(user?.uid);
   const { exercises } = useExercises(user?.uid);
   const { executions, add, update, remove } = useExerciseExecutions(user?.uid);
 
   const routineExec = routineExecutions.find((e) => e.id === id);
   const routine = routineExec ? routines.find((r) => r.id === routineExec.routineId) : undefined;
+
+  const [pickerMode, setPickerMode] = useState<'add' | 'replace' | null>(null);
+  const [replacingExId, setReplacingExId] = useState<string | null>(null);
 
   const [formExercise, setFormExercise] = useState<Exercise | null>(null);
   const [editingExec, setEditingExec] = useState<ExerciseExecution | null>(null);
@@ -43,9 +49,14 @@ export default function RoutineExecutionScreen() {
     [linked],
   );
 
+  const execExerciseIds = useMemo(
+    () => (routineExec ? effectiveExerciseIds(routine, routineExec) : []),
+    [routine, routineExec],
+  );
+
   const routineExercises = useMemo(
-    () => (routine?.exerciseIds ?? []).map((eid) => exercises.find((e) => e.id === eid)).filter(Boolean) as Exercise[],
-    [routine, exercises],
+    () => execExerciseIds.map((eid) => exercises.find((e) => e.id === eid)).filter(Boolean) as Exercise[],
+    [execExerciseIds, exercises],
   );
 
   function linkedExecFor(exId: string): ExerciseExecution | undefined {
@@ -56,28 +67,28 @@ export default function RoutineExecutionScreen() {
     return linked.find((e) => e.exerciseId === exId && e.completed);
   }
 
-  function seriesCircles(ex: Exercise): boolean[] {
-    const count = ex.series ?? 3;
+  function setCircles(ex: Exercise): boolean[] {
+    const count = ex.sets ?? 3;
     const exec = linkedExecFor(ex.id);
     if (!exec) return Array(count).fill(false);
-    if (exec.seriesData && exec.seriesData.length > 0) {
+    if (exec.setData && exec.setData.length > 0) {
       return Array.from({ length: count }, (_, i) => {
-        const s = (exec.seriesData as SeriesEntry[])[i];
+        const s = (exec.setData as SetEntry[])[i];
         return s != null && s.reps != null && s.weight != null;
       });
     }
     return Array(count).fill(exec.completed);
   }
 
-  const total = routine?.exerciseIds.length ?? 0;
-  const doneCount = (routine?.exerciseIds ?? []).filter((eid) => linked.some((e) => e.exerciseId === eid && e.completed)).length;
-  const inGrace = routineExec ? withinGrace(routineExec.dueDate, routine?.graceDays ?? 0, todayISO()) : false;
-  const interactive = routineExec ? (routineExec.status !== 'failed') && (inGrace || routineExec.status === 'completed') : false;
+  const total = execExerciseIds.length;
+  const doneCount = execExerciseIds.filter((eid) => linked.some((e) => e.exerciseId === eid && e.completed)).length;
+  const notPastDue = routineExec ? diffDays(todayISO(), routineExec.dueDate) <= 0 : false;
+  const interactive = routineExec ? (routineExec.status !== 'failed') && (notPastDue || routineExec.status === 'completed') : false;
 
   // Keep the routine-execution status in sync with per-exercise progress.
   useEffect(() => {
     if (!routineExec || !routine || total === 0) return;
-    const allDone = routine.exerciseIds.every((eid) => linked.some((e) => e.exerciseId === eid && e.completed));
+    const allDone = execExerciseIds.every((eid) => linked.some((e) => e.exerciseId === eid && e.completed));
     if (allDone && routineExec.status !== 'completed') {
       setStatus(routineExec.id, 'completed');
     } else if (!allDone && routineExec.status === 'completed') {
@@ -136,10 +147,10 @@ export default function RoutineExecutionScreen() {
           <Text style={styles.progressText}>{doneCount} / {total} exercises done</Text>
 
           {routineExec.status === 'failed' && (
-            <Text style={styles.expiredNote}>Grace period passed — this routine execution can no longer be completed.</Text>
+            <Text style={styles.expiredNote}>This routine execution can no longer be completed.</Text>
           )}
-          {routineExec.status === 'pending' && !inGrace && (
-            <Text style={styles.expiredNote}>Overdue by {overdueBy} day{overdueBy !== 1 ? 's' : ''} (grace {routine.graceDays}).</Text>
+          {routineExec.status === 'pending' && !notPastDue && (
+            <Text style={styles.expiredNote}>Overdue by {overdueBy} day{overdueBy !== 1 ? 's' : ''}.</Text>
           )}
         </View>
 
@@ -168,11 +179,11 @@ export default function RoutineExecutionScreen() {
                 <View style={styles.exMain}>
                   <Text style={styles.exName}>{ex.name}</Text>
                   <Text style={styles.exMeta}>
-                    {isStrength ? `${ex.series ?? 3} × ${ex.repsMin ?? 8}–${ex.repsMax ?? 10}` : `${ex.durationMin ?? 30} min`}
+                    {isStrength ? `${ex.sets ?? 3} × ${ex.repsMin ?? 8}–${ex.repsMax ?? 10}` : `${ex.durationMin ?? 30} min`}
                   </Text>
                 </View>
                 <View style={styles.circles}>
-                  {seriesCircles(ex).map((isDone, si) => (
+                  {setCircles(ex).map((isDone, si) => (
                     <MaterialIcons
                       key={si}
                       name={isDone ? 'check-circle' : 'radio-button-unchecked'}
@@ -181,11 +192,73 @@ export default function RoutineExecutionScreen() {
                     />
                   ))}
                 </View>
+                {interactive && (
+                  <Pressable
+                    hitSlop={8}
+                    onPress={() => { setReplacingExId(ex.id); setPickerMode('replace'); }}
+                    style={styles.exSwapBtn}
+                  >
+                    <MaterialIcons name="swap-horiz" size={20} color={colors.textMuted} />
+                  </Pressable>
+                )}
               </Pressable>
             );
           })
         )}
+
+        {interactive && (
+          <Pressable onPress={() => { setReplacingExId(null); setPickerMode('add'); }} style={styles.addExerciseRow}>
+            <MaterialIcons name="add" size={18} color={colors.accent} />
+            <Text style={styles.addExerciseText}>Add exercise (this occurrence only)</Text>
+          </Pressable>
+        )}
       </ScrollView>
+
+      <RNModal visible={pickerMode !== null} transparent animationType="fade" onRequestClose={() => setPickerMode(null)}>
+        <Pressable style={styles.pickerBackdrop} onPress={() => setPickerMode(null)}>
+          <Pressable style={styles.pickerSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.pickerTitle}>
+              {pickerMode === 'replace' ? 'Replace with' : 'Add exercise'}
+            </Text>
+            <ScrollView style={styles.pickerList}>
+              {exercises
+                .filter((e) => !execExerciseIds.includes(e.id) || e.id === replacingExId)
+                .filter((e) => e.id !== replacingExId)
+                .map((e) => (
+                  <Pressable
+                    key={e.id}
+                    style={styles.pickerItem}
+                    onPress={async () => {
+                      if (!routineExec) return;
+                      if (pickerMode === 'replace' && replacingExId) {
+                        await replaceExerciseInExecution(routineExec, replacingExId, e.id);
+                      } else {
+                        await addExerciseToExecution(routineExec, e.id);
+                      }
+                      setPickerMode(null);
+                      setReplacingExId(null);
+                    }}
+                  >
+                    <Text style={styles.pickerItemText}>{e.name}</Text>
+                  </Pressable>
+                ))}
+            </ScrollView>
+            {pickerMode === 'replace' && replacingExId && (
+              <Pressable
+                style={styles.pickerRemoveBtn}
+                onPress={async () => {
+                  if (!routineExec || !replacingExId) return;
+                  await removeExerciseFromExecution(routineExec, replacingExId);
+                  setPickerMode(null);
+                  setReplacingExId(null);
+                }}
+              >
+                <Text style={styles.pickerRemoveText}>Remove instead (no replacement)</Text>
+              </Pressable>
+            )}
+          </Pressable>
+        </Pressable>
+      </RNModal>
 
       {formExercise && (
         <ExecutionFormModal
@@ -276,4 +349,43 @@ const styles = StyleSheet.create({
   exName: { color: colors.text, fontSize: font.md, fontWeight: '500' },
   exMeta: { color: colors.textDim, fontSize: font.sm, marginTop: 2 },
   circles: { flexDirection: 'row', gap: 4, alignItems: 'center' },
+  exSwapBtn: { marginLeft: spacing.sm, padding: 2 },
+  addExerciseRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    padding: spacing.md,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderStyle: 'dashed',
+    marginTop: spacing.xs,
+  },
+  addExerciseText: { color: colors.accent, fontSize: font.md },
+  pickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  pickerSheet: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    maxHeight: '70%',
+    gap: spacing.md,
+  },
+  pickerTitle: { color: colors.text, fontSize: font.lg, fontWeight: '600' },
+  pickerList: { flexGrow: 0 },
+  pickerItem: {
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.surface2,
+  },
+  pickerItemText: { color: colors.text, fontSize: font.md },
+  pickerRemoveBtn: { alignItems: 'center', paddingVertical: spacing.sm },
+  pickerRemoveText: { color: colors.danger, fontSize: font.sm },
 });

@@ -1,4 +1,4 @@
-import type { Routine, RoutineExecution, RoutineSchedule } from '../types/gym';
+import { type Routine, type RoutineExecution, type RoutineSchedule, type ExerciseExecution, effectiveExerciseIds } from '../types/gym';
 
 // ── ISO date helpers (local, no time component) ─────────────────────────────
 
@@ -65,16 +65,21 @@ function isDue(schedule: RoutineSchedule, d: Date): boolean {
 
 export interface ReconcileResult {
   toCreate: RoutineExecution[];
-  toFail: string[]; // execution ids to mark failed
+  toFail: string[]; // routine execution ids to mark failed
+  exerciseExecsToSkip: string[]; // existing exercise execution ids to mark skipped
+  exerciseExecsToCreateSkipped: ExerciseExecution[]; // stub docs for exercises never logged
 }
 
 /**
- * Computes missing pending executions to create and overdue pending executions to fail.
- * Pure — callers persist the result.
+ * Computes missing pending executions to create, overdue pending executions to fail,
+ * and exercise executions to mark skipped when their parent routine execution fails.
+ * Pure — callers persist the result. Routine executions are never auto-deleted here;
+ * deletion only ever happens via explicit user action (manual delete / reschedule).
  */
 export function reconcileRoutineExecutions(
   routines: Routine[],
   existing: RoutineExecution[],
+  exerciseExecutions: ExerciseExecution[],
   today: string,
 ): ReconcileResult {
   const existingIds = new Set(existing.map((e) => e.id));
@@ -83,32 +88,48 @@ export function reconcileRoutineExecutions(
 
   for (const routine of routines) {
     const dueDates = enumerateDueDates(routine.schedule, routine.startDate, today);
-    const grace = routine.graceDays ?? 0;
     for (const dueDate of dueDates) {
       const id = `${routine.id}_${dueDate}`;
       if (existingIds.has(id)) continue;
-      // Skip dates past the grace window — they can no longer be completed and
-      // we must not recreate executions the user intentionally deleted.
-      if (diffDays(today, dueDate) > grace) continue;
       toCreate.push({ id, routineId: routine.id, dueDate, status: 'pending', createdAt: now });
     }
   }
 
-  const graceByRoutine = new Map(routines.map((r) => [r.id, r.graceDays]));
+  const routineById = new Map(routines.map((r) => [r.id, r]));
   const toFail: string[] = [];
   for (const exec of existing) {
-    if (exec.status !== 'pending') continue;
-    const grace = graceByRoutine.get(exec.routineId) ?? 0;
-    if (diffDays(today, exec.dueDate) > grace) toFail.push(exec.id);
+    if (exec.status !== 'pending' || exec.rescheduledTo || exec.deleted) continue;
+    if (diffDays(today, exec.dueDate) > 0) toFail.push(exec.id);
   }
 
-  return { toCreate, toFail };
-}
+  const exerciseExecsToSkip: string[] = [];
+  const exerciseExecsToCreateSkipped: ExerciseExecution[] = [];
+  for (const routineExecId of toFail) {
+    const exec = existing.find((e) => e.id === routineExecId)!;
+    const routine = routineById.get(exec.routineId);
+    if (!routine) continue;
+    for (const exerciseId of effectiveExerciseIds(routine, exec)) {
+      const existingExecExec = exerciseExecutions.find(
+        (e) => e.routineExecutionId === routineExecId && e.exerciseId === exerciseId,
+      );
+      if (existingExecExec) {
+        if (!existingExecExec.completed) exerciseExecsToSkip.push(existingExecExec.id);
+      } else {
+        exerciseExecsToCreateSkipped.push({
+          id: `${routineExecId}_${exerciseId}`,
+          exerciseId,
+          date: exec.dueDate,
+          routineExecutionId: routineExecId,
+          paramValues: [],
+          completed: false,
+          skipped: true,
+          createdAt: now,
+        });
+      }
+    }
+  }
 
-/** Whether a pending execution due on dueDate can still be completed today. */
-export function withinGrace(dueDate: string, graceDays: number, today: string): boolean {
-  const delta = diffDays(today, dueDate);
-  return delta >= 0 && delta <= graceDays;
+  return { toCreate, toFail, exerciseExecsToSkip, exerciseExecsToCreateSkipped };
 }
 
 const WEEKDAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

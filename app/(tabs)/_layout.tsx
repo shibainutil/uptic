@@ -77,7 +77,7 @@ export default function TabsLayout() {
           <Text style={styles.activeLabel}>{activeTab.title}</Text>
         </TouchableOpacity>
 
-        {/* Right: update indicator + settings + profile */}
+        {/* Right: update indicator + bug report + settings + profile */}
         <View style={styles.rightButtons}>
           {updateReady && (
             <TouchableOpacity style={styles.iconBtn} onPress={applyUpdate} activeOpacity={0.7}>

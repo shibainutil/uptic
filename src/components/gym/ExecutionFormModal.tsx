@@ -10,17 +10,17 @@ import { DatePicker } from '../ui/DatePicker';
 import { colors, spacing, font, radius } from '../../theme';
 import { todayISO } from '../../lib/schedule';
 import {
-  type Exercise, type ExerciseExecution, type ParamValue, type SeriesEntry, exerciseType,
+  type Exercise, type ExerciseExecution, type ParamValue, type SetEntry, exerciseType,
 } from '../../types/gym';
 
-interface SeriesRow {
+interface SetRow {
   reps: string;
   weight: string;
 }
 
 interface ExecForm {
   date: string;
-  seriesRows: SeriesRow[];
+  setRows: SetRow[];
   durationMin: string;
   paramValues: Record<string, string>;
 }
@@ -39,7 +39,7 @@ interface Props {
   onSubmit: (data: Omit<ExerciseExecution, 'id' | 'createdAt'>) => void | Promise<void>;
 }
 
-function isSeriesDone(row: SeriesRow): boolean {
+function isSetDone(row: SetRow): boolean {
   return row.reps.trim() !== '' && row.weight.trim() !== '';
 }
 
@@ -53,14 +53,14 @@ export function ExecutionFormModal({
   const [saving, setSaving] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
 
-  // Per-series weight placeholders: all slots show the last series weight from previous execution.
+  // Per-set weight placeholders: all slots show the last set's weight from previous execution.
   const weightPlaceholders: string[] = (() => {
     const src = lastExecution ?? execution;
     if (!src) return [];
-    const count = exercise.series ?? 3;
+    const count = exercise.sets ?? 3;
     let lastWeight: number | undefined;
-    if (src.seriesData && src.seriesData.length > 0) {
-      const lastEntry = [...src.seriesData].reverse().find((s) => s.weight != null);
+    if (src.setData && src.setData.length > 0) {
+      const lastEntry = [...src.setData].reverse().find((s) => s.weight != null);
       lastWeight = lastEntry?.weight;
     } else {
       lastWeight = src.weight ?? undefined;
@@ -77,20 +77,20 @@ export function ExecutionFormModal({
 
   useEffect(() => {
     if (!visible) return;
-    const seriesCount = exercise.series ?? 3;
+    const setCount = exercise.sets ?? 3;
     const pv: Record<string, string> = {};
 
     if (execution) {
       (execution.paramValues ?? []).forEach((p) => { pv[p.paramId] = p.value; });
 
-      let seriesRows: SeriesRow[];
-      if (execution.seriesData && execution.seriesData.length > 0) {
-        seriesRows = Array.from({ length: seriesCount }, (_, i) => {
-          const s = execution.seriesData![i];
+      let setRows: SetRow[];
+      if (execution.setData && execution.setData.length > 0) {
+        setRows = Array.from({ length: setCount }, (_, i) => {
+          const s = execution.setData![i];
           return { reps: s?.reps != null ? String(s.reps) : '', weight: s?.weight != null ? String(s.weight) : '' };
         });
       } else {
-        seriesRows = Array.from({ length: seriesCount }, (_, i) => ({
+        setRows = Array.from({ length: setCount }, (_, i) => ({
           reps: i === 0 && execution.reps != null ? String(execution.reps) : '',
           weight: i === 0 && execution.weight != null ? String(execution.weight) : '',
         }));
@@ -98,14 +98,14 @@ export function ExecutionFormModal({
 
       setForm({
         date: execution.date,
-        seriesRows,
+        setRows,
         durationMin: String(execution.durationMin ?? exercise.durationMin ?? 30),
         paramValues: pv,
       });
     } else {
       setForm({
         date: defaultDate ?? todayISO(),
-        seriesRows: Array.from({ length: seriesCount }, () => ({ reps: '', weight: '' })),
+        setRows: Array.from({ length: setCount }, () => ({ reps: '', weight: '' })),
         durationMin: String(exercise.durationMin ?? 30),
         paramValues: {},
       });
@@ -113,21 +113,21 @@ export function ExecutionFormModal({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, execution]);
 
-  function updateRow(index: number, field: keyof SeriesRow, value: string) {
+  function updateRow(index: number, field: keyof SetRow, value: string) {
     if (!form) return;
-    const rows = form.seriesRows.map((r, i) => i === index ? { ...r, [field]: value } : r);
-    setForm({ ...form, seriesRows: rows });
+    const rows = form.setRows.map((r, i) => i === index ? { ...r, [field]: value } : r);
+    setForm({ ...form, setRows: rows });
   }
 
-  const allSeriesDone = form ? form.seriesRows.every(isSeriesDone) : false;
+  const allSetsDone = form ? form.setRows.every(isSetDone) : false;
   const missingRequired = form
     ? requiredParams.filter((p) => !(form.paramValues[p.id] ?? '').trim()).map((p) => p.name)
     : [];
-  const canComplete = allSeriesDone && missingRequired.length === 0;
+  const canComplete = allSetsDone && missingRequired.length === 0;
 
   async function save() {
     if (!form || saving) return;
-    if (isStrength && missingRequired.length > 0 && allSeriesDone) {
+    if (isStrength && missingRequired.length > 0 && allSetsDone) {
       Alert.alert('Cannot complete', `Fill required parameter(s): ${missingRequired.join(', ')}`);
       return;
     }
@@ -145,15 +145,15 @@ export function ExecutionFormModal({
     };
 
     if (isStrength) {
-      const seriesData: SeriesEntry[] = form.seriesRows.map((r) => {
-        const entry: SeriesEntry = { weightUnit: 'kg' };
+      const setData: SetEntry[] = form.setRows.map((r) => {
+        const entry: SetEntry = { weightUnit: 'kg' };
         if (r.reps.trim()) entry.reps = parseInt(r.reps);
         if (r.weight.trim()) entry.weight = parseFloat(r.weight);
         return entry;
       });
-      data.seriesData = seriesData;
-      data.series = form.seriesRows.length;
-      const first = seriesData[0];
+      data.setData = setData;
+      data.sets = form.setRows.length;
+      const first = setData[0];
       if (first?.reps != null) data.reps = first.reps;
       if (first?.weight != null) { data.weight = first.weight; data.weightUnit = 'kg'; }
     } else {
@@ -196,7 +196,7 @@ export function ExecutionFormModal({
                   {/* Weight row */}
                   <View style={styles.gridRow}>
                     <Text style={styles.rowLabel}>Weight{'\n'}(kg)</Text>
-                    {form.seriesRows.map((row, i) => (
+                    {form.setRows.map((row, i) => (
                       <TextInput
                         key={i}
                         style={[styles.cell, focused === `w${i}` && styles.cellFocused]}
@@ -214,7 +214,7 @@ export function ExecutionFormModal({
                   {/* Reps row */}
                   <View style={styles.gridRow}>
                     <Text style={styles.rowLabel}>Reps</Text>
-                    {form.seriesRows.map((row, i) => (
+                    {form.setRows.map((row, i) => (
                       <TextInput
                         key={i}
                         style={[styles.cell, focused === `r${i}` && styles.cellFocused]}
@@ -232,8 +232,8 @@ export function ExecutionFormModal({
                   {/* Checkmarks row */}
                   <View style={styles.gridRow}>
                     <View style={styles.labelCell} />
-                    {form.seriesRows.map((row, i) => {
-                      const done = isSeriesDone(row);
+                    {form.setRows.map((row, i) => {
+                      const done = isSetDone(row);
                       return (
                         <View key={i} style={styles.checkCell}>
                           <MaterialIcons

@@ -45,7 +45,7 @@ export function ExercisesTab() {
 
   function metaLine(ex: Exercise): string {
     if (exerciseType(ex) === 'strength') {
-      return `${ex.series ?? 3} × ${ex.repsMin ?? 8}–${ex.repsMax ?? 10}`;
+      return `${ex.sets ?? 3} × ${ex.repsMin ?? 8}–${ex.repsMax ?? 10}`;
     }
     return `${ex.durationMin ?? 30} min`;
   }

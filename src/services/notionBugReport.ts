@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 const NOTION_API_URL = 'https://api.notion.com/v1/pages';
 const NOTION_FILE_UPLOAD_URL = 'https://api.notion.com/v1/file-uploads';

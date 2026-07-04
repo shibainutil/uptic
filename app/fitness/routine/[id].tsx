@@ -13,8 +13,15 @@ import { DatePicker } from '../../../src/components/ui/DatePicker';
 import { colors, spacing, font, radius } from '../../../src/theme';
 import { todayISO, fromISO } from '../../../src/lib/schedule';
 import {
-  type ScheduleFrequency, type RoutineSchedule, type Routine, type RoutineExecution,
+  type ScheduleFrequency, type RoutineSchedule, type Routine, type RoutineExecution, type ExerciseRole,
+  STRENGTH_GROUPS, exerciseType, exerciseMuscleGroup,
 } from '../../../src/types/gym';
+
+const ROLE_OPTIONS: { value: ExerciseRole; label: string }[] = [
+  { value: 'warmup', label: 'Warm-up' },
+  { value: 'mandatory', label: 'Mandatory' },
+  { value: 'optional', label: 'Optional' },
+];
 
 // Display Monday-first; values are JS getDay() (Sun=0..Sat=6).
 const WEEK_DAYS: { value: number; label: string }[] = [
@@ -42,7 +49,7 @@ export default function RoutineEditScreen() {
   // initial state captures empty defaults instead of the saved routine values.
   if (!isNew && !loaded) {
     return (
-      <SafeAreaView style={styles.container} edges={['bottom']}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <Header title="Routine" onBack={() => router.back()} />
         <View style={styles.empty}><Text style={styles.emptyText}>Loading…</Text></View>
       </SafeAreaView>
@@ -50,7 +57,7 @@ export default function RoutineEditScreen() {
   }
   if (!isNew && !existing) {
     return (
-      <SafeAreaView style={styles.container} edges={['bottom']}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <Header title="Routine" onBack={() => router.back()} />
         <View style={styles.empty}><Text style={styles.emptyText}>Routine not found.</Text></View>
       </SafeAreaView>
@@ -82,20 +89,52 @@ function RoutineForm({ existing }: { existing?: Routine }) {
   const [name, setName] = useState(existing?.name ?? '');
   const [description, setDescription] = useState(existing?.description ?? '');
   const [exerciseIds, setExerciseIds] = useState<string[]>(existing?.exerciseIds ?? []);
+  const [exerciseRoles, setExerciseRoles] = useState<Record<string, ExerciseRole>>(existing?.exerciseRoles ?? {});
   const [frequency, setFrequency] = useState<ScheduleFrequency>(existing?.schedule.frequency ?? 'weekly');
   const [daysOfWeek, setDaysOfWeek] = useState<number[]>(existing?.schedule.daysOfWeek ?? []);
   const [dayOfMonth, setDayOfMonth] = useState(String(existing?.schedule.dayOfMonth ?? 1));
-  const [graceDays, setGraceDays] = useState(String(existing?.graceDays ?? 2));
   const [startDate, setStartDate] = useState(existing?.startDate ?? todayISO());
   const [saving, setSaving] = useState(false);
 
   const history = useMemo(
     () => routineExecutions
-      .filter((e) => e.routineId === existing?.id)
+      .filter((e) => e.routineId === existing?.id && !e.rescheduledTo && !e.deleted)
       .sort((a, b) => b.dueDate.localeCompare(a.dueDate))
       .slice(0, 12),
     [routineExecutions, existing?.id],
   );
+
+  // Once at least one execution has been completed, the start date reflects when the
+  // routine actually began being followed and can no longer be changed.
+  const frozenStartDate = useMemo(() => {
+    const completedDates = routineExecutions
+      .filter((e) => e.routineId === existing?.id && e.status === 'completed')
+      .map((e) => e.dueDate)
+      .sort();
+    return completedDates[0];
+  }, [routineExecutions, existing?.id]);
+  const startDateLocked = frozenStartDate != null;
+  const effectiveStartDate = frozenStartDate ?? startDate;
+
+  const groupedExercises = useMemo(() => {
+    const cardio = exercises.filter((ex) => exerciseType(ex) === 'cardio');
+    const strength = exercises.filter((ex) => exerciseType(ex) === 'strength');
+    const groups: { title: string; items: typeof exercises }[] = [];
+    if (cardio.length) groups.push({ title: 'Cardio', items: cardio });
+    STRENGTH_GROUPS.forEach((g) => {
+      const items = strength.filter((ex) => exerciseMuscleGroup(ex) === g);
+      if (items.length) groups.push({ title: g, items });
+    });
+    return groups;
+  }, [exercises]);
+
+  const selectedExercises = exerciseIds
+    .map((exId) => exercises.find((ex) => ex.id === exId))
+    .filter((ex): ex is NonNullable<typeof ex> => Boolean(ex));
+
+  function setRole(exId: string, role: ExerciseRole) {
+    setExerciseRoles((cur) => ({ ...cur, [exId]: role }));
+  }
 
   function toggleExercise(exId: string) {
     setExerciseIds((cur) => (cur.includes(exId) ? cur.filter((x) => x !== exId) : [...cur, exId]));
@@ -124,9 +163,9 @@ function RoutineForm({ existing }: { existing?: Routine }) {
       name: name.trim(),
       description: description.trim() || undefined,
       exerciseIds,
+      exerciseRoles,
       schedule,
-      graceDays: Math.max(0, parseInt(graceDays) || 0),
-      startDate,
+      startDate: effectiveStartDate,
     };
 
     setSaving(true);
@@ -141,7 +180,7 @@ function RoutineForm({ existing }: { existing?: Routine }) {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <Header title={isNew ? 'New Routine' : 'Edit Routine'} onBack={() => router.back()} />
 
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
@@ -153,18 +192,39 @@ function RoutineForm({ existing }: { existing?: Routine }) {
           {exercises.length === 0 ? (
             <Text style={styles.hint}>Add exercises in the Exercises tab first.</Text>
           ) : (
-            <View style={styles.chips}>
-              {exercises.map((ex) => {
-                const active = exerciseIds.includes(ex.id);
-                return (
-                  <Pressable key={ex.id} onPress={() => toggleExercise(ex.id)} style={[styles.chip, active && styles.chipActive]}>
-                    <Text style={[styles.chipText, active && styles.chipTextActive]}>{ex.name}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            groupedExercises.map((group) => (
+              <View key={group.title} style={styles.groupBlock}>
+                <Text style={styles.groupLabel}>{group.title}</Text>
+                <View style={styles.chips}>
+                  {group.items.map((ex) => {
+                    const active = exerciseIds.includes(ex.id);
+                    return (
+                      <Pressable key={ex.id} onPress={() => toggleExercise(ex.id)} style={[styles.chip, active && styles.chipActive]}>
+                        <Text style={[styles.chipText, active && styles.chipTextActive]}>{ex.name}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            ))
           )}
         </View>
+
+        {selectedExercises.length > 0 && (
+          <View style={styles.field}>
+            <Text style={styles.label}>Exercise roles</Text>
+            {selectedExercises.map((ex) => (
+              <View key={ex.id} style={styles.roleRow}>
+                <Text style={styles.roleName} numberOfLines={1}>{ex.name}</Text>
+                <Segmented
+                  options={ROLE_OPTIONS}
+                  value={exerciseRoles[ex.id] ?? 'mandatory'}
+                  onChange={(v) => setRole(ex.id, v)}
+                />
+              </View>
+            ))}
+          </View>
+        )}
 
         <View style={styles.field}>
           <Text style={styles.label}>Schedule</Text>
@@ -199,14 +259,10 @@ function RoutineForm({ existing }: { existing?: Routine }) {
           <Input label="Day of month (1–31)" value={dayOfMonth} onChangeText={setDayOfMonth} keyboardType="numeric" />
         )}
 
-        <View style={styles.row2}>
-          <View style={styles.flex1}>
-            <Input label="Grace days" value={graceDays} onChangeText={setGraceDays} keyboardType="numeric" />
-          </View>
-          <View style={styles.flex1}>
-            <DatePicker label="Start date" value={startDate} onChange={setStartDate} />
-          </View>
-        </View>
+        <DatePicker label="Start date" value={effectiveStartDate} onChange={setStartDate} disabled={startDateLocked} />
+        {startDateLocked && (
+          <Text style={styles.hint}>Locked to the first completed execution.</Text>
+        )}
 
         {!isNew && history.length > 0 && (
           <View style={styles.field}>
@@ -254,6 +310,13 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase', letterSpacing: 0.8,
   },
   hint: { color: colors.textDim, fontSize: font.sm },
+  groupBlock: { gap: spacing.xs },
+  groupLabel: {
+    fontSize: 10, fontWeight: '700', color: colors.textDim,
+    textTransform: 'uppercase', letterSpacing: 0.6,
+  },
+  roleRow: { gap: spacing.xs, marginBottom: spacing.xs },
+  roleName: { color: colors.text, fontSize: font.sm, fontWeight: '500' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   chip: {
     paddingHorizontal: spacing.md,
