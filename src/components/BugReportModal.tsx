@@ -3,6 +3,7 @@ import {
   Modal, View, Text, TextInput, Image,
   TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { colors, spacing, radius, font } from '../theme';
 import { fileBugReport, BugSeverity } from '../services/notionBugReport';
@@ -26,6 +27,7 @@ interface Props {
 }
 
 export default function BugReportModal({ visible, capturedUri, capturedType, currentScreen, reporterEmail, onClose }: Props) {
+  const insets = useSafeAreaInsets();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [severity, setSeverity] = useState<BugSeverity>('Medium');
@@ -86,7 +88,10 @@ export default function BugReportModal({ visible, capturedUri, capturedType, cur
               <Text style={styles.successText}>Bug filed!</Text>
             </View>
           ) : (
-            <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+            <ScrollView
+              contentContainerStyle={[styles.body, { paddingBottom: spacing.lg + insets.bottom }]}
+              keyboardShouldPersistTaps="handled"
+            >
               {/* Media preview */}
               {capturedType === 'image' && capturedUri && (
                 <Image source={{ uri: capturedUri }} style={styles.screenshot} resizeMode="contain" />
