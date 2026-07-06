@@ -10,6 +10,7 @@ export const colors = {
   accentDark: '#2563EB',
   danger: '#EF4444',
   dangerDim: 'rgba(239,68,68,0.15)',
+  success: '#22C55E',
 };
 
 export const spacing = {

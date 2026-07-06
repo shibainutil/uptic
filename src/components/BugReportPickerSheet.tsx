@@ -3,6 +3,7 @@ import {
   Modal, View, Text, TouchableOpacity, ActivityIndicator,
   StyleSheet, Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { captureScreen } from 'react-native-view-shot';
 import { usePathname } from 'expo-router';
@@ -19,6 +20,7 @@ interface Props {
 type Phase = 'idle' | 'recording-instructions' | 'capturing' | 'report-ready';
 
 export default function BugReportPickerSheet({ visible, onClose }: Props) {
+  const insets = useSafeAreaInsets();
   const pathname = usePathname();
   const { user } = useAuth();
   const [phase, setPhase] = useState<Phase>('idle');
@@ -117,7 +119,7 @@ export default function BugReportPickerSheet({ visible, onClose }: Props) {
       onRequestClose={onClose}
     >
       <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
-      <View style={styles.sheet}>
+      <View style={[styles.sheet, { paddingBottom: spacing.xxl + insets.bottom }]}>
         <View style={styles.handle} />
 
         {phase === 'idle' ? (

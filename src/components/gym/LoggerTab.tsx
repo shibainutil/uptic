@@ -27,14 +27,28 @@ const MONTH_NAMES = [
 ];
 
 const STATUS_COLOR = {
+  scheduled: colors.textMuted,
   pending: '#3B82F6',
   'in-progress': '#EAB308',
   incomplete: '#A855F7',
   completed: '#22C55E',
-  failed: colors.danger,
+  overdue: colors.danger,
 } as const;
 
 type DisplayStatus = keyof typeof STATUS_COLOR;
+
+const STATUS_LABEL: Record<DisplayStatus, string> = {
+  scheduled: 'Scheduled',
+  pending: 'Pending',
+  'in-progress': 'In Progress',
+  incomplete: 'Incomplete',
+  completed: 'Completed',
+  overdue: 'Overdue',
+};
+
+// Primary sort order when grouping by status; any status not listed here (e.g.
+// incomplete/overdue, which the user didn't call out explicitly) is appended after.
+const STATUS_GROUP_ORDER: DisplayStatus[] = ['in-progress', 'pending', 'scheduled', 'completed'];
 
 // Shown as a solid-background star badge when at least one optional set is completed.
 const PERFECT_COLOR = '#00875A';
@@ -112,6 +126,7 @@ export function LoggerTab() {
     return d;
   });
   const [weekView, setWeekView] = useState(true);
+  const [groupBy, setGroupBy] = useState<'date' | 'status'>('date');
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
   const [menuExec, setMenuExec] = useState<RoutineExecution | null>(null);
   const [menuAnchor, setMenuAnchor] = useState({ x: 0, y: 0 });
@@ -290,13 +305,13 @@ export function LoggerTab() {
 
     const delta = diffDays(todayISO(), exec.dueDate); // >0 once past due date
 
-    if (delta < 0) return anyLogged ? 'in-progress' : 'pending'; // scheduled for a future date
-    if (delta === 0) return anyLogged ? 'in-progress' : 'pending';
+    if (delta < 0) return anyLogged ? 'in-progress' : 'scheduled'; // due date hasn't arrived yet
+    if (delta === 0) return anyLogged ? 'in-progress' : 'pending'; // due today
     // Past due date: still show in-progress while any exercise — mandatory or optional
-    // — is actively being worked on, even though the execution has otherwise failed/incomplete.
+    // — is actively being worked on, even though the execution has otherwise overdue/incomplete.
     const anyInProgress = allIds.some((eid) => isExerciseInProgress(exec.id, eid));
     if (anyInProgress) return 'in-progress';
-    return anyLogged ? 'incomplete' : 'failed'; // past due date — fails immediately, no grace window
+    return anyLogged ? 'incomplete' : 'overdue'; // past due date, nothing ever logged
   }
 
   function isRoutineExpanded(execId: string): boolean {
@@ -326,7 +341,7 @@ export function LoggerTab() {
 
   const dotsByDate = useMemo(() => {
     const priority: Record<DisplayStatus, number> = {
-      pending: 6, 'in-progress': 5, incomplete: 4, failed: 3, completed: 2,
+      overdue: 7, pending: 6, 'in-progress': 5, incomplete: 4, scheduled: 3, completed: 2,
     };
     const map = new Map<string, DisplayStatus[]>();
     for (const ex of routineExecutions.filter((e) => !e.rescheduledTo && !e.deleted)) {
@@ -357,13 +372,29 @@ export function LoggerTab() {
       : e.dueDate >= monthRangeStartISO && e.dueDate <= monthRangeEndISO))
     .sort((a, b) => b.dueDate.localeCompare(a.dueDate));
 
-  // Group by day, preserving newest-to-oldest order
+  // Group by day or by status, each preserving newest-to-oldest date order within a group.
   const weekGroups: { key: string; label: string; items: RoutineExecution[] }[] = [];
-  for (const exec of dueRoutines) {
-    const key = exec.dueDate;
-    let g = weekGroups.find((x) => x.key === key);
-    if (!g) { g = { key, label: dayGroupLabel(exec.dueDate), items: [] }; weekGroups.push(g); }
-    g.items.push(exec);
+  if (groupBy === 'date') {
+    for (const exec of dueRoutines) {
+      const key = exec.dueDate;
+      let g = weekGroups.find((x) => x.key === key);
+      if (!g) { g = { key, label: dayGroupLabel(exec.dueDate), items: [] }; weekGroups.push(g); }
+      g.items.push(exec);
+    }
+  } else {
+    const byStatus = new Map<DisplayStatus, RoutineExecution[]>();
+    for (const exec of dueRoutines) {
+      const st = getDisplayStatus(exec);
+      if (!byStatus.has(st)) byStatus.set(st, []);
+      byStatus.get(st)!.push(exec);
+    }
+    const orderedStatuses = [
+      ...STATUS_GROUP_ORDER.filter((s) => byStatus.has(s)),
+      ...[...byStatus.keys()].filter((s) => !STATUS_GROUP_ORDER.includes(s)),
+    ];
+    for (const st of orderedStatuses) {
+      weekGroups.push({ key: st, label: STATUS_LABEL[st], items: byStatus.get(st)! });
+    }
   }
 
   return (
@@ -450,6 +481,23 @@ export function LoggerTab() {
         )}
       </View>
 
+      <View style={styles.groupByRow}>
+        <TouchableOpacity
+          style={[styles.groupByChip, groupBy === 'date' && styles.groupByChipActive]}
+          onPress={() => setGroupBy('date')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.groupByChipText, groupBy === 'date' && styles.groupByChipTextActive]}>By Date</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.groupByChip, groupBy === 'status' && styles.groupByChipActive]}
+          onPress={() => setGroupBy('status')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.groupByChipText, groupBy === 'status' && styles.groupByChipTextActive]}>By Status</Text>
+        </TouchableOpacity>
+      </View>
+
       {dueRoutines.length === 0 ? (
         <Text style={styles.agendaEmpty}>Nothing scheduled for this period.</Text>
       ) : null}
@@ -486,11 +534,7 @@ export function LoggerTab() {
             const reqSkippedPct = allSetsTotal > 0 ? (allSetsSkipped / allSetsTotal) * 100 : 0;
             const routine = routines.find((r) => r.id === exec.routineId);
 
-            const statusLabel =
-              status === 'pending' ? 'Pending' :
-              status === 'in-progress' ? 'In Progress' :
-              status === 'incomplete' ? 'Incomplete' :
-              status === 'completed' ? 'Completed' : 'Failed';
+            const statusLabel = STATUS_LABEL[status];
 
             const loggedIds = executions
               .filter((e) => e.routineExecutionId === exec.id)
@@ -818,6 +862,30 @@ const styles = StyleSheet.create({
   dot: { width: 5, height: 5, borderRadius: 999 },
   dotHidden: { backgroundColor: 'transparent' },
   agendaEmpty: { color: colors.textDim, fontSize: font.md, paddingVertical: spacing.md },
+  groupByRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  groupByChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  groupByChipActive: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  groupByChipText: {
+    color: colors.textMuted,
+    fontSize: font.sm,
+    fontWeight: '600',
+  },
+  groupByChipTextActive: {
+    color: '#fff',
+  },
   weekHeader: {
     color: colors.textMuted,
     fontSize: font.sm,

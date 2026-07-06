@@ -84,7 +84,7 @@ export async function fileBugReport(payload: BugReportPayload): Promise<void> {
       Name: { title: [{ text: { content: payload.title } }] },
       Description: { rich_text: [{ text: { content: payload.description } }] },
       Module: { select: { name: pathnameToModule(payload.screen) } },
-      Status: { select: { name: 'New' } },
+      Status: { status: { name: 'New' } },
       Severity: { select: { name: payload.severity } },
       Reporter: { email: payload.reporter || null },
     },
