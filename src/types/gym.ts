@@ -96,14 +96,31 @@ export interface RoutineExecution {
   deleted?: boolean;             // user hard-deleted this occurrence; keeps doc alive (same reason) but hidden everywhere
   removedExerciseIds?: string[]; // exercises hidden from routine.exerciseIds for this execution only
   addedExerciseIds?: string[];   // extra exercises included only for this execution
+  // Frozen copy of the routine's exerciseIds/exerciseRoles, written the moment the user
+  // first logs anything for this execution. Once present, this execution stops tracking
+  // live edits to the routine template — so editing a routine can't retroactively change
+  // an occurrence that's already in progress or further along (completed/incomplete/skipped).
+  // Absent while the execution is still untouched (pending/scheduled/overdue-with-nothing-logged),
+  // so those still reflect routine edits made before the user actually starts them.
+  snapshotExerciseIds?: string[];
+  snapshotExerciseRoles?: Record<string, ExerciseRole>;
 }
 
-/** The exercise list for one specific execution: the routine's template, with this execution's own additions/removals applied. Never mutates the routine. */
+/** The exercise list for one specific execution: the routine's template (or this
+ * execution's frozen snapshot, once it has one), with this execution's own
+ * additions/removals applied. Never mutates the routine. */
 export function effectiveExerciseIds(routine: Routine | undefined, exec: RoutineExecution): string[] {
   const removed = new Set(exec.removedExerciseIds ?? []);
-  const base = (routine?.exerciseIds ?? []).filter((id) => !removed.has(id));
+  const baseIds = exec.snapshotExerciseIds ?? routine?.exerciseIds ?? [];
+  const base = baseIds.filter((id) => !removed.has(id));
   const added = (exec.addedExerciseIds ?? []).filter((id) => !base.includes(id));
   return [...base, ...added];
+}
+
+/** Same snapshot-vs-live-routine logic as effectiveExerciseIds, but for a single exercise's role. */
+export function effectiveExerciseRole(routine: Routine | undefined, exec: RoutineExecution, exerciseId: string): ExerciseRole {
+  const roles = exec.snapshotExerciseRoles ?? routine?.exerciseRoles;
+  return roles?.[exerciseId] ?? 'mandatory';
 }
 
 // ── Helpers for reading possibly-legacy exercise docs ───────────────────────

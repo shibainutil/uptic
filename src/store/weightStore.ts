@@ -77,8 +77,8 @@ export function useWeightTarget(userId: string | null | undefined) {
     return unsub;
   }, [userId]);
 
-  const save = useCallback(async (value: number, unit: WeightUnit) => {
-    await setDoc(targetDoc(userId!), { value, unit });
+  const save = useCallback(async (value: number, unit: WeightUnit, byDate?: string) => {
+    await setDoc(targetDoc(userId!), stripUndefined({ value, unit, byDate }));
   }, [userId]);
 
   const clear = useCallback(async () => {
