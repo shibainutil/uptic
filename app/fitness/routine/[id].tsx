@@ -82,7 +82,7 @@ function RoutineForm({ existing }: { existing?: Routine }) {
   const { user } = useAuth();
   const { exercises } = useExercises(user?.uid);
   const { add, update } = useRoutines(user?.uid);
-  const { routineExecutions } = useRoutineExecutions(user?.uid);
+  const { routineExecutions, remove: removeRoutineExec } = useRoutineExecutions(user?.uid);
 
   const isNew = !existing;
 
@@ -105,10 +105,11 @@ function RoutineForm({ existing }: { existing?: Routine }) {
   );
 
   // Once at least one execution has been completed, the start date reflects when the
-  // routine actually began being followed and can no longer be changed.
+  // routine actually began being followed and can no longer be changed. Rescheduled-away
+  // or deleted (tombstoned) docs are excluded — their stale status shouldn't lock anything.
   const frozenStartDate = useMemo(() => {
     const completedDates = routineExecutions
-      .filter((e) => e.routineId === existing?.id && e.status === 'completed')
+      .filter((e) => e.routineId === existing?.id && e.status === 'completed' && !e.rescheduledTo && !e.deleted)
       .map((e) => e.dueDate)
       .sort();
     return completedDates[0];
@@ -170,8 +171,18 @@ function RoutineForm({ existing }: { existing?: Routine }) {
 
     setSaving(true);
     try {
-      if (isNew) await add(data);
-      else await update(existing!.id, data);
+      if (isNew) {
+        await add(data);
+      } else {
+        await update(existing!.id, data);
+        // Moving the start date later invalidates any not-yet-completed execution that
+        // now falls before it — it can never be regenerated (the schedule only produces
+        // dates >= startDate going forward), so it'd otherwise be stranded forever.
+        const orphaned = routineExecutions.filter((e) =>
+          e.routineId === existing!.id && !e.rescheduledTo && !e.deleted &&
+          e.status !== 'completed' && e.dueDate < effectiveStartDate);
+        await Promise.all(orphaned.map((e) => removeRoutineExec(e.id)));
+      }
       router.back();
     } catch (e: unknown) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Could not save routine.');

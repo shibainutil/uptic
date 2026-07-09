@@ -1,19 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, Pressable, ScrollView, StyleSheet, Alert, Modal as RNModal } from 'react-native';
+import {
+  View, Text, TouchableOpacity, Pressable, ScrollView, StyleSheet, Alert, Modal as RNModal,
+} from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { MaterialIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../context/AuthContext';
 import {
   useRoutines, useRoutineExecutions, useExercises, useExerciseExecutions,
 } from '../../store/gymStore';
 import { toISO, todayISO, diffDays } from '../../lib/schedule';
 import { useKeyboardHeight } from '../../lib/useKeyboardHeight';
-import { type Exercise, type RoutineExecution, exerciseType, exerciseMuscleGroup, effectiveExerciseIds, exerciseRole } from '../../types/gym';
+import { type Exercise, type RoutineExecution, exerciseType, exerciseMuscleGroup, effectiveExerciseIds, effectiveExerciseRole } from '../../types/gym';
 import { colors, font, spacing, radius } from '../../theme';
 import { ExerciseInlineForm } from './ExerciseInlineForm';
 import { CalendarModal } from '../ui/CalendarModal';
+import { Collapsible } from '../ui/Collapsible';
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+const GROUP_BY_STORAGE_KEY = 'logger:groupBy';
+const DATE_SORT_DESC_STORAGE_KEY = 'logger:dateSortDesc';
 
 // Context-menu geometry: fixed card width + close-row height let us position the
 // card so its X icon lands exactly on the dots button, regardless of tap position.
@@ -94,7 +101,7 @@ export function LoggerTab() {
   const keyboardHeight = useKeyboardHeight();
   const { routines } = useRoutines(user?.uid);
   const {
-    routineExecutions, setStatus, reschedule, remove: removeRoutineExec,
+    routineExecutions, setStatus, reschedule, remove: removeRoutineExec, ensureSnapshot,
     addExerciseToExecution, removeExerciseFromExecution, replaceExerciseInExecution,
   } = useRoutineExecutions(user?.uid);
   const { exercises, update: updateExercise } = useExercises(user?.uid);
@@ -127,7 +134,39 @@ export function LoggerTab() {
   });
   const [weekView, setWeekView] = useState(true);
   const [groupBy, setGroupBy] = useState<'date' | 'status'>('date');
+  // Only meaningful for date grouping — status grouping always keeps its own fixed
+  // priority order (in-progress -> pending -> scheduled -> completed -> ...).
+  const [dateSortDesc, setDateSortDesc] = useState(true);
+  // Persisted so the grouping/sort choice survives app reloads and navigating away and
+  // back to this tab, instead of always resetting to the "by date" default.
+  const loadedPrefsRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const [savedGroupBy, savedSortDesc] = await Promise.all([
+          AsyncStorage.getItem(GROUP_BY_STORAGE_KEY),
+          AsyncStorage.getItem(DATE_SORT_DESC_STORAGE_KEY),
+        ]);
+        if (savedGroupBy === 'date' || savedGroupBy === 'status') setGroupBy(savedGroupBy);
+        if (savedSortDesc != null) setDateSortDesc(savedSortDesc === 'true');
+      } finally {
+        loadedPrefsRef.current = true;
+      }
+    })();
+  }, []);
+  useEffect(() => {
+    if (!loadedPrefsRef.current) return; // don't overwrite storage with the default before it's loaded
+    AsyncStorage.setItem(GROUP_BY_STORAGE_KEY, groupBy).catch(() => {});
+  }, [groupBy]);
+  useEffect(() => {
+    if (!loadedPrefsRef.current) return;
+    AsyncStorage.setItem(DATE_SORT_DESC_STORAGE_KEY, String(dateSortDesc)).catch(() => {});
+  }, [dateSortDesc]);
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
+  // Keyed by `${routineExecutionId}:${exerciseId}` — lifted here (rather than local state
+  // inside ExerciseInlineForm) so an expanded exercise survives its card remounting when
+  // status-based grouping moves the parent routine into a different status group.
+  const [openExerciseIds, setOpenExerciseIds] = useState<Set<string>>(new Set());
   const [menuExec, setMenuExec] = useState<RoutineExecution | null>(null);
   const [menuAnchor, setMenuAnchor] = useState({ x: 0, y: 0 });
   const dotsRefs = useRef<Map<string, View>>(new Map());
@@ -255,7 +294,7 @@ export function LoggerTab() {
         setsDone = count;
       }
 
-      const isOptional = exerciseRole(r, eid) === 'optional';
+      const isOptional = effectiveExerciseRole(r, exec, eid) === 'optional';
       if (isOptional) {
         optTotal += 1;
         optSetsTotal += count;
@@ -293,7 +332,7 @@ export function LoggerTab() {
 
     const isFullyLogged = (eid: string) => isExerciseFullyDone(exec.id, eid);
 
-    const mandatoryIds = allIds.filter((eid) => exerciseRole(routine, eid) !== 'optional');
+    const mandatoryIds = allIds.filter((eid) => effectiveExerciseRole(routine, exec, eid) !== 'optional');
     const allMandatoryDone = total > 0 && mandatoryIds.length > 0 && mandatoryIds.every(isFullyLogged);
     if (allMandatoryDone) return 'completed';
 
@@ -320,6 +359,11 @@ export function LoggerTab() {
 
   function toggleRoutine(execId: string) {
     setOpenIds((prev) => { const n = new Set(prev); n.has(execId) ? n.delete(execId) : n.add(execId); return n; });
+  }
+
+  function toggleExercise(execId: string, exerciseId: string) {
+    const key = `${execId}:${exerciseId}`;
+    setOpenExerciseIds((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
   }
 
   function handleReset(exec: RoutineExecution) {
@@ -366,13 +410,16 @@ export function LoggerTab() {
   const monthRangeStartISO = toISO(cells[0].date);
   const monthRangeEndISO = toISO(cells[cells.length - 1].date);
 
+  // Date order applies regardless of groupBy — it only controls chronological order
+  // (both the day-group order and the order of items within each status group). Which
+  // status group appears first is a separate, always-fixed concern (STATUS_GROUP_ORDER).
   const dueRoutines = routineExecutions
     .filter((e) => !e.rescheduledTo && !e.deleted && (weekView
       ? e.dueDate >= weekStartISO && e.dueDate <= weekEndISO
       : e.dueDate >= monthRangeStartISO && e.dueDate <= monthRangeEndISO))
-    .sort((a, b) => b.dueDate.localeCompare(a.dueDate));
+    .sort((a, b) => dateSortDesc ? b.dueDate.localeCompare(a.dueDate) : a.dueDate.localeCompare(b.dueDate));
 
-  // Group by day or by status, each preserving newest-to-oldest date order within a group.
+  // Group by day or by status, each preserving dueRoutines' date order within a group.
   const weekGroups: { key: string; label: string; items: RoutineExecution[] }[] = [];
   if (groupBy === 'date') {
     for (const exec of dueRoutines) {
@@ -435,11 +482,10 @@ export function LoggerTab() {
           <View style={styles.weekRow}>
             {weekDays().map((date, di) => {
               const isToday = isSameDay(date, today);
-              const isWeekend = di >= 5;
               const dots = dotsByDate.get(toISO(date)) ?? [];
               return (
                 <View key={di} style={[styles.dayCell, isToday && styles.dayCellToday]}>
-                  <Text style={[styles.dayNumber, isWeekend && styles.dayNumberWeekend, isToday && styles.dayNumberToday]}>
+                  <Text style={[styles.dayNumber, isToday && styles.dayNumberToday]}>
                     {date.getDate()}
                   </Text>
                   <View style={styles.dotRow}>
@@ -456,13 +502,11 @@ export function LoggerTab() {
             <View key={wi} style={styles.weekRow}>
               {week.map(({ date, inMonth }, di) => {
                 const isToday = isSameDay(date, today);
-                const isWeekend = di >= 5;
                 const dots = dotsByDate.get(toISO(date)) ?? [];
                 return (
                   <View key={di} style={[styles.dayCell, isToday && styles.dayCellToday]}>
                     <Text style={[
                       styles.dayNumber,
-                      isWeekend && styles.dayNumberWeekend,
                       isToday && styles.dayNumberToday,
                       !inMonth && styles.dayNumberOutOfMonth,
                     ]}>
@@ -481,21 +525,36 @@ export function LoggerTab() {
         )}
       </View>
 
-      <View style={styles.groupByRow}>
-        <TouchableOpacity
-          style={[styles.groupByChip, groupBy === 'date' && styles.groupByChipActive]}
-          onPress={() => setGroupBy('date')}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.groupByChipText, groupBy === 'date' && styles.groupByChipTextActive]}>By Date</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.groupByChip, groupBy === 'status' && styles.groupByChipActive]}
-          onPress={() => setGroupBy('status')}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.groupByChipText, groupBy === 'status' && styles.groupByChipTextActive]}>By Status</Text>
-        </TouchableOpacity>
+      <View style={styles.groupByBox}>
+        <Text style={styles.groupByLabel}>Group by</Text>
+        <View style={styles.groupByButtons}>
+          <TouchableOpacity
+            style={styles.groupByChip}
+            onPress={() => setGroupBy('status')}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.groupByChipText, groupBy === 'status' && styles.groupByChipTextActive]}>Status</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.groupByChip, styles.groupByChipWithIcon]}
+            onPress={() => {
+              // Already active: tapping again flips sort direction instead of a no-op.
+              if (groupBy === 'date') setDateSortDesc((v) => !v);
+              else setGroupBy('date');
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.groupByChipText, groupBy === 'date' && styles.groupByChipTextActive]}>Date</Text>
+            <MaterialIcons
+              name={dateSortDesc ? 'arrow-downward' : 'arrow-upward'}
+              size={font.md}
+              color={groupBy === 'date' ? STATUS_COLOR.pending : colors.textMuted}
+              // The glyph itself doesn't fill its bounding box symmetrically, leaving a
+              // couple extra px on this side even with equal coded padding — nudge it in.
+              style={{ marginRight: -2 }}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {dueRoutines.length === 0 ? (
@@ -551,7 +610,7 @@ export function LoggerTab() {
             // Ad-hoc exercises added to just this occurrence are always optional,
             // regardless of what the routine template would otherwise default to.
             const roleFor = (exId: string) =>
-              exec.addedExerciseIds?.includes(exId) ? 'optional' : exerciseRole(routine, exId);
+              exec.addedExerciseIds?.includes(exId) ? 'optional' : effectiveExerciseRole(routine, exec, exId);
             const grouped = routineExercises.reduce<Record<string, Exercise[]>>((acc, ex) => {
               const g = roleFor(ex.id);
               if (!acc[g]) acc[g] = [];
@@ -567,7 +626,7 @@ export function LoggerTab() {
             return (
               <View
                 key={exec.id}
-                style={[styles.agendaCard, { marginBottom: spacing.sm }]}
+                style={[styles.agendaCard, { marginBottom: spacing.xs }]}
               >
                 <Pressable style={styles.cardHeader} onPress={() => toggleRoutine(exec.id)}>
                   <MaterialIcons name={expanded ? 'expand-less' : 'expand-more'} size={22} color={colors.textMuted} />
@@ -646,7 +705,7 @@ export function LoggerTab() {
                 </View>
 
                 {routineExercises.length > 0 && (
-                  <View style={[styles.exerciseList, !expanded && styles.exerciseListHidden]}>
+                  <Collapsible expanded={expanded} style={styles.exerciseList}>
                     {groupNames.map((group) => (
                       <View key={group}>
                         <Text style={styles.groupLabel}>{ROLE_LABEL[group]}</Text>
@@ -669,6 +728,8 @@ export function LoggerTab() {
                               routineExecutionId={exec.id}
                               dueDate={exec.dueDate}
                               canDelete={roleFor(ex.id) === 'optional'}
+                              expanded={openExerciseIds.has(`${exec.id}:${ex.id}`)}
+                              onToggleExpanded={() => toggleExercise(exec.id, ex.id)}
                               onUpdateExercise={(data) => updateExercise(ex.id, data)}
                               onReplace={() => { setPickerExec(exec); setReplacingExId(ex.id); setPickerMode('replace'); }}
                               onTimerChange={(running, elapsedSec) => {
@@ -693,6 +754,9 @@ export function LoggerTab() {
                                   if (idToDelete) await removeExecExecution(idToDelete);
                                   return null;
                                 }
+                                // First real log for this occurrence freezes its exercise list/roles —
+                                // a later routine edit shouldn't retroactively change it anymore.
+                                await ensureSnapshot(exec, routine);
                                 const live = executions.find(
                                   (e) => e.routineExecutionId === exec.id && e.exerciseId === ex.id,
                                 );
@@ -711,7 +775,7 @@ export function LoggerTab() {
                       <MaterialIcons name="add" size={16} color={colors.accent} />
                       <Text style={styles.addExerciseText}>Add optional exercise</Text>
                     </Pressable>
-                  </View>
+                  </Collapsible>
                 )}
               </View>
             );
@@ -847,7 +911,6 @@ const styles = StyleSheet.create({
   dayCell: { flex: 1, alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.xs, height: 48 },
   dayCellToday: { backgroundColor: `${colors.accent}18` },
   dayNumber: { color: colors.text, fontSize: font.md },
-  dayNumberWeekend: { color: colors.textMuted },
   dayNumberToday: { color: colors.accent, fontWeight: '700' },
   dayNumberOutOfMonth: { opacity: 0.35 },
   dotRow: {
@@ -862,10 +925,29 @@ const styles = StyleSheet.create({
   dot: { width: 5, height: 5, borderRadius: 999 },
   dotHidden: { backgroundColor: 'transparent' },
   agendaEmpty: { color: colors.textDim, fontSize: font.md, paddingVertical: spacing.md },
-  groupByRow: {
+  groupByBox: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing.sm,
     marginTop: spacing.md,
+    marginBottom: spacing.xs,
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.surface2,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  groupByLabel: {
+    color: colors.textMuted,
+    fontSize: font.md,
+    fontWeight: '600',
+  },
+  groupByButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    flex: 1,
   },
   groupByChip: {
     paddingHorizontal: spacing.md,
@@ -873,26 +955,31 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.border,
+    minHeight: 28,
+    justifyContent: 'center',
   },
-  groupByChipActive: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
+  groupByChipWithIcon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   groupByChipText: {
     color: colors.textMuted,
-    fontSize: font.sm,
+    fontSize: font.md,
     fontWeight: '600',
+    textTransform: 'uppercase',
   },
   groupByChipTextActive: {
-    color: '#fff',
+    color: STATUS_COLOR.pending,
   },
   weekHeader: {
     color: colors.textMuted,
     fontSize: font.sm,
     fontWeight: '600',
-    paddingVertical: spacing.sm,
+    textTransform: 'uppercase',
+    paddingTop: 0,
+    paddingBottom: spacing.sm,
     paddingHorizontal: spacing.xs,
-    marginTop: spacing.sm,
   },
   agendaCard: {
     backgroundColor: colors.surface,
@@ -975,9 +1062,6 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xs,
     paddingBottom: spacing.sm,
     gap: spacing.xs,
-  },
-  exerciseListHidden: {
-    display: 'none',
   },
   groupLabel: {
     fontSize: 10,

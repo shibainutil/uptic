@@ -1,5 +1,20 @@
 import { type Routine, type RoutineExecution, type RoutineSchedule, type ExerciseExecution, effectiveExerciseIds } from '../types/gym';
 
+// Whether the user has actually engaged with this exercise at all — a running/paused
+// cardio timer, any weight/reps typed into a set, or an explicit skip. Only exercises
+// with NO trace of engagement get auto-skipped when their routine execution goes past
+// due; anything the user has touched (even mid-workout, timer still running) must be
+// left alone instead of being force-skipped out from under them.
+function hasAnyEngagement(e: ExerciseExecution): boolean {
+  return Boolean(
+    e.completed ||
+    e.skipped ||
+    e.timerStartedAt ||
+    (e.durationMin != null && e.durationMin > 0) ||
+    e.setData?.some((s) => s.weight != null || s.reps != null || s.skipped),
+  );
+}
+
 // ── ISO date helpers (local, no time component) ─────────────────────────────
 
 export function toISO(d: Date): string {
@@ -70,6 +85,14 @@ export interface ReconcileResult {
   exerciseExecsToCreateSkipped: ExerciseExecution[]; // stub docs for exercises never logged
 }
 
+// Executions are materialized through the end of next week (Mon–Sun), so the whole of
+// next week is already visible/schedulable instead of only appearing day by day.
+function endOfNextWeek(todayISO: string): string {
+  const mondayOffset = (fromISO(todayISO).getDay() + 6) % 7; // 0=Mon..6=Sun
+  const thisMonday = addDays(todayISO, -mondayOffset);
+  return addDays(thisMonday, 13); // +7 -> next Monday, +6 -> next Sunday
+}
+
 /**
  * Computes missing pending executions to create, overdue pending executions to fail,
  * and exercise executions to mark skipped when their parent routine execution fails.
@@ -85,9 +108,10 @@ export function reconcileRoutineExecutions(
   const existingIds = new Set(existing.map((e) => e.id));
   const now = new Date().toISOString();
   const toCreate: RoutineExecution[] = [];
+  const horizon = endOfNextWeek(today);
 
   for (const routine of routines) {
-    const dueDates = enumerateDueDates(routine.schedule, routine.startDate, today);
+    const dueDates = enumerateDueDates(routine.schedule, routine.startDate, horizon);
     for (const dueDate of dueDates) {
       const id = `${routine.id}_${dueDate}`;
       if (existingIds.has(id)) continue;
@@ -113,7 +137,10 @@ export function reconcileRoutineExecutions(
         (e) => e.routineExecutionId === routineExecId && e.exerciseId === exerciseId,
       );
       if (existingExecExec) {
-        if (!existingExecExec.completed) exerciseExecsToSkip.push(existingExecExec.id);
+        // Only auto-skip exercises with zero trace of engagement — anything the user has
+        // actually started (even mid-workout, e.g. a cardio timer still running) must be
+        // left alone rather than force-skipped just because a day boundary passed.
+        if (!hasAnyEngagement(existingExecExec)) exerciseExecsToSkip.push(existingExecExec.id);
       } else {
         exerciseExecsToCreateSkipped.push({
           id: `${routineExecId}_${exerciseId}`,

@@ -3,7 +3,7 @@ import { View, Text, TextInput, Pressable, StyleSheet, Alert, Modal as RNModal }
 import { MaterialIcons } from '@expo/vector-icons';
 import Svg, { Circle } from 'react-native-svg';
 import { colors, spacing, font, radius } from '../../theme';
-import { ClockDial } from '../ui/ClockDial';
+import { Collapsible } from '../ui/Collapsible';
 import {
   type Exercise, type ExerciseExecution, type SetEntry, exerciseType,
 } from '../../types/gym';
@@ -36,6 +36,11 @@ interface Props {
   // Reports live timer state up so the parent can show a running-timer badge
   // even while this form is collapsed/hidden (it stays mounted, just not visible).
   onTimerChange?: (running: boolean, elapsedSec: number) => void;
+  // Lifted to the parent (keyed by routine execution + exercise) instead of local state,
+  // so it survives this component remounting — e.g. when status-based grouping moves the
+  // parent routine card into a different group as its status changes.
+  expanded: boolean;
+  onToggleExpanded: () => void;
 }
 
 function filterWeight(v: string): string {
@@ -87,13 +92,74 @@ function lapShade(lapIndex: number): string {
 
 const LABEL_W = 52;
 
-export function ExerciseInlineForm({ exercise, badge, execution, lastExecution, routineExecutionId, dueDate, onSave, onUpdateExercise, onReplace, canDelete = true, onTimerChange }: Props) {
+// Four explicit rows (label / + / value / -) each spanning both minutes and seconds. Every
+// cell — label, button, box — sits in a same-width slot (wider than the small value box
+// itself, so "Minutes"/"Seconds" fit) with a fixed-width colon slot shared by every row.
+// That's what keeps the ":" exactly centered on the value-box row, and every row's items
+// stacked in the same two columns, regardless of the label text being wider than the box.
+function HmsEditor({ minutes, seconds, onIncrementMinutes, onDecrementMinutes, onIncrementSeconds, onDecrementSeconds }: {
+  minutes: number; seconds: number;
+  onIncrementMinutes: () => void; onDecrementMinutes: () => void;
+  onIncrementSeconds: () => void; onDecrementSeconds: () => void;
+}) {
+  return (
+    <View>
+      <View style={styles.hmsRow}>
+        <View style={styles.hmsSlot}><Text style={styles.hmsLabel}>Minutes</Text></View>
+        <View style={styles.hmsColonSlot} />
+        <View style={styles.hmsSlot}><Text style={styles.hmsLabel}>Seconds</Text></View>
+      </View>
+      <View style={styles.hmsRow}>
+        <View style={styles.hmsSlot}>
+          <Pressable onPress={onIncrementMinutes} style={styles.hmsStepBtn}>
+            <Text style={styles.hmsStepBtnText}>+</Text>
+          </Pressable>
+        </View>
+        <View style={styles.hmsColonSlot} />
+        <View style={styles.hmsSlot}>
+          <Pressable onPress={onIncrementSeconds} style={styles.hmsStepBtn}>
+            <Text style={styles.hmsStepBtnText}>+</Text>
+          </Pressable>
+        </View>
+      </View>
+      <View style={styles.hmsRow}>
+        <View style={styles.hmsSlot}>
+          <View style={styles.hmsBox}>
+            <Text style={styles.hmsValue}>{minutes.toString().padStart(2, '0')}</Text>
+          </View>
+        </View>
+        <View style={styles.hmsColonSlot}>
+          <Text style={styles.hmsColon}>:</Text>
+        </View>
+        <View style={styles.hmsSlot}>
+          <View style={styles.hmsBox}>
+            <Text style={styles.hmsValue}>{seconds.toString().padStart(2, '0')}</Text>
+          </View>
+        </View>
+      </View>
+      <View style={styles.hmsRow}>
+        <View style={styles.hmsSlot}>
+          <Pressable onPress={onDecrementMinutes} disabled={minutes <= 0} style={[styles.hmsStepBtn, minutes <= 0 && styles.cellLocked]}>
+            <Text style={styles.hmsStepBtnText}>−</Text>
+          </Pressable>
+        </View>
+        <View style={styles.hmsColonSlot} />
+        <View style={styles.hmsSlot}>
+          <Pressable onPress={onDecrementSeconds} disabled={seconds <= 0} style={[styles.hmsStepBtn, seconds <= 0 && styles.cellLocked]}>
+            <Text style={styles.hmsStepBtnText}>−</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+export function ExerciseInlineForm({ exercise, badge, execution, lastExecution, routineExecutionId, dueDate, onSave, onUpdateExercise, onReplace, canDelete = true, onTimerChange, expanded, onToggleExpanded }: Props) {
   const isStrength = exerciseType(exercise) === 'strength';
   // `canDelete` doubles as "this exercise is optional" (only optional exercises can be
   // deleted) — skipping optional exercises works the same but is shown in grey, not red.
   const skipColor = canDelete ? OPTIONAL_SKIP_COLOR : SKIP_COLOR;
   const setCount = exercise.sets ?? 3;
-  const [expanded, setExpanded] = useState(false);
   const [rows, setRows] = useState<SetRow[]>(() =>
     Array.from({ length: setCount }, () => ({ weight: '', reps: '' })),
   );
@@ -461,6 +527,7 @@ export function ExerciseInlineForm({ exercise, badge, execution, lastExecution, 
           .map((p, i) => ({ paramId: p.id, value: paramStrsRef.current[i] }))
           .filter((pv) => pv.value !== ''),
         completed: durationComplete,
+        skipped: false,
         routineExecutionId,
         // Always write durationMin explicitly (even 0) — omitting it on reset would
         // leave Firestore holding the stale prior value, which then jumps back into
@@ -539,10 +606,7 @@ export function ExerciseInlineForm({ exercise, badge, execution, lastExecution, 
     setEditingTime(null);
   }
 
-  function onDialChange(v: number) {
-    const currentMin = Math.floor(elapsedSecRef.current / 60);
-    const currentSec = elapsedSecRef.current % 60;
-    const next = editingTime === 'mm' ? v * 60 + currentSec : currentMin * 60 + v;
+  function applyDialValue(next: number) {
     // The edited value becomes the new baseline; if still running, restart the
     // wall-clock reference from now so future ticks continue from this value.
     runBaseSecRef.current = next;
@@ -551,6 +615,17 @@ export function ExerciseInlineForm({ exercise, badge, execution, lastExecution, 
     elapsedSecRef.current = next;
     isLocallyModifiedRef.current = true;
     triggerSaveCardio();
+  }
+
+  // Each stepper just adds/subtracts its own unit directly to the total elapsed seconds;
+  // minutes/seconds for display are always re-derived from that afterward, matching the
+  // main timer's own display (which isn't capped at 59 minutes either).
+  function adjustMinutes(delta: number) {
+    applyDialValue(Math.max(0, elapsedSecRef.current + delta * 60));
+  }
+
+  function adjustSeconds(delta: number) {
+    applyDialValue(Math.max(0, elapsedSecRef.current + delta));
   }
 
   function adjustDuration(delta: number) {
@@ -670,7 +745,7 @@ export function ExerciseInlineForm({ exercise, badge, execution, lastExecution, 
 
   return (
     <View style={styles.container}>
-      <Pressable style={styles.header} onPress={() => setExpanded((v) => !v)}>
+      <Pressable style={styles.header} onPress={onToggleExpanded}>
         <MaterialIcons
           name={expanded ? 'expand-less' : 'expand-more'}
           size={20}
@@ -784,7 +859,9 @@ export function ExerciseInlineForm({ exercise, badge, execution, lastExecution, 
         </Pressable>
       </RNModal>
 
-      {expanded && !isStrength && (() => {
+      {!isStrength && (
+      <Collapsible expanded={expanded}>
+      {(() => {
         const rawProgress = targetMin > 0 ? elapsedSec / (targetMin * 60) : 0;
         const isOvertime = rawProgress >= 1;
         // Base green ring fills 0->1 and then stays full; never resets.
@@ -968,25 +1045,31 @@ export function ExerciseInlineForm({ exercise, badge, execution, lastExecution, 
         </View>
         );
       })()}
+      </Collapsible>
+      )}
 
       <RNModal visible={editingTime !== null} transparent animationType="fade" onRequestClose={closeTimeEditor}>
         <Pressable style={styles.clockBackdrop} onPress={closeTimeEditor}>
           <Pressable style={styles.clockSheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.clockTitle}>{editingTime === 'mm' ? 'Minutes' : 'Seconds'}</Text>
-            {editingTime !== null && (
-              <ClockDial
-                value={editingTime === 'mm' ? Math.floor(elapsedSec / 60) : elapsedSec % 60}
-                onChange={onDialChange}
-              />
-            )}
+            <Text style={styles.clockTitle}>Edit Time</Text>
+            {/* Matches the main timer's own MM:SS display — minutes aren't capped at 59. */}
+            <HmsEditor
+              minutes={Math.floor(elapsedSec / 60)}
+              seconds={elapsedSec % 60}
+              onIncrementMinutes={() => adjustMinutes(1)}
+              onDecrementMinutes={() => adjustMinutes(-1)}
+              onIncrementSeconds={() => adjustSeconds(1)}
+              onDecrementSeconds={() => adjustSeconds(-1)}
+            />
             <Pressable onPress={closeTimeEditor} style={styles.clockDoneBtn}>
-              <Text style={styles.clockDoneText}>Done</Text>
+              <Text style={styles.clockDoneText}>Save</Text>
             </Pressable>
           </Pressable>
         </Pressable>
       </RNModal>
 
-      {expanded && isStrength && (
+      {isStrength && (
+        <Collapsible expanded={expanded}>
         <View style={styles.form}>
           <View style={styles.setGridHeader}>
             <Text style={styles.setLabelHeader} />
@@ -1062,6 +1145,7 @@ export function ExerciseInlineForm({ exercise, badge, execution, lastExecution, 
             );
           })}
         </View>
+        </Collapsible>
       )}
     </View>
   );
@@ -1069,7 +1153,10 @@ export function ExerciseInlineForm({ exercise, badge, execution, lastExecution, 
 
 const RING_SIZE = 184;
 const OUTER_STROKE = 8;
-const OUTER_R = RING_SIZE / 2 - OUTER_STROKE / 2 - 2;
+// Flush with the shadow circle behind it (RING_SIZE/2) — any gap here exposes a sliver
+// of the shadow's grey background, which reads as an odd grey contour around the ring,
+// especially against the darkest overtime-lap green.
+const OUTER_R = RING_SIZE / 2 - OUTER_STROKE / 2;
 const RING_GAP = 6;
 const INNER_STROKE = 8;
 const INNER_R = OUTER_R - OUTER_STROKE / 2 - RING_GAP - INNER_STROKE / 2;
@@ -1342,8 +1429,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
   },
   stepBtn: {
-    width: Math.round(44 * 0.6 * 1.1),
-    height: Math.round(BOX_H * 0.6 * 1.1),
+    width: 44,
+    height: BOX_H,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: colors.surface,
@@ -1358,8 +1445,8 @@ const styles = StyleSheet.create({
   },
   stepBtnText: {
     color: colors.textMuted,
-    fontSize: 14,
-    lineHeight: 16,
+    fontSize: 20,
+    lineHeight: 22,
     includeFontPadding: false,
   },
   clockBackdrop: {
@@ -1369,7 +1456,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   clockSheet: {
-    backgroundColor: colors.surface,
+    // surface2, not surface — the boxes below are colors.surface (same as the main
+    // logger's digit boxes), and need a lighter surface2 backdrop to actually stand out
+    // instead of blending invisibly into a same-color sheet.
+    backgroundColor: colors.surface2,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
@@ -1380,6 +1470,65 @@ const styles = StyleSheet.create({
   clockTitle: {
     color: colors.text,
     fontSize: font.md,
+    fontWeight: '600' as const,
+  },
+  hmsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: spacing.xs / 2,
+  },
+  // Wider than the value box itself, so full label words fit — every row uses the same
+  // slot width for its left/right item, keeping all four rows aligned into two columns.
+  hmsSlot: {
+    width: 64,
+    alignItems: 'center',
+  },
+  hmsColonSlot: {
+    width: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hmsColon: {
+    color: colors.textMuted,
+    fontSize: 22,
+    fontWeight: '700' as const,
+  },
+  hmsBox: {
+    width: BOX_W,
+    height: BOX_H,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+  },
+  hmsStepBtn: {
+    width: BOX_W,
+    height: BOX_H,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+  },
+  hmsStepBtnText: {
+    color: colors.textMuted,
+    fontSize: 22,
+    lineHeight: 24,
+    includeFontPadding: false,
+  },
+  hmsValue: {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: '700' as const,
+    fontVariant: ['tabular-nums'],
+  },
+  hmsLabel: {
+    color: colors.textMuted,
+    fontSize: font.sm,
     fontWeight: '600' as const,
   },
   clockDoneBtn: {

@@ -192,6 +192,19 @@ export function useRoutineExecutions(userId: string | null | undefined) {
     });
   }, [userId]);
 
+  // Freezes the routine's current exerciseIds/exerciseRoles onto this execution the first
+  // time the user logs anything for it, so a later edit to the routine template can't
+  // retroactively change an occurrence that's already in progress or further along. A
+  // no-op once a snapshot already exists, and a no-op for still-untouched executions
+  // (those should keep tracking live routine edits until the user actually starts them).
+  const ensureSnapshot = useCallback(async (exec: RoutineExecution, routine: Routine | undefined) => {
+    if (exec.snapshotExerciseIds || !routine) return;
+    await updateDoc(userDoc(userId!, 'routineExecutions', exec.id), stripUndefined({
+      snapshotExerciseIds: routine.exerciseIds,
+      snapshotExerciseRoles: routine.exerciseRoles ?? {},
+    }));
+  }, [userId]);
+
   // Reschedule: delete old doc, create new one at newDate, move exercise execution refs.
   // The reconciler won't recreate the original date since a doc already exists for it
   // (rescheduledTo tombstone). The new doc's id prevents a duplicate at the new date.
@@ -207,7 +220,19 @@ export function useRoutineExecutions(userId: string | null | undefined) {
     batch.set(userDoc(userId!, 'routineExecutions', newId), stripUndefined({
       ...exec, id: newId, dueDate: newDate, status: 'pending', completedAt: null, rescheduledTo: undefined,
     }));
-    exSnap.docs.forEach((d) => batch.update(d.ref, { routineExecutionId: newId }));
+    exSnap.docs.forEach((d) => {
+      const data = d.data() as ExerciseExecution;
+      // A skipped-but-not-completed exercise gets a clean slate on the new date instead of
+      // arriving pre-skipped — rescheduling means "let me attempt this occurrence again",
+      // so a skip (whether from the user or an old auto-skip) shouldn't carry over. Genuine
+      // progress (completed, or real data logged) is left untouched either way.
+      const shouldUnskip = data.skipped && !data.completed;
+      batch.update(d.ref, stripUndefined({
+        routineExecutionId: newId,
+        date: newDate,
+        ...(shouldUnskip ? { skipped: false } : {}),
+      }));
+    });
     await batch.commit();
   }, [userId]);
 
@@ -269,7 +294,7 @@ export function useRoutineExecutions(userId: string | null | undefined) {
   }, [removeExerciseFromExecution, addExerciseToExecution]);
 
   return {
-    routineExecutions, loaded, setStatus, reschedule, remove,
+    routineExecutions, loaded, setStatus, reschedule, remove, ensureSnapshot,
     addExerciseToExecution, removeExerciseFromExecution, replaceExerciseInExecution,
   };
 }
