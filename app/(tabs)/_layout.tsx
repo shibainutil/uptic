@@ -13,16 +13,9 @@ import BugReportPickerSheet from '../../src/components/BugReportPickerSheet';
 type IconName = React.ComponentProps<typeof MaterialIcons>['name'];
 
 const TABS: { name: string; title: string; icon: IconName }[] = [
-  { name: 'todo',      title: 'To Do',     icon: 'checklist' },
-  { name: 'goals',     title: 'Goals',     icon: 'flag' },
-  { name: 'steps',     title: 'Steps',     icon: 'directions-walk' },
   { name: 'weight',    title: 'Weight',    icon: 'monitor-weight' },
-  { name: 'water',     title: 'Water',     icon: 'water-drop' },
-  { name: 'poop',      title: 'Poop',      icon: 'wc' },
-  { name: 'nutrition', title: 'Nutrition', icon: 'restaurant' },
-  { name: 'habits',    title: 'Habits',    icon: 'repeat' },
-  { name: 'journal',   title: 'Journal',   icon: 'menu-book' },
   { name: 'fitness',   title: 'Fitness',   icon: 'fitness-center' },
+  { name: 'cleaning',  title: 'Cleaning',  icon: 'cleaning-services' },
 ];
 
 export default function TabsLayout() {
