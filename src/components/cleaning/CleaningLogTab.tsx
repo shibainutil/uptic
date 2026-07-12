@@ -3,61 +3,31 @@ import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { useCleaningTasks, useCleaningSessions } from '../../store/cleaningStore';
-import { fromISO, todayISO } from '../../lib/schedule';
-import type { CleaningSession, CleaningTask } from '../../types/cleaning';
+import { fromISO, todayISO, addDays } from '../../lib/schedule';
+import { describeCleaningSchedule } from '../../lib/cleaningSchedule';
+import type { CleaningSession } from '../../types/cleaning';
 import { colors, spacing, font, radius } from '../../theme';
 
-function dueLabel(dueDate: string): string {
-  return fromISO(dueDate).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
-}
-
-function PeriodicRow({ session, task, onDone, onRemove }: {
-  session: CleaningSession;
-  task: CleaningTask | undefined;
-  onDone: () => void;
-  onRemove: () => void;
-}) {
-  const overdue = session.dueDate < todayISO();
-  const label = task ? `${task.name} · ${session.variant === 'deep' ? 'Deep clean' : 'Normal clean'}` : 'Unknown task';
-  return (
-    <View style={styles.row}>
-      <View style={styles.rowMain}>
-        <Text style={styles.rowLabel}>{label}</Text>
-        <Text style={[styles.rowDue, overdue && styles.rowDueOverdue]}>{dueLabel(session.dueDate)}</Text>
-      </View>
-      <View style={styles.rowActions}>
-        <Pressable onPress={onRemove} hitSlop={8} style={styles.iconBtn}>
-          <MaterialIcons name="close" size={18} color={colors.textMuted} />
-        </Pressable>
-        <Pressable onPress={onDone} style={styles.doneBtn}>
-          <MaterialIcons name="check" size={16} color="#fff" />
-          <Text style={styles.doneBtnText}>Done</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
-function FiniteTaskCard({ task, completedCount, pending, onLog }: {
-  task: CleaningTask;
+interface ProgressCardData {
+  key: string;
+  title: string;
+  subtitle?: string;
   completedCount: number;
-  pending: CleaningSession[];
+  total: number;
+  remaining: number;
   onLog: (count: number) => void;
-}) {
+}
+
+function ProgressCard({ title, subtitle, completedCount, total, remaining, onLog }: Omit<ProgressCardData, 'key'>) {
   const [count, setCount] = useState(1);
-  const target = task.targetSessions ?? completedCount + pending.length;
-  const pct = target > 0 ? Math.min(completedCount / target, 1) : 0;
-  const remaining = pending.length;
+  const pct = total > 0 ? Math.min(completedCount / total, 1) : 0;
   const clamped = Math.max(1, Math.min(count, remaining));
 
   return (
-    <View style={styles.finiteCard}>
+    <View style={styles.card}>
       <View style={styles.rowMain}>
-        <Text style={styles.rowLabel}>{task.name}</Text>
-        <Text style={styles.rowDue}>
-          {completedCount} of {target}
-          {task.targetDate ? ` · by ${fromISO(task.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : ''}
-        </Text>
+        <Text style={styles.rowLabel}>{title}</Text>
+        <Text style={styles.rowDue}>{completedCount} of {total}{subtitle ? ` · ${subtitle}` : ''}</Text>
       </View>
       <View style={styles.progressTrack}>
         <View style={[styles.progressFill, { width: `${pct * 100}%` }]} />
@@ -84,38 +54,73 @@ function FiniteTaskCard({ task, completedCount, pending, onLog }: {
   );
 }
 
+function isActive(s: CleaningSession): boolean {
+  return s.status !== 'completed' && !s.rescheduledTo && !s.deleted;
+}
+
 export function CleaningLogTab() {
   const { user } = useAuth();
   const { tasks } = useCleaningTasks(user?.uid);
-  const { sessions, setStatus, remove, logFiniteSessions } = useCleaningSessions(user?.uid);
+  const { sessions, logSessions } = useCleaningSessions(user?.uid);
 
   const today = todayISO();
-  const active = sessions.filter((s) => s.status !== 'completed' && !s.rescheduledTo && !s.deleted);
+  const tomorrow = addDays(today, 1);
 
-  // Finite tasks collapse to one progress card instead of one row per session.
-  const periodicActive = active.filter((s) => s.variant);
-  const finiteActive = active.filter((s) => !s.variant);
-
-  const finiteTaskIds = [...new Set(finiteActive.map((s) => s.taskId))];
-  const finiteGroups = finiteTaskIds
-    .map((taskId) => {
+  // Finite tasks: one tile per task, progress against its fixed target count.
+  const finiteTaskIds = [...new Set(sessions.filter((s) => !s.variant && isActive(s)).map((s) => s.taskId))];
+  const finiteGroups: ProgressCardData[] = finiteTaskIds
+    .map((taskId): ProgressCardData | null => {
       const task = tasks.find((t) => t.id === taskId);
       if (!task) return null;
-      const pending = finiteActive.filter((s) => s.taskId === taskId).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+      const pending = sessions.filter((s) => s.taskId === taskId && !s.variant && isActive(s));
       const completedCount = sessions.filter(
-        (s) => s.taskId === taskId && s.status === 'completed' && !s.rescheduledTo && !s.deleted,
+        (s) => s.taskId === taskId && !s.variant && s.status === 'completed' && !s.rescheduledTo && !s.deleted,
       ).length;
-      return { task, pending, completedCount };
+      const total = task.targetSessions ?? completedCount + pending.length;
+      return {
+        key: task.id,
+        title: task.name,
+        subtitle: task.targetDate
+          ? `by ${fromISO(task.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`
+          : undefined,
+        completedCount,
+        total,
+        remaining: pending.length,
+        onLog: (count) => logSessions(task.id, undefined, count),
+      };
     })
-    .filter((g): g is NonNullable<typeof g> => g != null);
+    .filter((g): g is ProgressCardData => g != null);
 
-  const overdue = periodicActive.filter((s) => s.dueDate < today).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-  const dueToday = periodicActive.filter((s) => s.dueDate === today);
-  const upcoming = periodicActive.filter((s) => s.dueDate > today).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  // Periodic tasks: one tile per (task, variant) — normal and deep clean track separately.
+  // Progress reflects only sessions scheduled before tomorrow (i.e. due by today), since
+  // the recurrence never ends and future occurrences aren't "graded" yet.
+  const periodicKeys = [...new Set(
+    sessions.filter((s) => s.variant && !s.rescheduledTo && !s.deleted).map((s) => `${s.taskId}::${s.variant}`),
+  )];
+  const periodicGroups: ProgressCardData[] = periodicKeys
+    .map((key): ProgressCardData | null => {
+      const [taskId, variant] = key.split('::') as [string, 'normal' | 'deep'];
+      const task = tasks.find((t) => t.id === taskId);
+      if (!task) return null;
+      const all = sessions.filter((s) => s.taskId === taskId && s.variant === variant && !s.rescheduledTo && !s.deleted);
+      const before = all.filter((s) => s.dueDate < tomorrow);
+      if (before.length === 0) return null;
+      const completedCount = before.filter((s) => s.status === 'completed').length;
+      const remaining = before.filter((s) => s.status !== 'completed').length;
+      const schedule = variant === 'deep' ? task.deepSchedule : task.normalSchedule;
+      return {
+        key,
+        title: `${task.name} · ${variant === 'deep' ? 'Deep clean' : 'Normal clean'}`,
+        subtitle: schedule ? describeCleaningSchedule(schedule) : undefined,
+        completedCount,
+        total: before.length,
+        remaining,
+        onLog: (count) => logSessions(taskId, variant, count),
+      };
+    })
+    .filter((g): g is ProgressCardData => g != null);
 
-  const nothing = finiteGroups.length === 0 && overdue.length === 0 && dueToday.length === 0 && upcoming.length === 0;
-
-  if (nothing) {
+  if (finiteGroups.length === 0 && periodicGroups.length === 0) {
     return (
       <View style={styles.empty}>
         <MaterialIcons name="check-circle" size={48} color={colors.textDim} />
@@ -126,54 +131,17 @@ export function CleaningLogTab() {
 
   return (
     <ScrollView contentContainerStyle={styles.list}>
+      {periodicGroups.length > 0 && (
+        <>
+          <Text style={styles.sectionHeader}>Recurring</Text>
+          {periodicGroups.map(({ key, ...g }) => <ProgressCard key={key} {...g} />)}
+        </>
+      )}
+
       {finiteGroups.length > 0 && (
         <>
           <Text style={styles.sectionHeader}>In Progress</Text>
-          {finiteGroups.map(({ task, pending, completedCount }) => (
-            <FiniteTaskCard
-              key={task.id}
-              task={task}
-              pending={pending}
-              completedCount={completedCount}
-              onLog={(count) => logFiniteSessions(task.id, count)}
-            />
-          ))}
-        </>
-      )}
-
-      {overdue.length > 0 && (
-        <>
-          <Text style={styles.sectionHeader}>Overdue</Text>
-          {overdue.map((s) => (
-            <PeriodicRow
-              key={s.id} session={s} task={tasks.find((t) => t.id === s.taskId)}
-              onDone={() => setStatus(s.id, 'completed')} onRemove={() => remove(s.id)}
-            />
-          ))}
-        </>
-      )}
-
-      {dueToday.length > 0 && (
-        <>
-          <Text style={styles.sectionHeader}>Due Today</Text>
-          {dueToday.map((s) => (
-            <PeriodicRow
-              key={s.id} session={s} task={tasks.find((t) => t.id === s.taskId)}
-              onDone={() => setStatus(s.id, 'completed')} onRemove={() => remove(s.id)}
-            />
-          ))}
-        </>
-      )}
-
-      {upcoming.length > 0 && (
-        <>
-          <Text style={styles.sectionHeader}>Upcoming</Text>
-          {upcoming.map((s) => (
-            <PeriodicRow
-              key={s.id} session={s} task={tasks.find((t) => t.id === s.taskId)}
-              onDone={() => setStatus(s.id, 'completed')} onRemove={() => remove(s.id)}
-            />
-          ))}
+          {finiteGroups.map(({ key, ...g }) => <ProgressCard key={key} {...g} />)}
         </>
       )}
     </ScrollView>
@@ -193,24 +161,9 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     marginBottom: spacing.sm,
   },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.surface2,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    gap: spacing.md,
-    marginBottom: spacing.sm,
-  },
   rowMain: { flex: 1, gap: 4 },
   rowLabel: { color: colors.text, fontSize: font.md, fontWeight: '500' },
   rowDue: { color: colors.textDim, fontSize: font.sm },
-  rowDueOverdue: { color: colors.danger, fontWeight: '600' },
-  rowActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  iconBtn: { padding: spacing.xs },
   doneBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -221,7 +174,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
   },
   doneBtnText: { color: '#fff', fontSize: font.sm, fontWeight: '600' },
-  finiteCard: {
+  card: {
     backgroundColor: colors.surface,
     borderRadius: radius.sm,
     borderWidth: 1,

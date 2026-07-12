@@ -125,12 +125,13 @@ export function useCleaningSessions(userId: string | null | undefined) {
     await batch.commit();
   }, [userId]);
 
-  // Marks the earliest `count` still-pending sessions of a finite task as completed
-  // today, so logging several sessions done in one sitting doesn't require tapping
-  // Done once per session.
-  const logFiniteSessions = useCallback(async (taskId: string, count: number) => {
+  // Marks the earliest `count` still-open (pending or overdue/failed) sessions of a
+  // task — and, for periodic tasks, a specific normal/deep variant — as completed
+  // today, so logging several sessions done in one sitting (or catching up on
+  // missed ones) doesn't require tapping Done once per session.
+  const logSessions = useCallback(async (taskId: string, variant: 'normal' | 'deep' | undefined, count: number) => {
     const targets = sessions
-      .filter((s) => s.taskId === taskId && s.status === 'pending' && !s.rescheduledTo && !s.deleted)
+      .filter((s) => s.taskId === taskId && s.variant === variant && s.status !== 'completed' && !s.rescheduledTo && !s.deleted)
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
       .slice(0, count);
     if (targets.length === 0) return;
@@ -140,7 +141,7 @@ export function useCleaningSessions(userId: string | null | undefined) {
     await batch.commit();
   }, [userId, sessions]);
 
-  return { sessions, loaded, setStatus, remove, reschedule, logFiniteSessions };
+  return { sessions, loaded, setStatus, remove, reschedule, logSessions };
 }
 
 /**
