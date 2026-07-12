@@ -56,7 +56,7 @@ export function enumeratePeriodicDueDates(schedule: CleaningSchedule, startISO: 
  */
 export function countScheduledSlotsBefore(schedule: CleaningSchedule, startISO: string, beforeISO: string): number {
   const dueDates = enumeratePeriodicDueDates(schedule, startISO, addDays(beforeISO, -1));
-  return dueDates.length * Math.max(1, schedule.timesOfDay.length);
+  return dueDates.length * Math.max(1, (schedule.timesOfDay ?? []).length);
 }
 
 // ── Human-readable description ───────────────────────────────────────────────
@@ -91,6 +91,6 @@ export function describeCleaningSchedule(schedule: CleaningSchedule): string {
     default:
       base = '';
   }
-  const times = schedule.timesOfDay.length ? ` at ${schedule.timesOfDay.join(', ')}` : '';
+  const times = (schedule.timesOfDay ?? []).length ? ` at ${schedule.timesOfDay.join(', ')}` : '';
   return `${base}${times}`;
 }
