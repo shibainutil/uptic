@@ -125,7 +125,22 @@ export function useCleaningSessions(userId: string | null | undefined) {
     await batch.commit();
   }, [userId]);
 
-  return { sessions, loaded, setStatus, remove, reschedule };
+  // Marks the earliest `count` still-pending sessions of a finite task as completed
+  // today, so logging several sessions done in one sitting doesn't require tapping
+  // Done once per session.
+  const logFiniteSessions = useCallback(async (taskId: string, count: number) => {
+    const targets = sessions
+      .filter((s) => s.taskId === taskId && s.status === 'pending' && !s.rescheduledTo && !s.deleted)
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+      .slice(0, count);
+    if (targets.length === 0) return;
+    const now = new Date().toISOString();
+    const batch = writeBatch(db);
+    targets.forEach((s) => batch.update(userDoc(userId!, 'cleaningSessions', s.id), { status: 'completed', completedAt: now }));
+    await batch.commit();
+  }, [userId, sessions]);
+
+  return { sessions, loaded, setStatus, remove, reschedule, logFiniteSessions };
 }
 
 /**
