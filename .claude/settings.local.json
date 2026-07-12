@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(*)",
-      "PowerShell(*)"
+      "PowerShell(*)",
+      "WebFetch(domain:storage.googleapis.com)"
     ]
   }
 }
