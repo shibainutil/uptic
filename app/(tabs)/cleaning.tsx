@@ -3,6 +3,8 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CleaningLogTab } from '../../src/components/cleaning/CleaningLogTab';
 import { CleaningTasksTab } from '../../src/components/cleaning/CleaningTasksTab';
+import { useAuth } from '../../src/context/AuthContext';
+import { useMigrateLegacyCleaningSessions } from '../../src/store/cleaningStore';
 import { colors, spacing, font } from '../../src/theme';
 
 const SUB_TABS = [
@@ -14,6 +16,8 @@ type SubTab = typeof SUB_TABS[number]['key'];
 
 export default function CleaningScreen() {
   const [tab, setTab] = useState<SubTab>('log');
+  const { user } = useAuth();
+  useMigrateLegacyCleaningSessions(user?.uid);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>

@@ -10,7 +10,7 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { db } from '../firebase';
 import type { CleaningTask, CleaningLogEntry } from '../types/cleaning';
 
@@ -61,13 +61,16 @@ export function useCleaningTasks(userId: string | null | undefined) {
     await updateDoc(userDoc(userId!, 'cleaningTasks', id), stripUndefined(data as Record<string, unknown>));
   }, [userId]);
 
-  // Deleting a task cascades to its logged entries.
+  // Deleting a task cascades to its logged entries (and any not-yet-migrated
+  // legacy session docs for it, just in case the migration hasn't run yet).
   const remove = useCallback(async (id: string) => {
-    const entrySnap = await getDocs(
-      query(userCol(userId!, 'cleaningLogEntries'), where('taskId', '==', id)),
-    );
+    const [entrySnap, legacySnap] = await Promise.all([
+      getDocs(query(userCol(userId!, 'cleaningLogEntries'), where('taskId', '==', id))),
+      getDocs(query(userCol(userId!, 'cleaningSessions'), where('taskId', '==', id))),
+    ]);
     const batch = writeBatch(db);
     entrySnap.docs.forEach((d) => batch.delete(d.ref));
+    legacySnap.docs.forEach((d) => batch.delete(d.ref));
     batch.delete(userDoc(userId!, 'cleaningTasks', id));
     await batch.commit();
   }, [userId]);
@@ -129,4 +132,41 @@ export function useCleaningLogEntries(userId: string | null | undefined) {
   }, [userId]);
 
   return { entries, loaded, add, addMany, update, remove };
+}
+
+// ── One-time migration ───────────────────────────────────────────────────────
+// The old `cleaningSessions` collection (pending/completed/failed slots) was
+// replaced by the freeform `cleaningLogEntries` log. Anything already marked
+// completed there represents a real logged session and gets carried over;
+// everything else (pending/failed placeholders) is no longer meaningful and is
+// dropped. Runs once per mount — once the old collection is empty there's
+// nothing left to migrate, so it's naturally idempotent.
+export function useMigrateLegacyCleaningSessions(userId: string | null | undefined) {
+  const ran = useRef(false);
+
+  useEffect(() => {
+    if (!userId || ran.current) return;
+    ran.current = true;
+
+    (async () => {
+      const snap = await getDocs(userCol(userId, 'cleaningSessions'));
+      if (snap.empty) return;
+
+      const batch = writeBatch(db);
+      snap.docs.forEach((d) => {
+        const s = d.data() as {
+          id: string; taskId: string; variant?: 'normal' | 'deep'; status: string;
+          dueDate: string; completedAt?: string; createdAt: string; notes?: string;
+        };
+        if (s.status === 'completed') {
+          const loggedAt = s.completedAt ?? `${s.dueDate}T00:00:00.000Z`;
+          batch.set(userDoc(userId, 'cleaningLogEntries', s.id), stripUndefined({
+            id: s.id, taskId: s.taskId, variant: s.variant, loggedAt, notes: s.notes, createdAt: s.createdAt,
+          }));
+        }
+        batch.delete(d.ref);
+      });
+      await batch.commit();
+    })().catch(() => { ran.current = false; /* retry on next mount */ });
+  }, [userId]);
 }
