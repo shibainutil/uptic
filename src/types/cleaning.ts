@@ -5,6 +5,7 @@ export interface CleaningSchedule {
   interval: number;         // every N units; 1 = plain daily/weekly/monthly
   daysOfWeek?: number[];    // unit='week': 0=Sun..6=Sat
   dayOfMonth?: number;      // unit='month': 1..31
+  timesOfDay: string[];     // "HH:MM" 24h, one entry per occurrence per due date (e.g. morning + evening)
 }
 
 export type CleaningTaskKind = 'periodic' | 'finite';
@@ -27,17 +28,15 @@ export interface CleaningTask {
   createdAt: string;
 }
 
-export type CleaningSessionStatus = 'pending' | 'completed' | 'failed';
-
-export interface CleaningSession {
-  id: string;                        // periodic: `${taskId}_${variant}_${dueDate}`; finite: `${taskId}_${index}`
+// A user-created record of an actual cleaning session. Logging is freeform — entries
+// aren't tied to a specific pre-generated schedule slot, can be logged outside the
+// schedule entirely, edited, or removed. Progress is derived by comparing entry counts
+// against the schedule, not by consuming pre-created placeholder docs.
+export interface CleaningLogEntry {
+  id: string;
   taskId: string;
-  variant?: 'normal' | 'deep';       // periodic only
-  dueDate: string;                   // ISO yyyy-mm-dd
-  status: CleaningSessionStatus;
-  completedAt?: string;
-  createdAt: string;
-  rescheduledTo?: string;            // tombstone; keeps doc alive so the reconciler won't recreate it
-  deleted?: boolean;                 // user hard-deleted this occurrence; tombstone, hidden everywhere
+  variant?: 'normal' | 'deep';       // periodic only; absent for finite tasks
+  loggedAt: string;                  // ISO datetime — when the session actually happened
   notes?: string;
+  createdAt: string;
 }

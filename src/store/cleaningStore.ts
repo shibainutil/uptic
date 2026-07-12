@@ -10,11 +10,9 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore';
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { db } from '../firebase';
-import type { CleaningTask, CleaningSession, CleaningSessionStatus } from '../types/cleaning';
-import { reconcileCleaningSessions } from '../lib/cleaningSchedule';
-import { todayISO } from '../lib/schedule';
+import type { CleaningTask, CleaningLogEntry } from '../types/cleaning';
 
 function uid() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -63,13 +61,13 @@ export function useCleaningTasks(userId: string | null | undefined) {
     await updateDoc(userDoc(userId!, 'cleaningTasks', id), stripUndefined(data as Record<string, unknown>));
   }, [userId]);
 
-  // Deleting a task cascades to its cleaning sessions.
+  // Deleting a task cascades to its logged entries.
   const remove = useCallback(async (id: string) => {
-    const sessionSnap = await getDocs(
-      query(userCol(userId!, 'cleaningSessions'), where('taskId', '==', id)),
+    const entrySnap = await getDocs(
+      query(userCol(userId!, 'cleaningLogEntries'), where('taskId', '==', id)),
     );
     const batch = writeBatch(db);
-    sessionSnap.docs.forEach((d) => batch.delete(d.ref));
+    entrySnap.docs.forEach((d) => batch.delete(d.ref));
     batch.delete(userDoc(userId!, 'cleaningTasks', id));
     await batch.commit();
   }, [userId]);
@@ -77,97 +75,58 @@ export function useCleaningTasks(userId: string | null | undefined) {
   return { tasks, loaded, add, update, remove };
 }
 
-// ── Sessions ──────────────────────────────────────────────────────────────────
+// ── Log entries ───────────────────────────────────────────────────────────────
+// Freeform, append-only: a session is logged whenever the user says so — on
+// schedule, early, late, or multiple times a day — not by consuming a
+// pre-generated pending slot. Entries are fully editable and deletable.
 
-export function useCleaningSessions(userId: string | null | undefined) {
-  const [sessions, setSessions] = useState<CleaningSession[]>([]);
+export function useCleaningLogEntries(userId: string | null | undefined) {
+  const [entries, setEntries] = useState<CleaningLogEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     if (!userId) {
-      setSessions([]);
+      setEntries([]);
       setLoaded(false);
       return;
     }
     setLoaded(false);
-    const unsub = onSnapshot(userCol(userId, 'cleaningSessions'), (snap) => {
-      setSessions(snap.docs.map((d) => d.data() as CleaningSession));
+    const unsub = onSnapshot(userCol(userId, 'cleaningLogEntries'), (snap) => {
+      setEntries(snap.docs.map((d) => d.data() as CleaningLogEntry));
       setLoaded(true);
     });
     return unsub;
   }, [userId]);
 
-  const setStatus = useCallback(async (id: string, status: CleaningSessionStatus) => {
-    await updateDoc(userDoc(userId!, 'cleaningSessions', id), {
-      status,
-      completedAt: status === 'completed' ? new Date().toISOString() : null,
-    });
+  const add = useCallback(async (data: Omit<CleaningLogEntry, 'id' | 'createdAt'>): Promise<string> => {
+    const id = uid();
+    const docData = { ...data, id, createdAt: new Date().toISOString() };
+    await setDoc(userDoc(userId!, 'cleaningLogEntries', id), stripUndefined(docData));
+    return id;
   }, [userId]);
 
-  // Tombstone instead of delete — deleting outright would free up the id and the
-  // reconciler would immediately recreate it on the next check (same reasoning as
-  // routine executions).
-  const remove = useCallback(async (id: string) => {
-    await updateDoc(userDoc(userId!, 'cleaningSessions', id), { deleted: true });
-  }, [userId]);
-
-  // Move a session to a new due date. Old doc is tombstoned (rescheduledTo) rather
-  // than deleted so the reconciler won't recreate it at the original date.
-  const reschedule = useCallback(async (session: CleaningSession, newDate: string) => {
-    const newId = session.variant
-      ? `${session.taskId}_${session.variant}_${newDate}`
-      : `${session.taskId}_${newDate}`;
-    const batch = writeBatch(db);
-    batch.update(userDoc(userId!, 'cleaningSessions', session.id), { rescheduledTo: newDate });
-    batch.set(userDoc(userId!, 'cleaningSessions', newId), stripUndefined({
-      ...session, id: newId, dueDate: newDate, status: 'pending', completedAt: null, rescheduledTo: undefined,
-    }));
-    await batch.commit();
-  }, [userId]);
-
-  // Marks the earliest `count` still-open (pending or overdue/failed) sessions of a
-  // task — and, for periodic tasks, a specific normal/deep variant — as completed
-  // today, so logging several sessions done in one sitting (or catching up on
-  // missed ones) doesn't require tapping Done once per session.
-  const logSessions = useCallback(async (taskId: string, variant: 'normal' | 'deep' | undefined, count: number) => {
-    const targets = sessions
-      .filter((s) => s.taskId === taskId && s.variant === variant && s.status !== 'completed' && !s.rescheduledTo && !s.deleted)
-      .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
-      .slice(0, count);
-    if (targets.length === 0) return;
+  // Logs `count` entries at once (e.g. catching up on several sessions in one sitting),
+  // all timestamped now.
+  const addMany = useCallback(async (taskId: string, variant: 'normal' | 'deep' | undefined, count: number) => {
+    if (count <= 0) return;
     const now = new Date().toISOString();
     const batch = writeBatch(db);
-    targets.forEach((s) => batch.update(userDoc(userId!, 'cleaningSessions', s.id), { status: 'completed', completedAt: now }));
+    for (let i = 0; i < count; i++) {
+      const id = uid();
+      batch.set(userDoc(userId!, 'cleaningLogEntries', id), stripUndefined({
+        id, taskId, variant, loggedAt: now, createdAt: now,
+      }));
+    }
     await batch.commit();
-  }, [userId, sessions]);
+  }, [userId]);
 
-  return { sessions, loaded, setStatus, remove, reschedule, logSessions };
-}
+  const update = useCallback(async (id: string, data: Partial<CleaningLogEntry>) => {
+    await updateDoc(userDoc(userId!, 'cleaningLogEntries', id), stripUndefined(data as Record<string, unknown>));
+  }, [userId]);
 
-/**
- * Generates pending cleaning sessions for due dates and fails overdue ones.
- * Mount once (e.g. in the cleaning screen); runs when tasks/sessions settle.
- */
-export function useCleaningReconcile(
-  userId: string | null | undefined,
-  tasks: CleaningTask[],
-  sessions: CleaningSession[],
-  sessionsLoaded: boolean,
-) {
-  const running = useRef(false);
+  const remove = useCallback(async (id: string) => {
+    await deleteDoc(userDoc(userId!, 'cleaningLogEntries', id));
+  }, [userId]);
 
-  useEffect(() => {
-    if (!userId || tasks.length === 0 || !sessionsLoaded || running.current) return;
-    const { toCreate, toFail } = reconcileCleaningSessions(tasks, sessions, todayISO());
-    if (toCreate.length === 0 && toFail.length === 0) return;
-
-    running.current = true;
-    const batch = writeBatch(db);
-    toCreate.forEach((session) => batch.set(userDoc(userId, 'cleaningSessions', session.id), stripUndefined(session)));
-    toFail.forEach((id) => batch.update(userDoc(userId, 'cleaningSessions', id), { status: 'failed' }));
-    batch
-      .commit()
-      .catch(() => { /* surfaced on next reconcile */ })
-      .finally(() => { running.current = false; });
-  }, [userId, tasks, sessions, sessionsLoaded]);
+  return { entries, loaded, add, addMany, update, remove };
 }

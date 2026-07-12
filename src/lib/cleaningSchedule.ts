@@ -1,5 +1,5 @@
 import { toISO, fromISO, addDays, diffDays } from './schedule';
-import type { CleaningSchedule, CleaningTask, CleaningSession } from '../types/cleaning';
+import type { CleaningSchedule } from '../types/cleaning';
 
 // ── Periodic due-date logic ──────────────────────────────────────────────────
 
@@ -47,22 +47,16 @@ export function enumeratePeriodicDueDates(schedule: CleaningSchedule, startISO: 
   return out;
 }
 
-// ── Finite due-date logic ────────────────────────────────────────────────────
-
-/** targetSessions dates evenly spaced across [startISO, targetISO], last one clamped to targetISO. */
-export function computeFiniteDueDates(startISO: string, targetISO: string, targetSessions: number): string[] {
-  if (targetSessions <= 0) return [];
-  if (targetSessions === 1) return [targetISO];
-  const span = Math.max(diffDays(targetISO, startISO), 0);
-  const dates: string[] = [];
-  for (let i = 0; i < targetSessions; i++) {
-    if (i === targetSessions - 1) {
-      dates.push(targetISO);
-    } else {
-      dates.push(addDays(startISO, Math.round((span * i) / (targetSessions - 1))));
-    }
-  }
-  return dates;
+/**
+ * How many (date × time-of-day) occurrences this schedule has produced from its
+ * start date through the day before `beforeISO` (inclusive). Used to size the
+ * "scheduled before today" denominator for a progress bar — logging itself is
+ * freeform, so this is just a count of what was nominally due, not a set of
+ * slots that get consumed.
+ */
+export function countScheduledSlotsBefore(schedule: CleaningSchedule, startISO: string, beforeISO: string): number {
+  const dueDates = enumeratePeriodicDueDates(schedule, startISO, addDays(beforeISO, -1));
+  return dueDates.length * Math.max(1, schedule.timesOfDay.length);
 }
 
 // ── Human-readable description ───────────────────────────────────────────────
@@ -75,87 +69,28 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
-/** e.g. "Daily", "Every 3 days", "Weekly · Mon, Wed", "Every 2 weeks · Tue", "Monthly · 15th". */
+/** e.g. "Daily at 08:00, 20:00", "Weekly · Mon, Wed at 18:00", "Every 3 months · 1st at 09:00". */
 export function describeCleaningSchedule(schedule: CleaningSchedule): string {
   const n = schedule.interval || 1;
+  let base: string;
   switch (schedule.unit) {
     case 'day':
-      return n === 1 ? 'Daily' : `Every ${n} days`;
+      base = n === 1 ? 'Daily' : `Every ${n} days`;
+      break;
     case 'week': {
       const days = (schedule.daysOfWeek ?? []).slice().sort((a, b) => a - b).map((d) => WEEKDAY_ABBR[d]);
       const prefix = n === 1 ? 'Weekly' : `Every ${n} weeks`;
-      return days.length ? `${prefix} · ${days.join(', ')}` : prefix;
+      base = days.length ? `${prefix} · ${days.join(', ')}` : prefix;
+      break;
     }
     case 'month': {
       const prefix = n === 1 ? 'Monthly' : `Every ${n} months`;
-      return schedule.dayOfMonth != null ? `${prefix} · ${ordinal(schedule.dayOfMonth)}` : prefix;
+      base = schedule.dayOfMonth != null ? `${prefix} · ${ordinal(schedule.dayOfMonth)}` : prefix;
+      break;
     }
     default:
-      return '';
+      base = '';
   }
-}
-
-// ── Reconciliation ───────────────────────────────────────────────────────────
-
-export interface CleaningReconcileResult {
-  toCreate: CleaningSession[];
-  toFail: string[]; // session ids to mark failed
-}
-
-// Sessions are materialized through the end of next week (Mon–Sun), matching the
-// gym routine reconciler, so the whole of next week is already visible/schedulable.
-function endOfNextWeek(today: string): string {
-  const mondayOffset = (fromISO(today).getDay() + 6) % 7;
-  const thisMonday = addDays(today, -mondayOffset);
-  return addDays(thisMonday, 13);
-}
-
-/**
- * Computes missing pending sessions to create and overdue pending sessions to fail.
- * Pure — callers persist the result. Sessions are never auto-deleted here; deletion
- * only ever happens via explicit user action.
- */
-export function reconcileCleaningSessions(
-  tasks: CleaningTask[],
-  existing: CleaningSession[],
-  today: string,
-): CleaningReconcileResult {
-  const existingIds = new Set(existing.map((e) => e.id));
-  const now = new Date().toISOString();
-  const toCreate: CleaningSession[] = [];
-  const horizon = endOfNextWeek(today);
-
-  for (const task of tasks) {
-    if (task.kind === 'periodic') {
-      const variants: Array<{ variant: 'normal' | 'deep'; schedule?: CleaningSchedule }> = [
-        { variant: 'normal', schedule: task.normalSchedule },
-        { variant: 'deep', schedule: task.deepSchedule },
-      ];
-      for (const { variant, schedule } of variants) {
-        if (!schedule) continue;
-        for (const dueDate of enumeratePeriodicDueDates(schedule, task.startDate, horizon)) {
-          const id = `${task.id}_${variant}_${dueDate}`;
-          if (existingIds.has(id)) continue;
-          toCreate.push({ id, taskId: task.id, variant, dueDate, status: 'pending', createdAt: now });
-        }
-      }
-    } else {
-      // Finite: materialize all N sessions once, up front, the first time this task is reconciled.
-      if (!task.targetDate || !task.targetSessions) continue;
-      if (existing.some((e) => e.taskId === task.id)) continue;
-      computeFiniteDueDates(task.startDate, task.targetDate, task.targetSessions).forEach((dueDate, i) => {
-        const id = `${task.id}_${i}`;
-        if (existingIds.has(id)) return;
-        toCreate.push({ id, taskId: task.id, dueDate, status: 'pending', createdAt: now });
-      });
-    }
-  }
-
-  const toFail: string[] = [];
-  for (const session of existing) {
-    if (session.status !== 'pending' || session.rescheduledTo || session.deleted) continue;
-    if (diffDays(today, session.dueDate) > 0) toFail.push(session.id);
-  }
-
-  return { toCreate, toFail };
+  const times = schedule.timesOfDay.length ? ` at ${schedule.timesOfDay.join(', ')}` : '';
+  return `${base}${times}`;
 }

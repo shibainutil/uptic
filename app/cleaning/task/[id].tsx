@@ -10,6 +10,7 @@ import { Input } from '../../../src/components/ui/Input';
 import { Button } from '../../../src/components/ui/Button';
 import { Segmented } from '../../../src/components/ui/Segmented';
 import { DatePicker } from '../../../src/components/ui/DatePicker';
+import { TimePicker } from '../../../src/components/ui/TimePicker';
 import { colors, spacing, font, radius } from '../../../src/theme';
 import { todayISO, addDays } from '../../../src/lib/schedule';
 import {
@@ -30,20 +31,21 @@ const UNIT_OPTIONS: { value: ScheduleUnit; label: string }[] = [
 ];
 
 function parseSchedule(
-  unit: ScheduleUnit, intervalStr: string, daysOfWeek: number[], dayOfMonthStr: string,
+  unit: ScheduleUnit, intervalStr: string, daysOfWeek: number[], dayOfMonthStr: string, timesOfDay: string[],
 ): CleaningSchedule | { error: string } {
   const interval = parseInt(intervalStr, 10);
   if (!interval || interval < 1) return { error: 'Interval must be at least 1.' };
+  if (timesOfDay.length === 0) return { error: 'Add at least one time of day.' };
   if (unit === 'week') {
     if (daysOfWeek.length === 0) return { error: 'Pick at least one weekday.' };
-    return { unit, interval, daysOfWeek: daysOfWeek.slice().sort((a, b) => a - b) };
+    return { unit, interval, daysOfWeek: daysOfWeek.slice().sort((a, b) => a - b), timesOfDay };
   }
   if (unit === 'month') {
     const dom = parseInt(dayOfMonthStr, 10);
     if (!dom || dom < 1 || dom > 31) return { error: 'Day of month must be between 1 and 31.' };
-    return { unit, interval, dayOfMonth: dom };
+    return { unit, interval, dayOfMonth: dom, timesOfDay };
   }
-  return { unit, interval };
+  return { unit, interval, timesOfDay };
 }
 
 export default function CleaningTaskScreen() {
@@ -89,12 +91,14 @@ function Header({ title, onBack }: { title: string; onBack: () => void }) {
 
 function ScheduleBuilder({
   title, unit, setUnit, interval, setInterval, daysOfWeek, toggleDay, dayOfMonth, setDayOfMonth,
+  timesOfDay, setTimeAt, addTime, removeTime,
 }: {
   title: string;
   unit: ScheduleUnit; setUnit: (u: ScheduleUnit) => void;
   interval: string; setInterval: (v: string) => void;
   daysOfWeek: number[]; toggleDay: (d: number) => void;
   dayOfMonth: string; setDayOfMonth: (v: string) => void;
+  timesOfDay: string[]; setTimeAt: (i: number, v: string) => void; addTime: () => void; removeTime: (i: number) => void;
 }) {
   return (
     <View style={styles.field}>
@@ -123,6 +127,23 @@ function ScheduleBuilder({
       {unit === 'month' && (
         <Input label="Day of month (1–31)" value={dayOfMonth} onChangeText={setDayOfMonth} keyboardType="numeric" />
       )}
+
+      <View style={styles.timesField}>
+        <Text style={styles.subLabel}>Times of day</Text>
+        {timesOfDay.map((t, i) => (
+          <View key={i} style={styles.timeRow}>
+            <TimePicker value={t} onChange={(v) => setTimeAt(i, v)} />
+            {timesOfDay.length > 1 && (
+              <Pressable onPress={() => removeTime(i)} hitSlop={8} style={styles.removeTimeBtn}>
+                <Text style={styles.removeTimeBtnText}>✕</Text>
+              </Pressable>
+            )}
+          </View>
+        ))}
+        <Pressable onPress={addTime} style={styles.addTimeBtn}>
+          <Text style={styles.addTimeBtnText}>+ Add time</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -144,12 +165,14 @@ function TaskForm({ existing }: { existing?: CleaningTask }) {
   const [normalInterval, setNormalInterval] = useState(String(existing?.normalSchedule?.interval ?? 1));
   const [normalDaysOfWeek, setNormalDaysOfWeek] = useState<number[]>(existing?.normalSchedule?.daysOfWeek ?? []);
   const [normalDayOfMonth, setNormalDayOfMonth] = useState(String(existing?.normalSchedule?.dayOfMonth ?? 1));
+  const [normalTimesOfDay, setNormalTimesOfDay] = useState<string[]>(existing?.normalSchedule?.timesOfDay ?? ['08:00']);
 
   const [deepEnabled, setDeepEnabled] = useState(Boolean(existing?.deepSchedule));
   const [deepUnit, setDeepUnit] = useState<ScheduleUnit>(existing?.deepSchedule?.unit ?? 'month');
   const [deepInterval, setDeepInterval] = useState(String(existing?.deepSchedule?.interval ?? 1));
   const [deepDaysOfWeek, setDeepDaysOfWeek] = useState<number[]>(existing?.deepSchedule?.daysOfWeek ?? []);
   const [deepDayOfMonth, setDeepDayOfMonth] = useState(String(existing?.deepSchedule?.dayOfMonth ?? 1));
+  const [deepTimesOfDay, setDeepTimesOfDay] = useState<string[]>(existing?.deepSchedule?.timesOfDay ?? ['08:00']);
 
   const [targetSessions, setTargetSessions] = useState(String(existing?.targetSessions ?? 3));
   const [targetDate, setTargetDate] = useState(existing?.targetDate ?? addDays(todayISO(), 30));
@@ -167,14 +190,14 @@ function TaskForm({ existing }: { existing?: CleaningTask }) {
     let data: Omit<CleaningTask, 'id' | 'createdAt'>;
 
     if (kind === 'periodic') {
-      const normalSchedule = parseSchedule(normalUnit, normalInterval, normalDaysOfWeek, normalDayOfMonth);
+      const normalSchedule = parseSchedule(normalUnit, normalInterval, normalDaysOfWeek, normalDayOfMonth, normalTimesOfDay);
       if ('error' in normalSchedule) {
         Alert.alert('Invalid schedule', normalSchedule.error);
         return;
       }
       let deepSchedule: CleaningSchedule | undefined;
       if (deepEnabled) {
-        const parsed = parseSchedule(deepUnit, deepInterval, deepDaysOfWeek, deepDayOfMonth);
+        const parsed = parseSchedule(deepUnit, deepInterval, deepDaysOfWeek, deepDayOfMonth, deepTimesOfDay);
         if ('error' in parsed) {
           Alert.alert('Invalid deep-clean schedule', parsed.error);
           return;
@@ -247,6 +270,10 @@ function TaskForm({ existing }: { existing?: CleaningTask }) {
               interval={normalInterval} setInterval={setNormalInterval}
               daysOfWeek={normalDaysOfWeek} toggleDay={toggleNormalDay}
               dayOfMonth={normalDayOfMonth} setDayOfMonth={setNormalDayOfMonth}
+              timesOfDay={normalTimesOfDay}
+              setTimeAt={(i, v) => setNormalTimesOfDay((cur) => cur.map((t, idx) => (idx === i ? v : t)))}
+              addTime={() => setNormalTimesOfDay((cur) => [...cur, '08:00'])}
+              removeTime={(i) => setNormalTimesOfDay((cur) => cur.filter((_, idx) => idx !== i))}
             />
 
             <Pressable style={styles.toggleRow} onPress={() => setDeepEnabled((v) => !v)}>
@@ -263,6 +290,10 @@ function TaskForm({ existing }: { existing?: CleaningTask }) {
                 interval={deepInterval} setInterval={setDeepInterval}
                 daysOfWeek={deepDaysOfWeek} toggleDay={toggleDeepDay}
                 dayOfMonth={deepDayOfMonth} setDayOfMonth={setDeepDayOfMonth}
+                timesOfDay={deepTimesOfDay}
+                setTimeAt={(i, v) => setDeepTimesOfDay((cur) => cur.map((t, idx) => (idx === i ? v : t)))}
+                addTime={() => setDeepTimesOfDay((cur) => [...cur, '08:00'])}
+                removeTime={(i) => setDeepTimesOfDay((cur) => cur.filter((_, idx) => idx !== i))}
               />
             )}
 
@@ -341,4 +372,11 @@ const styles = StyleSheet.create({
   toggleLabel: { color: colors.text, fontSize: font.md },
   flex1: { flex: 1 },
   formRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
+  timesField: { gap: spacing.sm, marginTop: spacing.xs },
+  subLabel: { color: colors.textMuted, fontSize: font.sm },
+  timeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  removeTimeBtn: { padding: spacing.xs },
+  removeTimeBtnText: { color: colors.textMuted, fontSize: font.sm },
+  addTimeBtn: { alignSelf: 'flex-start', paddingVertical: spacing.xs },
+  addTimeBtnText: { color: colors.accent, fontSize: font.sm, fontWeight: '600' },
 });

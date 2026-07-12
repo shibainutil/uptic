@@ -2,7 +2,7 @@ import { View, Text, Pressable, FlatList, StyleSheet, Alert } from 'react-native
 import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
-import { useCleaningTasks, useCleaningSessions } from '../../store/cleaningStore';
+import { useCleaningTasks, useCleaningLogEntries } from '../../store/cleaningStore';
 import { describeCleaningSchedule } from '../../lib/cleaningSchedule';
 import { fromISO } from '../../lib/schedule';
 import { colors, spacing, font, radius } from '../../theme';
@@ -12,11 +12,11 @@ const DEEP_COLOR = '#A855F7'; // kept independent of colors.accent, matches gym'
 export function CleaningTasksTab() {
   const { user } = useAuth();
   const { tasks, remove } = useCleaningTasks(user?.uid);
-  const { sessions } = useCleaningSessions(user?.uid);
+  const { entries } = useCleaningLogEntries(user?.uid);
   const router = useRouter();
 
   function confirmDelete(id: string, name: string) {
-    Alert.alert('Delete Task', `Remove "${name}"? Its scheduled sessions will also be deleted.`, [
+    Alert.alert('Delete Task', `Remove "${name}"? Its logged sessions will also be deleted.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: () => remove(id) },
     ]);
@@ -43,9 +43,7 @@ export function CleaningTasksTab() {
           contentContainerStyle={styles.list}
           ItemSeparatorComponent={() => <View style={styles.sep} />}
           renderItem={({ item }) => {
-            const completedCount = sessions.filter(
-              (s) => s.taskId === item.id && s.status === 'completed' && !s.rescheduledTo && !s.deleted,
-            ).length;
+            const completedCount = entries.filter((e) => e.taskId === item.id && !e.variant).length;
             return (
               <Pressable style={styles.card} onPress={() => router.push(`/cleaning/task/${item.id}`)}>
                 <View style={styles.cardMain}>
