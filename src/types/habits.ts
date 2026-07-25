@@ -1,0 +1,46 @@
+export type ScheduleUnit = 'day' | 'week' | 'month' | 'quarter' | 'year';
+
+export interface HabitSchedule {
+  unit: ScheduleUnit;
+  interval: number;         // every N units; 1 = plain daily/weekly/monthly/quarterly/yearly
+  daysOfWeek?: number[];    // unit='week': 0=Sun..6=Sat
+  dayOfMonth?: number;      // unit='month'|'quarter'|'year': 1..31
+  timesOfDay: string[];     // "HH:MM" 24h, one entry per occurrence per due date (e.g. morning + evening)
+}
+
+export type HabitKind = 'continuous' | 'limited';
+
+export interface Habit {
+  id: string;
+  name: string;
+  description?: string;
+  kind: HabitKind;
+  startDate: string;             // ISO yyyy-mm-dd; schedule anchor
+  schedule: HabitSchedule;
+
+  // limited only — completion condition(s); the habit is done once either is met
+  targetSessions?: number;
+  targetDate?: string;           // ISO yyyy-mm-dd
+
+  createdAt: string;
+}
+
+// A user-created record of an actual habit session. Logging is freeform — entries
+// aren't tied to a specific pre-generated schedule slot, can be logged outside the
+// schedule entirely, edited, or removed. Progress rings are derived by comparing
+// entry counts against the schedule, not by consuming pre-created placeholder docs.
+export interface HabitLogEntry {
+  id: string;
+  habitId: string;
+  loggedAt: string;              // ISO datetime — when the session actually happened
+  notes?: string;
+  createdAt: string;
+}
+
+/** True once a limited habit's completion condition has been met. */
+export function isHabitComplete(habit: Habit, completedCount: number, todayISO: string): boolean {
+  if (habit.kind !== 'limited') return false;
+  if (habit.targetSessions != null && completedCount >= habit.targetSessions) return true;
+  if (habit.targetDate != null && todayISO > habit.targetDate) return true;
+  return false;
+}

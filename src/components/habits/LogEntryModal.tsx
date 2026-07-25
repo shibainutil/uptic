@@ -7,11 +7,11 @@ import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 import { colors, spacing } from '../../theme';
 import { toISO, fromISO } from '../../lib/schedule';
-import type { CleaningLogEntry } from '../../types/cleaning';
+import type { HabitLogEntry } from '../../types/habits';
 
 interface Props {
   visible: boolean;
-  entry?: CleaningLogEntry;
+  entry?: HabitLogEntry;
   onSave: (loggedAt: string, notes: string) => void;
   onDelete?: () => void;
   onClose: () => void;

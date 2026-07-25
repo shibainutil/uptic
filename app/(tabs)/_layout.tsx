@@ -15,7 +15,8 @@ type IconName = React.ComponentProps<typeof MaterialIcons>['name'];
 const TABS: { name: string; title: string; icon: IconName }[] = [
   { name: 'weight',    title: 'Weight',    icon: 'monitor-weight' },
   { name: 'fitness',   title: 'Fitness',   icon: 'fitness-center' },
-  { name: 'cleaning',  title: 'Cleaning',  icon: 'cleaning-services' },
+  { name: 'habits',    title: 'Habits',    icon: 'track-changes' },
+  { name: 'nutrition', title: 'Nutrition', icon: 'restaurant' },
 ];
 
 export default function TabsLayout() {

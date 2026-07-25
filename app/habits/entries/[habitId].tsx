@@ -4,10 +4,10 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../../src/context/AuthContext';
-import { useCleaningTasks, useCleaningLogEntries } from '../../../src/store/cleaningStore';
-import { LogEntryModal } from '../../../src/components/cleaning/LogEntryModal';
+import { useHabits, useHabitLogEntries } from '../../../src/store/habitStore';
+import { LogEntryModal } from '../../../src/components/habits/LogEntryModal';
 import { colors, spacing, font, radius } from '../../../src/theme';
-import type { CleaningLogEntry } from '../../../src/types/cleaning';
+import type { HabitLogEntry } from '../../../src/types/habits';
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
@@ -15,28 +15,27 @@ function formatDateTime(iso: string): string {
   });
 }
 
-export default function CleaningEntriesScreen() {
-  const { taskId, variant } = useLocalSearchParams<{ taskId: string; variant?: string }>();
+export default function HabitEntriesScreen() {
+  const { habitId } = useLocalSearchParams<{ habitId: string }>();
   const router = useRouter();
   const { user } = useAuth();
-  const { tasks } = useCleaningTasks(user?.uid);
-  const { entries, add, update, remove } = useCleaningLogEntries(user?.uid);
+  const { habits } = useHabits(user?.uid);
+  const { entries, add, update, remove } = useHabitLogEntries(user?.uid);
 
-  const task = tasks.find((t) => t.id === taskId);
-  const v = variant === 'normal' || variant === 'deep' ? variant : undefined;
+  const habit = habits.find((h) => h.id === habitId);
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<CleaningLogEntry | undefined>(undefined);
+  const [editing, setEditing] = useState<HabitLogEntry | undefined>(undefined);
 
-  const taskEntries = entries
-    .filter((e) => e.taskId === taskId && e.variant === v)
+  const habitEntries = entries
+    .filter((e) => e.habitId === habitId)
     .sort((a, b) => b.loggedAt.localeCompare(a.loggedAt));
 
   function openNew() {
     setEditing(undefined);
     setModalOpen(true);
   }
-  function openEdit(entry: CleaningLogEntry) {
+  function openEdit(entry: HabitLogEntry) {
     setEditing(entry);
     setModalOpen(true);
   }
@@ -44,7 +43,7 @@ export default function CleaningEntriesScreen() {
     if (editing) {
       update(editing.id, { loggedAt, notes: notes || undefined });
     } else {
-      add({ taskId: taskId!, variant: v, loggedAt, notes: notes || undefined });
+      add({ habitId: habitId!, loggedAt, notes: notes || undefined });
     }
     setModalOpen(false);
   }
@@ -56,28 +55,24 @@ export default function CleaningEntriesScreen() {
     ]);
   }
 
-  const title = task
-    ? `${task.name}${v ? ` · ${v === 'deep' ? 'Deep clean' : 'Normal clean'}` : ''}`
-    : 'Sessions';
-
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} style={styles.back}><Text style={styles.backText}>‹ Back</Text></Pressable>
-        <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
+        <Text style={styles.headerTitle} numberOfLines={1}>{habit?.name ?? 'Sessions'}</Text>
         <Pressable onPress={openNew} style={styles.addBtn}>
           <Text style={styles.addBtnText}>+ Log</Text>
         </Pressable>
       </View>
 
-      {taskEntries.length === 0 ? (
+      {habitEntries.length === 0 ? (
         <View style={styles.empty}>
           <MaterialIcons name="event-note" size={48} color={colors.textDim} />
           <Text style={styles.emptyText}>No sessions logged yet.</Text>
         </View>
       ) : (
         <FlatList
-          data={taskEntries}
+          data={habitEntries}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
           ItemSeparatorComponent={() => <View style={styles.sep} />}

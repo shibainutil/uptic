@@ -2,21 +2,21 @@ import { View, Text, Pressable, FlatList, StyleSheet, Alert } from 'react-native
 import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
-import { useCleaningTasks, useCleaningLogEntries } from '../../store/cleaningStore';
-import { describeCleaningSchedule } from '../../lib/cleaningSchedule';
-import { fromISO } from '../../lib/schedule';
+import { useHabits, useHabitLogEntries } from '../../store/habitStore';
+import { describeSchedule } from '../../lib/habitSchedule';
+import { fromISO, todayISO } from '../../lib/schedule';
+import { isHabitComplete } from '../../types/habits';
 import { colors, spacing, font, radius } from '../../theme';
 
-const DEEP_COLOR = '#A855F7'; // kept independent of colors.accent, matches gym's reschedule-purple convention
-
-export function CleaningTasksTab() {
+export function HabitsListTab() {
   const { user } = useAuth();
-  const { tasks, remove } = useCleaningTasks(user?.uid);
-  const { entries } = useCleaningLogEntries(user?.uid);
+  const { habits, remove } = useHabits(user?.uid);
+  const { entries } = useHabitLogEntries(user?.uid);
   const router = useRouter();
+  const today = todayISO();
 
   function confirmDelete(id: string, name: string) {
-    Alert.alert('Delete Task', `Remove "${name}"? Its logged sessions will also be deleted.`, [
+    Alert.alert('Delete Habit', `Remove "${name}"? Its logged sessions will also be deleted.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: () => remove(id) },
     ]);
@@ -25,54 +25,46 @@ export function CleaningTasksTab() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.count}>{tasks.length} task{tasks.length !== 1 ? 's' : ''}</Text>
-        <Pressable onPress={() => router.push('/cleaning/task/new')} style={styles.addBtn}>
+        <Text style={styles.count}>{habits.length} habit{habits.length !== 1 ? 's' : ''}</Text>
+        <Pressable onPress={() => router.push('/habits/habit/new')} style={styles.addBtn}>
           <Text style={styles.addBtnText}>+ Add</Text>
         </Pressable>
       </View>
 
-      {tasks.length === 0 ? (
+      {habits.length === 0 ? (
         <View style={styles.empty}>
-          <MaterialIcons name="cleaning-services" size={48} color={colors.textDim} />
-          <Text style={styles.emptyText}>No cleaning tasks yet.{'\n'}Create one with a schedule.</Text>
+          <MaterialIcons name="track-changes" size={48} color={colors.textDim} />
+          <Text style={styles.emptyText}>No habits yet.{'\n'}Create one with a schedule.</Text>
         </View>
       ) : (
         <FlatList
-          data={tasks}
+          data={habits}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
           ItemSeparatorComponent={() => <View style={styles.sep} />}
           renderItem={({ item }) => {
-            const completedCount = entries.filter((e) => e.taskId === item.id && !e.variant).length;
+            const completedCount = entries.filter((e) => e.habitId === item.id).length;
+            const done = isHabitComplete(item, completedCount, today);
             return (
-              <Pressable style={styles.card} onPress={() => router.push(`/cleaning/task/${item.id}`)}>
+              <Pressable style={styles.card} onPress={() => router.push(`/habits/habit/${item.id}`)}>
                 <View style={styles.cardMain}>
                   <Text style={styles.cardName}>{item.name}</Text>
                   {item.description ? <Text style={styles.cardDesc}>{item.description}</Text> : null}
                   <View style={styles.cardMetaRow}>
-                    {item.kind === 'periodic' ? (
-                      <>
-                        {item.normalSchedule && (
-                          <View style={styles.badge}>
-                            <MaterialIcons name="event-repeat" size={13} color={colors.accent} />
-                            <Text style={styles.badgeText}>{describeCleaningSchedule(item.normalSchedule)}</Text>
-                          </View>
-                        )}
-                        {item.deepSchedule && (
-                          <View style={[styles.badge, styles.deepBadge]}>
-                            <MaterialIcons name="auto-awesome" size={13} color={DEEP_COLOR} />
-                            <Text style={[styles.badgeText, styles.deepBadgeText]}>
-                              Deep · {describeCleaningSchedule(item.deepSchedule)}
-                            </Text>
-                          </View>
-                        )}
-                      </>
-                    ) : (
+                    <View style={[styles.badge, item.kind === 'limited' && styles.limitedBadge]}>
+                      <MaterialIcons
+                        name={item.kind === 'limited' ? 'flag' : 'event-repeat'}
+                        size={13}
+                        color={item.kind === 'limited' ? LIMITED_COLOR : colors.accent}
+                      />
+                      <Text style={[styles.badgeText, item.kind === 'limited' && styles.limitedBadgeText]}>
+                        {describeSchedule(item.schedule)}
+                      </Text>
+                    </View>
+                    {item.kind === 'limited' && (
                       <Text style={styles.cardMeta}>
-                        {completedCount} of {item.targetSessions ?? 0}
-                        {item.targetDate
-                          ? ` by ${fromISO(item.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`
-                          : ''}
+                        {done ? 'Completed' : `${completedCount} of ${item.targetSessions ?? '∞'}`}
+                        {item.targetDate ? ` · by ${fromISO(item.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : ''}
                       </Text>
                     )}
                   </View>
@@ -91,6 +83,8 @@ export function CleaningTasksTab() {
     </View>
   );
 }
+
+const LIMITED_COLOR = '#A855F7'; // kept independent of colors.accent, matches gym's reschedule-purple convention
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
@@ -138,8 +132,8 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: radius.sm,
   },
-  deepBadge: { backgroundColor: `${DEEP_COLOR}1A` },
-  deepBadgeText: { color: DEEP_COLOR },
+  limitedBadge: { backgroundColor: `${LIMITED_COLOR}1A` },
+  limitedBadgeText: { color: LIMITED_COLOR },
   badgeText: { color: colors.accent, fontSize: font.sm, fontWeight: '500' },
   cardMeta: { color: colors.textDim, fontSize: font.sm },
   cardActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
