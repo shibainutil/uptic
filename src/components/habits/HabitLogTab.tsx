@@ -8,11 +8,14 @@ import { todayISO, fromISO, diffDays } from '../../lib/schedule';
 import { computeRing, describeSchedule, type RingPeriod } from '../../lib/habitSchedule';
 import { isHabitComplete, totalSessions, type Habit, type HabitLogEntry } from '../../types/habits';
 import { ProgressRing } from '../ui/ProgressRing';
+import { Badge } from '../ui/Badge';
 import { LogEntryModal } from './LogEntryModal';
 import { colors, spacing, font, radius } from '../../theme';
 
 const EXPANDED_ENTRY_LIMIT = 10;
 const ICON_SIZE = 18;
+const LIMITED_COLOR = '#A855F7';
+const WARNING_COLOR = '#EAB308';
 
 const RING_PERIODS: { period: RingPeriod; label: string }[] = [
   { period: 'day', label: 'Day' },
@@ -60,11 +63,6 @@ export function HabitLogTab() {
         <HabitCard
           key={habit.id}
           habit={habit}
-          habitId={habit.id}
-          title={habit.name}
-          subtitle={habit.kind === 'limited'
-            ? `${completedCount} of ${habit.targetSessions ?? '∞'}${habit.targetDate ? ` · by ${fromISO(habit.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : ''}`
-            : describeSchedule(habit.schedule)}
           rings={RING_PERIODS.map(({ period, label }) => ({ label, ...computeRing(habit, entries, period, today) }))}
           completedCount={completedCount}
           entries={habitEntries}
@@ -91,11 +89,8 @@ export function HabitLogTab() {
   );
 }
 
-function HabitCard({ habit, habitId, title, subtitle, rings, completedCount, entries, onAdd, onPress }: {
+function HabitCard({ habit, rings, completedCount, entries, onAdd, onPress }: {
   habit: Habit;
-  habitId: string;
-  title: string;
-  subtitle: string;
   rings: Array<{ label: string; rate: number }>;
   completedCount: number;
   entries: HabitLogEntry[];
@@ -108,12 +103,14 @@ function HabitCard({ habit, habitId, title, subtitle, rings, completedCount, ent
   const sortedEntries = entries.slice().sort((a, b) => b.loggedAt.localeCompare(a.loggedAt));
   const shown = sortedEntries.slice(0, EXPANDED_ENTRY_LIMIT);
 
+  const showPaceBars = habit.kind === 'limited' && habit.targetSessions != null && habit.targetDate != null;
+
   return (
     <View style={styles.card}>
+      {/* Title + action buttons */}
       <View style={styles.headerRow}>
         <Pressable style={styles.rowMain} onPress={onPress}>
-          <Text style={styles.rowLabel}>{title}</Text>
-          <Text style={styles.rowDue}>{subtitle}</Text>
+          <Text style={styles.rowLabel}>{habit.name}</Text>
         </Pressable>
         <View style={styles.headerActions}>
           <Pressable onPress={() => setExpanded((v) => !v)} style={[styles.iconBtn, styles.listBtn]}>
@@ -125,21 +122,47 @@ function HabitCard({ habit, habitId, title, subtitle, rings, completedCount, ent
         </View>
       </View>
 
+      {/* Badges */}
+      <View style={styles.badgeRow}>
+        <Badge
+          color={colors.accent}
+          label={describeSchedule(habit.schedule)}
+          icon={<MaterialIcons name="event-repeat" size={11} color={colors.accent} />}
+        />
+        {habit.kind === 'limited' && habit.targetDate && (
+          <Badge
+            color={LIMITED_COLOR}
+            label={`by ${fromISO(habit.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`}
+            icon={<MaterialIcons name="flag" size={11} color={LIMITED_COLOR} />}
+          />
+        )}
+        {habit.kind === 'limited' && habit.targetSessions != null && (
+          <Badge
+            color={LIMITED_COLOR}
+            label={`${completedCount} / ${habit.targetSessions}`}
+            icon={<MaterialIcons name="check-circle-outline" size={11} color={LIMITED_COLOR} />}
+          />
+        )}
+      </View>
+
+      {/* Progress rings */}
       <View style={styles.ringsRow}>
         {rings.map((r) => (
           <ProgressRing key={r.label} rate={r.rate} label={r.label} size={44} strokeWidth={4} />
         ))}
       </View>
 
-      {habit.kind === 'limited' && habit.targetSessions != null && habit.targetDate != null && (
+      {/* Pace bars (limited habits only) */}
+      {showPaceBars && (
         <LimitedPaceBars
           startDate={habit.startDate}
-          targetDate={habit.targetDate}
-          targetSessions={habit.targetSessions}
+          targetDate={habit.targetDate!}
+          targetSessions={habit.targetSessions!}
           completedCount={completedCount}
         />
       )}
 
+      {/* Expanded session list */}
       {expanded && (
         <View style={styles.entriesList}>
           {shown.length === 0 ? (
@@ -166,7 +189,7 @@ function HabitCard({ habit, habitId, title, subtitle, rings, completedCount, ent
       <LogEntryModal
         visible={modalOpen}
         onSave={(loggedAt, notes, count) => {
-          onAdd({ habitId, loggedAt, notes: notes || undefined, count });
+          onAdd({ habitId: habit.id, loggedAt, notes: notes || undefined, count });
           setModalOpen(false);
         }}
         onClose={() => setModalOpen(false)}
@@ -182,78 +205,107 @@ function LimitedPaceBars({ startDate, targetDate, targetSessions, completedCount
   completedCount: number;
 }) {
   const today = todayISO();
-  const totalDays = diffDays(targetDate, startDate);
+  const totalDays = Math.max(1, diffDays(targetDate, startDate));
   const elapsedDays = Math.min(Math.max(0, diffDays(today, startDate)), totalDays);
-  const timeRate = totalDays > 0 ? elapsedDays / totalDays : 0;
+  const timeRate = elapsedDays / totalDays;
   const sessionRate = Math.min(completedCount / targetSessions, 1);
 
   const expectedByNow = Math.ceil(timeRate * targetSessions);
-  const onTrack = completedCount >= expectedByNow;
-  const sessionBarColor = sessionRate >= 1 ? colors.success : onTrack ? colors.success : completedCount >= expectedByNow - 1 ? '#EAB308' : colors.danger;
+  const deficit = expectedByNow - completedCount;
+  const onTrack = deficit <= 0;
+
+  const fillColor =
+    sessionRate >= 1 ? colors.success :
+    onTrack ? colors.success :
+    deficit === 1 ? WARNING_COLOR :
+    colors.danger;
 
   const daysLeft = Math.max(0, diffDays(targetDate, today));
   const sessionsLeft = Math.max(0, targetSessions - completedCount);
 
+  const paceLabel = sessionRate >= 1
+    ? 'Goal reached'
+    : onTrack
+    ? 'On pace'
+    : `${deficit} behind pace`;
+
   return (
     <View style={paceStyles.container}>
-      <View style={paceStyles.row}>
-        <Text style={paceStyles.rowLabel}>Sessions</Text>
+      {/* Sessions bar */}
+      <View style={paceStyles.barSection}>
+        <View style={paceStyles.barHeader}>
+          <Text style={paceStyles.barTitle}>Sessions</Text>
+          <Text style={[paceStyles.barValue, { color: fillColor }]}>
+            {completedCount} <Text style={paceStyles.barValueDim}>/ {targetSessions}</Text>
+          </Text>
+        </View>
         <View style={paceStyles.trackOuter}>
           <View style={paceStyles.track}>
-            <View style={[paceStyles.fill, { width: `${sessionRate * 100}%` as any, backgroundColor: sessionBarColor }]} />
+            <View style={[paceStyles.fill, { width: `${sessionRate * 100}%` as any, backgroundColor: fillColor }]} />
           </View>
-          {/* pace marker: where you should be right now */}
-          <View style={[paceStyles.marker, { left: `${Math.min(timeRate * 100, 100)}%` as any }]} />
-        </View>
-        <Text style={paceStyles.rowValue}>{completedCount}/{targetSessions}</Text>
-      </View>
-      <View style={paceStyles.row}>
-        <Text style={paceStyles.rowLabel}>Deadline</Text>
-        <View style={paceStyles.trackOuter}>
-          <View style={paceStyles.track}>
-            <View style={[paceStyles.fill, { width: `${timeRate * 100}%` as any, backgroundColor: colors.accent }]} />
+          {/* Pace marker: where you should be now given elapsed time */}
+          <View style={[paceStyles.paceMarker, { left: `${Math.min(timeRate * 100, 99)}%` as any }]}>
+            <View style={paceStyles.paceMarkerLine} />
+            <View style={paceStyles.paceMarkerDot} />
           </View>
         </View>
-        <Text style={paceStyles.rowValue}>{daysLeft}d left</Text>
+        <View style={paceStyles.barFooter}>
+          <Text style={paceStyles.paceText}>
+            <MaterialIcons name="schedule" size={10} color={colors.textDim} /> pace
+          </Text>
+          <Text style={[paceStyles.paceStatus, { color: onTrack ? colors.success : deficit === 1 ? WARNING_COLOR : colors.danger }]}>
+            {paceLabel}
+          </Text>
+        </View>
       </View>
-      {sessionsLeft > 0 && daysLeft > 0 && (
-        <Text style={paceStyles.hint}>
-          {`${sessionsLeft} session${sessionsLeft !== 1 ? 's' : ''} left · `}
-          {onTrack ? 'On pace' : `${expectedByNow - completedCount} behind pace`}
-        </Text>
-      )}
+
+      {/* Deadline bar */}
+      <View style={paceStyles.barSection}>
+        <View style={paceStyles.barHeader}>
+          <Text style={paceStyles.barTitle}>Deadline</Text>
+          <Text style={paceStyles.barValue}>
+            {daysLeft > 0
+              ? <>{daysLeft} <Text style={paceStyles.barValueDim}>days left</Text></>
+              : <Text style={{ color: colors.danger }}>Overdue</Text>
+            }
+          </Text>
+        </View>
+        <View style={paceStyles.track}>
+          <View style={[paceStyles.fill, { width: `${timeRate * 100}%` as any, backgroundColor: colors.accent }]} />
+        </View>
+      </View>
     </View>
   );
 }
 
 const paceStyles = StyleSheet.create({
   container: {
-    gap: spacing.xs,
-    paddingTop: spacing.xs,
+    gap: spacing.md,
+    paddingTop: spacing.sm,
     borderTopWidth: 1,
     borderTopColor: colors.surface2,
   },
-  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  rowLabel: { color: colors.textMuted, fontSize: font.sm - 1, fontWeight: '600', width: 56 },
-  rowValue: { color: colors.textDim, fontSize: font.sm - 1, width: 52, textAlign: 'right' },
-  trackOuter: { flex: 1, height: 10, justifyContent: 'center' },
+  barSection: { gap: 6 },
+  barHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
+  barTitle: { color: colors.textMuted, fontSize: font.sm - 1, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  barValue: { color: colors.text, fontSize: font.sm, fontWeight: '700' },
+  barValueDim: { color: colors.textDim, fontWeight: '400' },
+  trackOuter: { position: 'relative' },
   track: {
-    height: 6,
+    height: 8,
     backgroundColor: colors.surface2,
-    borderRadius: 3,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
     overflow: 'hidden',
   },
-  fill: { height: '100%', borderRadius: 3 },
-  marker: {
-    position: 'absolute',
-    top: 0,
-    width: 2,
-    height: 10,
-    backgroundColor: colors.textMuted,
-    borderRadius: 1,
-    marginLeft: -1,
-  },
-  hint: { color: colors.textDim, fontSize: font.sm - 1, textAlign: 'right' },
+  fill: { height: '100%', borderRadius: 4 },
+  paceMarker: { position: 'absolute', top: -3, alignItems: 'center' },
+  paceMarkerLine: { width: 1.5, height: 14, backgroundColor: colors.textMuted, borderRadius: 1 },
+  paceMarkerDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: colors.textMuted, marginTop: -2 },
+  barFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 },
+  paceText: { color: colors.textDim, fontSize: 10 },
+  paceStatus: { fontSize: font.sm - 1, fontWeight: '600' },
 });
 
 const styles = StyleSheet.create({
@@ -283,12 +335,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  addBtn: {
-    backgroundColor: colors.accent,
-  },
-  rowMain: { flex: 1, gap: 4 },
+  addBtn: { backgroundColor: colors.accent },
+  rowMain: { flex: 1 },
   rowLabel: { color: colors.text, fontSize: font.md, fontWeight: '500' },
   rowDue: { color: colors.textDim, fontSize: font.sm },
+  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.sm,
