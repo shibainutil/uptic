@@ -4,6 +4,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { useRoutines } from '../../store/gymStore';
 import { describeSchedule } from '../../lib/schedule';
+import { Badge } from '../ui/Badge';
 import { colors, spacing, font, radius } from '../../theme';
 
 export function RoutinesTab() {
@@ -44,10 +45,11 @@ export function RoutinesTab() {
                 <Text style={styles.cardName}>{item.name}</Text>
                 {item.description ? <Text style={styles.cardDesc}>{item.description}</Text> : null}
                 <View style={styles.cardMetaRow}>
-                  <View style={styles.badge}>
-                    <MaterialIcons name="event-repeat" size={13} color={colors.accent} />
-                    <Text style={styles.badgeText}>{describeSchedule(item.schedule)}</Text>
-                  </View>
+                  <Badge
+                    color={colors.accent}
+                    label={describeSchedule(item.schedule)}
+                    icon={<MaterialIcons name="event-repeat" size={11} color={colors.accent} />}
+                  />
                   <Text style={styles.cardMeta}>
                     {item.exerciseIds.length} exercise{item.exerciseIds.length !== 1 ? 's' : ''}
                   </Text>
@@ -104,16 +106,6 @@ const styles = StyleSheet.create({
   cardName: { color: colors.text, fontSize: font.md, fontWeight: '500' },
   cardDesc: { color: colors.textDim, fontSize: font.sm },
   cardMetaRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: 2 },
-  badge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: `${colors.accent}1A`,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-  },
-  badgeText: { color: colors.accent, fontSize: font.sm, fontWeight: '500' },
   cardMeta: { color: colors.textDim, fontSize: font.sm },
   cardActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   actionDelete: { color: colors.danger, fontSize: font.sm },

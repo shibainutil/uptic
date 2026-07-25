@@ -6,7 +6,10 @@ import { useHabits, useHabitLogEntries } from '../../store/habitStore';
 import { describeSchedule } from '../../lib/habitSchedule';
 import { fromISO, todayISO } from '../../lib/schedule';
 import { isHabitComplete, totalSessions } from '../../types/habits';
+import { Badge } from '../ui/Badge';
 import { colors, spacing, font, radius } from '../../theme';
+
+const LIMITED_COLOR = '#A855F7'; // kept independent of colors.accent, matches gym's reschedule-purple convention
 
 export function HabitsListTab() {
   const { user } = useAuth();
@@ -51,17 +54,17 @@ export function HabitsListTab() {
                   <Text style={styles.cardName}>{item.name}</Text>
                   {item.description ? <Text style={styles.cardDesc}>{item.description}</Text> : null}
                   <View style={styles.cardMetaRow}>
-                    <View style={styles.badge}>
-                      <MaterialIcons name="event-repeat" size={13} color={colors.accent} />
-                      <Text style={styles.badgeText}>{describeSchedule(item.schedule)}</Text>
-                    </View>
+                    <Badge
+                      color={colors.accent}
+                      label={describeSchedule(item.schedule)}
+                      icon={<MaterialIcons name="event-repeat" size={11} color={colors.accent} />}
+                    />
                     {item.kind === 'limited' && item.targetDate && (
-                      <View style={[styles.badge, styles.limitedBadge]}>
-                        <MaterialIcons name="flag" size={13} color={LIMITED_COLOR} />
-                        <Text style={[styles.badgeText, styles.limitedBadgeText]}>
-                          by {fromISO(item.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
-                        </Text>
-                      </View>
+                      <Badge
+                        color={LIMITED_COLOR}
+                        label={`by ${fromISO(item.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`}
+                        icon={<MaterialIcons name="flag" size={11} color={LIMITED_COLOR} />}
+                      />
                     )}
                     {item.kind === 'limited' && (
                       <Text style={styles.cardMeta}>
@@ -84,8 +87,6 @@ export function HabitsListTab() {
     </View>
   );
 }
-
-const LIMITED_COLOR = '#A855F7'; // kept independent of colors.accent, matches gym's reschedule-purple convention
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
@@ -124,18 +125,6 @@ const styles = StyleSheet.create({
   cardName: { color: colors.text, fontSize: font.md, fontWeight: '500' },
   cardDesc: { color: colors.textDim, fontSize: font.sm },
   cardMetaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm, marginTop: 2 },
-  badge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: `${colors.accent}1A`,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-  },
-  limitedBadge: { backgroundColor: `${LIMITED_COLOR}1A` },
-  limitedBadgeText: { color: LIMITED_COLOR },
-  badgeText: { color: colors.accent, fontSize: font.sm, fontWeight: '500' },
   cardMeta: { color: colors.textDim, fontSize: font.sm },
   cardActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   actionDelete: { color: colors.danger, fontSize: font.sm },
