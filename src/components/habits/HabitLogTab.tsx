@@ -6,11 +6,11 @@ import { useAuth } from '../../context/AuthContext';
 import { useHabits, useHabitLogEntries } from '../../store/habitStore';
 import { todayISO, fromISO } from '../../lib/schedule';
 import { computeRing, describeSchedule, type RingPeriod } from '../../lib/habitSchedule';
-import { isHabitComplete, type HabitLogEntry } from '../../types/habits';
+import { isHabitComplete, totalSessions, type HabitLogEntry } from '../../types/habits';
 import { ProgressRing } from '../ui/ProgressRing';
+import { LogEntryModal } from './LogEntryModal';
 import { colors, spacing, font, radius } from '../../theme';
 
-const LOG_CAP = 20; // sane upper bound for the "log N at once" stepper; not tied to the schedule
 const EXPANDED_ENTRY_LIMIT = 10;
 
 const RING_PERIODS: { period: RingPeriod; label: string }[] = [
@@ -32,13 +32,14 @@ export function HabitLogTab() {
   const router = useRouter();
   const { user } = useAuth();
   const { habits } = useHabits(user?.uid);
-  const { entries, addMany } = useHabitLogEntries(user?.uid);
+  const { entries, add } = useHabitLogEntries(user?.uid);
 
   const today = todayISO();
 
   const withProgress = habits.map((habit) => {
     const habitEntries = entries.filter((e) => e.habitId === habit.id);
-    return { habit, completedCount: habitEntries.length, habitEntries, complete: isHabitComplete(habit, habitEntries.length, today) };
+    const completedCount = totalSessions(habitEntries);
+    return { habit, completedCount, habitEntries, complete: isHabitComplete(habit, completedCount, today) };
   });
   const active = withProgress.filter((h) => !h.complete);
   const completed = withProgress.filter((h) => h.complete);
@@ -57,13 +58,14 @@ export function HabitLogTab() {
       {active.map(({ habit, completedCount, habitEntries }) => (
         <HabitCard
           key={habit.id}
+          habitId={habit.id}
           title={habit.name}
           subtitle={habit.kind === 'limited'
             ? `${completedCount} of ${habit.targetSessions ?? '∞'}${habit.targetDate ? ` · by ${fromISO(habit.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : ''}`
             : describeSchedule(habit.schedule)}
           rings={RING_PERIODS.map(({ period, label }) => ({ label, ...computeRing(habit, entries, period, today) }))}
           entries={habitEntries}
-          onLog={(count) => addMany(habit.id, count)}
+          onAdd={add}
           onPress={() => router.push(`/habits/entries/${habit.id}`)}
         />
       ))}
@@ -86,17 +88,17 @@ export function HabitLogTab() {
   );
 }
 
-function HabitCard({ title, subtitle, rings, entries, onLog, onPress }: {
+function HabitCard({ habitId, title, subtitle, rings, entries, onAdd, onPress }: {
+  habitId: string;
   title: string;
   subtitle: string;
   rings: Array<{ label: string; rate: number }>;
   entries: HabitLogEntry[];
-  onLog: (count: number) => void;
+  onAdd: (data: Omit<HabitLogEntry, 'id' | 'createdAt'>) => void;
   onPress: () => void;
 }) {
-  const [count, setCount] = useState(1);
   const [expanded, setExpanded] = useState(false);
-  const clamped = Math.max(1, Math.min(count, LOG_CAP));
+  const [modalOpen, setModalOpen] = useState(false);
 
   const sortedEntries = entries.slice().sort((a, b) => b.loggedAt.localeCompare(a.loggedAt));
   const shown = sortedEntries.slice(0, EXPANDED_ENTRY_LIMIT);
@@ -108,32 +110,21 @@ function HabitCard({ title, subtitle, rings, entries, onLog, onPress }: {
           <Text style={styles.rowLabel}>{title}</Text>
           <Text style={styles.rowDue}>{subtitle}</Text>
         </Pressable>
-        <Pressable onPress={() => setExpanded((v) => !v)} hitSlop={8} style={styles.expandBtn}>
-          <MaterialIcons name={expanded ? 'expand-less' : 'expand-more'} size={24} color={colors.textMuted} />
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable onPress={() => setExpanded((v) => !v)} style={styles.pillBtn}>
+            <MaterialIcons name="format-list-bulleted" size={15} color={colors.textMuted} />
+            <Text style={styles.pillBtnText}>{expanded ? 'Hide' : 'Sessions'}</Text>
+          </Pressable>
+          <Pressable onPress={() => setModalOpen(true)} style={styles.addPillBtn}>
+            <MaterialIcons name="add" size={18} color="#fff" />
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.ringsRow}>
         {rings.map((r) => (
           <ProgressRing key={r.label} rate={r.rate} label={r.label} size={44} strokeWidth={4} />
         ))}
-      </View>
-
-      <View style={styles.stepperRow}>
-        <Text style={styles.stepperLabel}>Log sessions</Text>
-        <View style={styles.stepper}>
-          <Pressable onPress={() => setCount((c) => Math.max(1, c - 1))} style={styles.stepBtn} hitSlop={8}>
-            <Text style={styles.stepBtnText}>−</Text>
-          </Pressable>
-          <Text style={styles.stepCount}>{clamped}</Text>
-          <Pressable onPress={() => setCount((c) => Math.min(LOG_CAP, c + 1))} style={styles.stepBtn} hitSlop={8}>
-            <Text style={styles.stepBtnText}>+</Text>
-          </Pressable>
-        </View>
-        <Pressable onPress={() => { onLog(clamped); setCount(1); }} style={styles.doneBtn}>
-          <MaterialIcons name="check" size={16} color="#fff" />
-          <Text style={styles.doneBtnText}>Log {clamped}</Text>
-        </Pressable>
       </View>
 
       {expanded && (
@@ -143,7 +134,9 @@ function HabitCard({ title, subtitle, rings, entries, onLog, onPress }: {
           ) : (
             shown.map((e) => (
               <View key={e.id} style={styles.entryRow}>
-                <Text style={styles.entryDate}>{formatDateTime(e.loggedAt)}</Text>
+                <Text style={styles.entryDate}>
+                  {formatDateTime(e.loggedAt)}{e.count && e.count > 1 ? ` · ×${e.count}` : ''}
+                </Text>
                 {e.notes ? <Text style={styles.entryNotes} numberOfLines={1}>{e.notes}</Text> : null}
               </View>
             ))
@@ -156,6 +149,15 @@ function HabitCard({ title, subtitle, rings, entries, onLog, onPress }: {
           </Pressable>
         </View>
       )}
+
+      <LogEntryModal
+        visible={modalOpen}
+        onSave={(loggedAt, notes, count) => {
+          onAdd({ habitId, loggedAt, notes: notes || undefined, count });
+          setModalOpen(false);
+        }}
+        onClose={() => setModalOpen(false)}
+      />
     </View>
   );
 }
@@ -174,20 +176,27 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   headerRow: { flexDirection: 'row', alignItems: 'center' },
-  expandBtn: { padding: spacing.xs },
-  rowMain: { flex: 1, gap: 4 },
-  rowLabel: { color: colors.text, fontSize: font.md, fontWeight: '500' },
-  rowDue: { color: colors.textDim, fontSize: font.sm },
-  doneBtn: {
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  pillBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: colors.success,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderColor: colors.border,
     borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
   },
-  doneBtnText: { color: '#fff', fontSize: font.sm, fontWeight: '600' },
+  pillBtnText: { color: colors.textMuted, fontSize: font.sm, fontWeight: '600' },
+  addPillBtn: {
+    backgroundColor: colors.accent,
+    borderRadius: radius.sm,
+    padding: spacing.xs + 1,
+  },
+  rowMain: { flex: 1, gap: 4 },
+  rowLabel: { color: colors.text, fontSize: font.md, fontWeight: '500' },
+  rowDue: { color: colors.textDim, fontSize: font.sm },
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.sm,
@@ -202,23 +211,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
-  stepperRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  stepperLabel: { color: colors.textMuted, fontSize: font.sm, flex: 1 },
-  stepper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.surface2,
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm,
-  },
-  stepBtn: { paddingVertical: spacing.xs, paddingHorizontal: spacing.xs },
-  stepBtnText: { color: colors.accent, fontSize: font.lg, fontWeight: '700' },
-  stepCount: { color: colors.text, fontSize: font.md, fontWeight: '600', minWidth: 20, textAlign: 'center' },
   completedRow: {
     flexDirection: 'row',
     alignItems: 'center',

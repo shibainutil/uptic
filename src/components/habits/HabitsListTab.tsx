@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useHabits, useHabitLogEntries } from '../../store/habitStore';
 import { describeSchedule } from '../../lib/habitSchedule';
 import { fromISO, todayISO } from '../../lib/schedule';
-import { isHabitComplete } from '../../types/habits';
+import { isHabitComplete, totalSessions } from '../../types/habits';
 import { colors, spacing, font, radius } from '../../theme';
 
 export function HabitsListTab() {
@@ -43,7 +43,7 @@ export function HabitsListTab() {
           contentContainerStyle={styles.list}
           ItemSeparatorComponent={() => <View style={styles.sep} />}
           renderItem={({ item }) => {
-            const completedCount = entries.filter((e) => e.habitId === item.id).length;
+            const completedCount = totalSessions(entries.filter((e) => e.habitId === item.id));
             const done = isHabitComplete(item, completedCount, today);
             return (
               <Pressable style={styles.card} onPress={() => router.push(`/habits/habit/${item.id}`)}>

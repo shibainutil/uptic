@@ -1,5 +1,5 @@
 import { toISO, fromISO, addDays, diffDays } from './schedule';
-import type { Habit, HabitLogEntry, HabitSchedule } from '../types/habits';
+import { totalSessions, type Habit, type HabitLogEntry, type HabitSchedule } from '../types/habits';
 
 // ── Due-date logic ───────────────────────────────────────────────────────────
 
@@ -155,9 +155,9 @@ export function computeRing(habit: Habit, entries: HabitLogEntry[], period: Ring
 
   const expected = countScheduledSlots(habit.schedule, habit.startDate, start, end);
   const rangeEndExclusive = addDays(end, 1);
-  const completed = entries.filter(
+  const completed = totalSessions(entries.filter(
     (e) => e.habitId === habit.id && e.loggedAt >= start && e.loggedAt < rangeEndExclusive,
-  ).length;
+  ));
 
   const rate = expected > 0 ? Math.min(completed / expected, 1) : (completed > 0 ? 1 : 0);
   return { rate, completed, expected };

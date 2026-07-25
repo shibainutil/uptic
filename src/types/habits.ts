@@ -33,8 +33,14 @@ export interface HabitLogEntry {
   id: string;
   habitId: string;
   loggedAt: string;              // ISO datetime — when the session actually happened
+  count?: number;                // sessions this single entry represents (default 1); e.g. logging 6 at once
   notes?: string;
   createdAt: string;
+}
+
+/** Sum of `count` (default 1) across a set of log entries. */
+export function totalSessions(entries: HabitLogEntry[]): number {
+  return entries.reduce((sum, e) => sum + (e.count ?? 1), 0);
 }
 
 /**

@@ -111,19 +111,6 @@ export function useHabitLogEntries(userId: string | null | undefined) {
     return id;
   }, [userId]);
 
-  // Logs `count` entries at once (e.g. catching up on several sessions in one sitting),
-  // all timestamped now.
-  const addMany = useCallback(async (habitId: string, count: number) => {
-    if (count <= 0) return;
-    const now = new Date().toISOString();
-    const batch = writeBatch(db);
-    for (let i = 0; i < count; i++) {
-      const id = uid();
-      batch.set(userDoc(userId!, ENTRIES_COL, id), stripUndefined({ id, habitId, loggedAt: now, createdAt: now }));
-    }
-    await batch.commit();
-  }, [userId]);
-
   const update = useCallback(async (id: string, data: Partial<HabitLogEntry>) => {
     await updateDoc(userDoc(userId!, ENTRIES_COL, id), stripUndefined(data as Record<string, unknown>));
   }, [userId]);
@@ -132,7 +119,7 @@ export function useHabitLogEntries(userId: string | null | undefined) {
     await deleteDoc(userDoc(userId!, ENTRIES_COL, id));
   }, [userId]);
 
-  return { entries, loaded, add, addMany, update, remove };
+  return { entries, loaded, add, update, remove };
 }
 
 // ── One-time migration ───────────────────────────────────────────────────────

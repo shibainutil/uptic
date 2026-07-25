@@ -39,11 +39,11 @@ export default function HabitEntriesScreen() {
     setEditing(entry);
     setModalOpen(true);
   }
-  function save(loggedAt: string, notes: string) {
+  function save(loggedAt: string, notes: string, count: number) {
     if (editing) {
-      update(editing.id, { loggedAt, notes: notes || undefined });
+      update(editing.id, { loggedAt, notes: notes || undefined, count });
     } else {
-      add({ habitId: habitId!, loggedAt, notes: notes || undefined });
+      add({ habitId: habitId!, loggedAt, notes: notes || undefined, count });
     }
     setModalOpen(false);
   }
@@ -79,7 +79,9 @@ export default function HabitEntriesScreen() {
           renderItem={({ item }) => (
             <Pressable style={styles.row} onPress={() => openEdit(item)}>
               <View style={styles.rowMain}>
-                <Text style={styles.rowDate}>{formatDateTime(item.loggedAt)}</Text>
+                <Text style={styles.rowDate}>
+                  {formatDateTime(item.loggedAt)}{item.count && item.count > 1 ? ` · ×${item.count}` : ''}
+                </Text>
                 {item.notes ? <Text style={styles.rowNotes} numberOfLines={2}>{item.notes}</Text> : null}
               </View>
               <MaterialIcons name="chevron-right" size={22} color={colors.textMuted} />
