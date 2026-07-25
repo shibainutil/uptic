@@ -23,11 +23,11 @@ function mix(a: [number, number, number], b: [number, number, number], t: number
   return `rgb(${r}, ${g}, ${bl})`;
 }
 
-/** Red at 0%, yellow at 33%, green at 66%+ — faded continuously rather than snapped bands. */
+/** Colors keyed to absolute circle position: red→yellow at 1/3, yellow→green at 2/3. */
 export function ringColor(t: number): string {
   if (t <= 1 / 3) return mix(RED, YELLOW, t / (1 / 3));
-  if (t <= 2 / 3) return mix(YELLOW, GREEN, (t - 1 / 3) / (1 / 3));
-  return `rgb(${GREEN[0]}, ${GREEN[1]}, ${GREEN[2]})`;
+  if (t <= 2 / 3) return `rgb(${YELLOW[0]}, ${YELLOW[1]}, ${YELLOW[2]})`;
+  return mix(YELLOW, GREEN, (t - 2 / 3) / (1 / 3));
 }
 
 function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {
@@ -61,12 +61,7 @@ export function ProgressRing({ rate, label, size = 48, strokeWidth = 5 }: Props)
               d={describeArc(cx, cy, radius, i * step, (i + 1) * step)}
               stroke={ringColor(i / SEGMENTS)}
               strokeWidth={strokeWidth}
-              // Flat (not round) caps: each segment's color reflects its exact position on
-              // the whole circle (i / SEGMENTS) — rounded caps would let each segment's disc
-              // overlap its neighbor, letting later (greener) segments visually bleed over
-              // earlier ones and making the ring look further along the red->green fade than
-              // the actual rate/position warrants.
-              strokeLinecap="butt"
+              strokeLinecap="round"
               fill="none"
             />
           ))}
