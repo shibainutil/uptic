@@ -6,11 +6,12 @@ import { useAuth } from '../../context/AuthContext';
 import { useHabits, useHabitLogEntries } from '../../store/habitStore';
 import { todayISO, fromISO } from '../../lib/schedule';
 import { computeRing, describeSchedule, type RingPeriod } from '../../lib/habitSchedule';
-import { isHabitComplete } from '../../types/habits';
+import { isHabitComplete, type HabitLogEntry } from '../../types/habits';
 import { ProgressRing } from '../ui/ProgressRing';
 import { colors, spacing, font, radius } from '../../theme';
 
 const LOG_CAP = 20; // sane upper bound for the "log N at once" stepper; not tied to the schedule
+const EXPANDED_ENTRY_LIMIT = 10;
 
 const RING_PERIODS: { period: RingPeriod; label: string }[] = [
   { period: 'day', label: 'Day' },
@@ -21,6 +22,12 @@ const RING_PERIODS: { period: RingPeriod; label: string }[] = [
   { period: 'allTime', label: 'All' },
 ];
 
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+  });
+}
+
 export function HabitLogTab() {
   const router = useRouter();
   const { user } = useAuth();
@@ -30,8 +37,8 @@ export function HabitLogTab() {
   const today = todayISO();
 
   const withProgress = habits.map((habit) => {
-    const completedCount = entries.filter((e) => e.habitId === habit.id).length;
-    return { habit, completedCount, complete: isHabitComplete(habit, completedCount, today) };
+    const habitEntries = entries.filter((e) => e.habitId === habit.id);
+    return { habit, completedCount: habitEntries.length, habitEntries, complete: isHabitComplete(habit, habitEntries.length, today) };
   });
   const active = withProgress.filter((h) => !h.complete);
   const completed = withProgress.filter((h) => h.complete);
@@ -47,7 +54,7 @@ export function HabitLogTab() {
 
   return (
     <ScrollView contentContainerStyle={styles.list}>
-      {active.map(({ habit, completedCount }) => (
+      {active.map(({ habit, completedCount, habitEntries }) => (
         <HabitCard
           key={habit.id}
           title={habit.name}
@@ -55,6 +62,7 @@ export function HabitLogTab() {
             ? `${completedCount} of ${habit.targetSessions ?? '∞'}${habit.targetDate ? ` · by ${fromISO(habit.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : ''}`
             : describeSchedule(habit.schedule)}
           rings={RING_PERIODS.map(({ period, label }) => ({ label, ...computeRing(habit, entries, period, today) }))}
+          entries={habitEntries}
           onLog={(count) => addMany(habit.id, count)}
           onPress={() => router.push(`/habits/entries/${habit.id}`)}
         />
@@ -78,21 +86,31 @@ export function HabitLogTab() {
   );
 }
 
-function HabitCard({ title, subtitle, rings, onLog, onPress }: {
+function HabitCard({ title, subtitle, rings, entries, onLog, onPress }: {
   title: string;
   subtitle: string;
   rings: Array<{ label: string; rate: number }>;
+  entries: HabitLogEntry[];
   onLog: (count: number) => void;
   onPress: () => void;
 }) {
   const [count, setCount] = useState(1);
+  const [expanded, setExpanded] = useState(false);
   const clamped = Math.max(1, Math.min(count, LOG_CAP));
 
+  const sortedEntries = entries.slice().sort((a, b) => b.loggedAt.localeCompare(a.loggedAt));
+  const shown = sortedEntries.slice(0, EXPANDED_ENTRY_LIMIT);
+
   return (
-    <Pressable style={styles.card} onPress={onPress}>
-      <View style={styles.rowMain}>
-        <Text style={styles.rowLabel}>{title}</Text>
-        <Text style={styles.rowDue}>{subtitle}</Text>
+    <View style={styles.card}>
+      <View style={styles.headerRow}>
+        <Pressable style={styles.rowMain} onPress={onPress}>
+          <Text style={styles.rowLabel}>{title}</Text>
+          <Text style={styles.rowDue}>{subtitle}</Text>
+        </Pressable>
+        <Pressable onPress={() => setExpanded((v) => !v)} hitSlop={8} style={styles.expandBtn}>
+          <MaterialIcons name={expanded ? 'expand-less' : 'expand-more'} size={24} color={colors.textMuted} />
+        </Pressable>
       </View>
 
       <View style={styles.ringsRow}>
@@ -117,7 +135,28 @@ function HabitCard({ title, subtitle, rings, onLog, onPress }: {
           <Text style={styles.doneBtnText}>Log {clamped}</Text>
         </Pressable>
       </View>
-    </Pressable>
+
+      {expanded && (
+        <View style={styles.entriesList}>
+          {shown.length === 0 ? (
+            <Text style={styles.noEntriesText}>No sessions logged yet.</Text>
+          ) : (
+            shown.map((e) => (
+              <View key={e.id} style={styles.entryRow}>
+                <Text style={styles.entryDate}>{formatDateTime(e.loggedAt)}</Text>
+                {e.notes ? <Text style={styles.entryNotes} numberOfLines={1}>{e.notes}</Text> : null}
+              </View>
+            ))
+          )}
+          <Pressable onPress={onPress} style={styles.viewAllBtn}>
+            <Text style={styles.viewAllText}>
+              {sortedEntries.length > EXPANDED_ENTRY_LIMIT ? `View all ${sortedEntries.length} sessions` : 'Manage sessions'}
+            </Text>
+            <MaterialIcons name="chevron-right" size={18} color={colors.accent} />
+          </Pressable>
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -134,6 +173,8 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     marginBottom: spacing.sm,
   },
+  headerRow: { flexDirection: 'row', alignItems: 'center' },
+  expandBtn: { padding: spacing.xs },
   rowMain: { flex: 1, gap: 4 },
   rowLabel: { color: colors.text, fontSize: font.md, fontWeight: '500' },
   rowDue: { color: colors.textDim, fontSize: font.sm },
@@ -190,4 +231,28 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     marginBottom: spacing.sm,
   },
+  entriesList: {
+    gap: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.surface2,
+    paddingTop: spacing.sm,
+  },
+  noEntriesText: { color: colors.textDim, fontSize: font.sm },
+  entryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  entryDate: { color: colors.text, fontSize: font.sm },
+  entryNotes: { color: colors.textDim, fontSize: font.sm, flexShrink: 1, textAlign: 'right' },
+  viewAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    paddingTop: spacing.xs,
+  },
+  viewAllText: { color: colors.accent, fontSize: font.sm, fontWeight: '600' },
 });
