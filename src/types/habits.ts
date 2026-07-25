@@ -37,10 +37,16 @@ export interface HabitLogEntry {
   createdAt: string;
 }
 
-/** True once a limited habit's completion condition has been met. */
+/**
+ * True once a limited habit's completion condition has been met. When a target
+ * session count is set, that count is the actual goal — the target date is just
+ * an informational deadline and does NOT by itself mark the habit complete (a
+ * passed deadline with sessions still missing means overdue, not done). The date
+ * only decides completion when there's no session-count goal to check against.
+ */
 export function isHabitComplete(habit: Habit, completedCount: number, todayISO: string): boolean {
   if (habit.kind !== 'limited') return false;
-  if (habit.targetSessions != null && completedCount >= habit.targetSessions) return true;
-  if (habit.targetDate != null && todayISO > habit.targetDate) return true;
+  if (habit.targetSessions != null) return completedCount >= habit.targetSessions;
+  if (habit.targetDate != null) return todayISO > habit.targetDate;
   return false;
 }

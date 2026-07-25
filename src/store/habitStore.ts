@@ -140,9 +140,9 @@ export function useHabitLogEntries(userId: string | null | undefined) {
 // per-variant fields and had no `schedule`/unified kind. Give any doc missing
 // `schedule` a best-effort single schedule (the old normal schedule, or a plain
 // daily default for goal-based habits that never had one) and normalize `kind`.
-// Legacy log entries may carry a leftover `variant` field — harmless, just unused
-// by the new HabitLogEntry shape. Runs once per mount; idempotent once every doc
-// has a `schedule`.
+// Older log entry docs used `taskId` instead of `habitId` — copy it over so
+// existing logged sessions don't silently disappear. Runs once per mount;
+// idempotent once every doc has the new field(s).
 export function useMigrateLegacyHabitSchema(userId: string | null | undefined) {
   const ran = useRef(false);
 
@@ -151,17 +151,28 @@ export function useMigrateLegacyHabitSchema(userId: string | null | undefined) {
     ran.current = true;
 
     (async () => {
-      const snap = await getDocs(userCol(userId, HABITS_COL));
-      const legacy = snap.docs.filter((d) => !('schedule' in d.data()));
-      if (legacy.length === 0) return;
+      const [habitsSnap, entriesSnap] = await Promise.all([
+        getDocs(userCol(userId, HABITS_COL)),
+        getDocs(userCol(userId, ENTRIES_COL)),
+      ]);
+      const legacyHabits = habitsSnap.docs.filter((d) => !('schedule' in d.data()));
+      const legacyEntries = entriesSnap.docs.filter((d) => {
+        const raw = d.data() as Record<string, unknown>;
+        return !raw.habitId && Boolean(raw.taskId);
+      });
+      if (legacyHabits.length === 0 && legacyEntries.length === 0) return;
 
       const batch = writeBatch(db);
-      legacy.forEach((d) => {
+      legacyHabits.forEach((d) => {
         const raw = d.data() as Record<string, unknown>;
         const oldKind = raw.kind as string | undefined;
         const kind = oldKind === 'finite' ? 'limited' : 'continuous';
         const schedule = raw.normalSchedule ?? { unit: 'day', interval: 1, timesOfDay: ['08:00'] };
         batch.update(d.ref, stripUndefined({ kind, schedule }));
+      });
+      legacyEntries.forEach((d) => {
+        const raw = d.data() as Record<string, unknown>;
+        batch.update(d.ref, { habitId: raw.taskId });
       });
       await batch.commit();
     })().catch(() => { ran.current = false; /* retry on next mount */ });
