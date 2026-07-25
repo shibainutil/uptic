@@ -12,6 +12,7 @@ import { LogEntryModal } from './LogEntryModal';
 import { colors, spacing, font, radius } from '../../theme';
 
 const EXPANDED_ENTRY_LIMIT = 10;
+const ICON_SIZE = 18;
 
 const RING_PERIODS: { period: RingPeriod; label: string }[] = [
   { period: 'day', label: 'Day' },
@@ -111,12 +112,11 @@ function HabitCard({ habitId, title, subtitle, rings, entries, onAdd, onPress }:
           <Text style={styles.rowDue}>{subtitle}</Text>
         </Pressable>
         <View style={styles.headerActions}>
-          <Pressable onPress={() => setExpanded((v) => !v)} style={styles.pillBtn}>
-            <MaterialIcons name="format-list-bulleted" size={15} color={colors.textMuted} />
-            <Text style={styles.pillBtnText}>{expanded ? 'Hide' : 'Sessions'}</Text>
+          <Pressable onPress={() => setExpanded((v) => !v)} style={[styles.iconBtn, styles.listBtn]}>
+            <MaterialIcons name="format-list-bulleted" size={ICON_SIZE} color={colors.textMuted} />
           </Pressable>
-          <Pressable onPress={() => setModalOpen(true)} style={styles.addPillBtn}>
-            <MaterialIcons name="add" size={18} color="#fff" />
+          <Pressable onPress={() => setModalOpen(true)} style={[styles.iconBtn, styles.addBtn]}>
+            <MaterialIcons name="add" size={ICON_SIZE} color="#fff" />
           </Pressable>
         </View>
       </View>
@@ -177,22 +177,20 @@ const styles = StyleSheet.create({
   },
   headerRow: { flexDirection: 'row', alignItems: 'center' },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  pillBtn: {
-    flexDirection: 'row',
+  iconBtn: {
+    width: 32,
+    height: 32,
     alignItems: 'center',
-    gap: 4,
+    justifyContent: 'center',
+    borderRadius: radius.sm,
+  },
+  listBtn: {
     backgroundColor: colors.surface2,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
   },
-  pillBtnText: { color: colors.textMuted, fontSize: font.sm, fontWeight: '600' },
-  addPillBtn: {
+  addBtn: {
     backgroundColor: colors.accent,
-    borderRadius: radius.sm,
-    padding: spacing.xs + 1,
   },
   rowMain: { flex: 1, gap: 4 },
   rowLabel: { color: colors.text, fontSize: font.md, fontWeight: '500' },

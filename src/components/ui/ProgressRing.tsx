@@ -61,7 +61,12 @@ export function ProgressRing({ rate, label, size = 48, strokeWidth = 5 }: Props)
               d={describeArc(cx, cy, radius, i * step, (i + 1) * step)}
               stroke={ringColor(i / SEGMENTS)}
               strokeWidth={strokeWidth}
-              strokeLinecap="round"
+              // Flat (not round) caps: each segment's color reflects its exact position on
+              // the whole circle (i / SEGMENTS) — rounded caps would let each segment's disc
+              // overlap its neighbor, letting later (greener) segments visually bleed over
+              // earlier ones and making the ring look further along the red->green fade than
+              // the actual rate/position warrants.
+              strokeLinecap="butt"
               fill="none"
             />
           ))}
