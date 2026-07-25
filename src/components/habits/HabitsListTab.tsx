@@ -51,20 +51,21 @@ export function HabitsListTab() {
                   <Text style={styles.cardName}>{item.name}</Text>
                   {item.description ? <Text style={styles.cardDesc}>{item.description}</Text> : null}
                   <View style={styles.cardMetaRow}>
-                    <View style={[styles.badge, item.kind === 'limited' && styles.limitedBadge]}>
-                      <MaterialIcons
-                        name={item.kind === 'limited' ? 'flag' : 'event-repeat'}
-                        size={13}
-                        color={item.kind === 'limited' ? LIMITED_COLOR : colors.accent}
-                      />
-                      <Text style={[styles.badgeText, item.kind === 'limited' && styles.limitedBadgeText]}>
-                        {describeSchedule(item.schedule)}
-                      </Text>
+                    <View style={styles.badge}>
+                      <MaterialIcons name="event-repeat" size={13} color={colors.accent} />
+                      <Text style={styles.badgeText}>{describeSchedule(item.schedule)}</Text>
                     </View>
+                    {item.kind === 'limited' && item.targetDate && (
+                      <View style={[styles.badge, styles.limitedBadge]}>
+                        <MaterialIcons name="flag" size={13} color={LIMITED_COLOR} />
+                        <Text style={[styles.badgeText, styles.limitedBadgeText]}>
+                          by {fromISO(item.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
+                        </Text>
+                      </View>
+                    )}
                     {item.kind === 'limited' && (
                       <Text style={styles.cardMeta}>
                         {done ? 'Completed' : `${completedCount} of ${item.targetSessions ?? '∞'}`}
-                        {item.targetDate ? ` · by ${fromISO(item.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : ''}
                       </Text>
                     )}
                   </View>
