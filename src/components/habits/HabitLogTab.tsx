@@ -4,9 +4,9 @@ import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { useHabits, useHabitLogEntries } from '../../store/habitStore';
-import { todayISO, fromISO } from '../../lib/schedule';
+import { todayISO, fromISO, diffDays } from '../../lib/schedule';
 import { computeRing, describeSchedule, type RingPeriod } from '../../lib/habitSchedule';
-import { isHabitComplete, totalSessions, type HabitLogEntry } from '../../types/habits';
+import { isHabitComplete, totalSessions, type Habit, type HabitLogEntry } from '../../types/habits';
 import { ProgressRing } from '../ui/ProgressRing';
 import { LogEntryModal } from './LogEntryModal';
 import { colors, spacing, font, radius } from '../../theme';
@@ -59,12 +59,14 @@ export function HabitLogTab() {
       {active.map(({ habit, completedCount, habitEntries }) => (
         <HabitCard
           key={habit.id}
+          habit={habit}
           habitId={habit.id}
           title={habit.name}
           subtitle={habit.kind === 'limited'
             ? `${completedCount} of ${habit.targetSessions ?? '∞'}${habit.targetDate ? ` · by ${fromISO(habit.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : ''}`
             : describeSchedule(habit.schedule)}
           rings={RING_PERIODS.map(({ period, label }) => ({ label, ...computeRing(habit, entries, period, today) }))}
+          completedCount={completedCount}
           entries={habitEntries}
           onAdd={add}
           onPress={() => router.push(`/habits/entries/${habit.id}`)}
@@ -89,11 +91,13 @@ export function HabitLogTab() {
   );
 }
 
-function HabitCard({ habitId, title, subtitle, rings, entries, onAdd, onPress }: {
+function HabitCard({ habit, habitId, title, subtitle, rings, completedCount, entries, onAdd, onPress }: {
+  habit: Habit;
   habitId: string;
   title: string;
   subtitle: string;
   rings: Array<{ label: string; rate: number }>;
+  completedCount: number;
   entries: HabitLogEntry[];
   onAdd: (data: Omit<HabitLogEntry, 'id' | 'createdAt'>) => void;
   onPress: () => void;
@@ -126,6 +130,15 @@ function HabitCard({ habitId, title, subtitle, rings, entries, onAdd, onPress }:
           <ProgressRing key={r.label} rate={r.rate} label={r.label} size={44} strokeWidth={4} />
         ))}
       </View>
+
+      {habit.kind === 'limited' && habit.targetSessions != null && habit.targetDate != null && (
+        <LimitedPaceBars
+          startDate={habit.startDate}
+          targetDate={habit.targetDate}
+          targetSessions={habit.targetSessions}
+          completedCount={completedCount}
+        />
+      )}
 
       {expanded && (
         <View style={styles.entriesList}>
@@ -161,6 +174,87 @@ function HabitCard({ habitId, title, subtitle, rings, entries, onAdd, onPress }:
     </View>
   );
 }
+
+function LimitedPaceBars({ startDate, targetDate, targetSessions, completedCount }: {
+  startDate: string;
+  targetDate: string;
+  targetSessions: number;
+  completedCount: number;
+}) {
+  const today = todayISO();
+  const totalDays = diffDays(targetDate, startDate);
+  const elapsedDays = Math.min(Math.max(0, diffDays(today, startDate)), totalDays);
+  const timeRate = totalDays > 0 ? elapsedDays / totalDays : 0;
+  const sessionRate = Math.min(completedCount / targetSessions, 1);
+
+  const expectedByNow = Math.ceil(timeRate * targetSessions);
+  const onTrack = completedCount >= expectedByNow;
+  const sessionBarColor = sessionRate >= 1 ? colors.success : onTrack ? colors.success : completedCount >= expectedByNow - 1 ? '#EAB308' : colors.danger;
+
+  const daysLeft = Math.max(0, diffDays(targetDate, today));
+  const sessionsLeft = Math.max(0, targetSessions - completedCount);
+
+  return (
+    <View style={paceStyles.container}>
+      <View style={paceStyles.row}>
+        <Text style={paceStyles.rowLabel}>Sessions</Text>
+        <View style={paceStyles.trackOuter}>
+          <View style={paceStyles.track}>
+            <View style={[paceStyles.fill, { width: `${sessionRate * 100}%` as any, backgroundColor: sessionBarColor }]} />
+          </View>
+          {/* pace marker: where you should be right now */}
+          <View style={[paceStyles.marker, { left: `${Math.min(timeRate * 100, 100)}%` as any }]} />
+        </View>
+        <Text style={paceStyles.rowValue}>{completedCount}/{targetSessions}</Text>
+      </View>
+      <View style={paceStyles.row}>
+        <Text style={paceStyles.rowLabel}>Deadline</Text>
+        <View style={paceStyles.trackOuter}>
+          <View style={paceStyles.track}>
+            <View style={[paceStyles.fill, { width: `${timeRate * 100}%` as any, backgroundColor: colors.accent }]} />
+          </View>
+        </View>
+        <Text style={paceStyles.rowValue}>{daysLeft}d left</Text>
+      </View>
+      {sessionsLeft > 0 && daysLeft > 0 && (
+        <Text style={paceStyles.hint}>
+          {`${sessionsLeft} session${sessionsLeft !== 1 ? 's' : ''} left · `}
+          {onTrack ? 'On pace' : `${expectedByNow - completedCount} behind pace`}
+        </Text>
+      )}
+    </View>
+  );
+}
+
+const paceStyles = StyleSheet.create({
+  container: {
+    gap: spacing.xs,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.surface2,
+  },
+  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  rowLabel: { color: colors.textMuted, fontSize: font.sm - 1, fontWeight: '600', width: 56 },
+  rowValue: { color: colors.textDim, fontSize: font.sm - 1, width: 52, textAlign: 'right' },
+  trackOuter: { flex: 1, height: 10, justifyContent: 'center' },
+  track: {
+    height: 6,
+    backgroundColor: colors.surface2,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  fill: { height: '100%', borderRadius: 3 },
+  marker: {
+    position: 'absolute',
+    top: 0,
+    width: 2,
+    height: 10,
+    backgroundColor: colors.textMuted,
+    borderRadius: 1,
+    marginLeft: -1,
+  },
+  hint: { color: colors.textDim, fontSize: font.sm - 1, textAlign: 'right' },
+});
 
 const styles = StyleSheet.create({
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
