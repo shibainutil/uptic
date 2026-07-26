@@ -2,22 +2,22 @@ import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
-import Svg, { Circle, Path, Line } from 'react-native-svg';
+import Svg, { Circle, Path } from 'react-native-svg';
 import { useAuth } from '../../context/AuthContext';
 import { useHabits, useHabitLogEntries } from '../../store/habitStore';
 import { todayISO, fromISO, diffDays } from '../../lib/schedule';
 import { computeRing, describeSchedule } from '../../lib/habitSchedule';
 import { isHabitComplete, totalSessions, type Habit, type HabitLogEntry } from '../../types/habits';
-import { ringColor, polarToCartesian, describeArc } from '../ui/ProgressRing';
+import { ringColor, describeArc } from '../ui/ProgressRing';
 import { Badge } from '../ui/Badge';
 import { LogEntryModal } from './LogEntryModal';
 import { colors, spacing, font, radius } from '../../theme';
 
 const EXPANDED_ENTRY_LIMIT = 10;
-const ICON_SIZE = 18;
+const ICON_SIZE = 16;
 const LIMITED_COLOR = '#A855F7';
 const WARNING_COLOR = '#EAB308';
-const RING_SIZE = 120;
+const RING_SIZE = 88;
 const SEGMENTS = 32;
 
 function formatDateTime(iso: string): string {
@@ -52,33 +52,35 @@ export function HabitLogTab() {
 
   return (
     <ScrollView contentContainerStyle={styles.list}>
-      {active.map(({ habit, completedCount, habitEntries }) => {
-        const allTimeRate = computeRing(habit, entries, 'allTime', today).rate;
-        const sessionRate =
-          habit.kind === 'limited' && habit.targetSessions != null
-            ? Math.min(completedCount / habit.targetSessions, 1)
-            : allTimeRate;
+      <View style={styles.grid}>
+        {active.map(({ habit, completedCount, habitEntries }) => {
+          const allTimeRate = computeRing(habit, entries, 'allTime', today).rate;
+          const sessionRate =
+            habit.kind === 'limited' && habit.targetSessions != null
+              ? Math.min(completedCount / habit.targetSessions, 1)
+              : allTimeRate;
 
-        let timeRate: number | undefined;
-        if (habit.kind === 'limited' && habit.targetDate != null) {
-          const total = Math.max(1, diffDays(habit.targetDate, habit.startDate));
-          const elapsed = Math.min(Math.max(0, diffDays(today, habit.startDate)), total);
-          timeRate = elapsed / total;
-        }
+          let timeRate: number | undefined;
+          if (habit.kind === 'limited' && habit.targetDate != null) {
+            const total = Math.max(1, diffDays(habit.targetDate, habit.startDate));
+            const elapsed = Math.min(Math.max(0, diffDays(today, habit.startDate)), total);
+            timeRate = elapsed / total;
+          }
 
-        return (
-          <HabitCard
-            key={habit.id}
-            habit={habit}
-            completedCount={completedCount}
-            sessionRate={sessionRate}
-            timeRate={timeRate}
-            entries={habitEntries}
-            onAdd={add}
-            onPress={() => router.push(`/habits/entries/${habit.id}`)}
-          />
-        );
-      })}
+          return (
+            <HabitCard
+              key={habit.id}
+              habit={habit}
+              completedCount={completedCount}
+              sessionRate={sessionRate}
+              timeRate={timeRate}
+              entries={habitEntries}
+              onAdd={add}
+              onPress={() => router.push(`/habits/entries/${habit.id}`)}
+            />
+          );
+        })}
+      </View>
 
       {completed.length > 0 && (
         <>
@@ -115,41 +117,35 @@ function HabitCard({ habit, completedCount, sessionRate, timeRate, entries, onAd
   const today = todayISO();
   const sortedEntries = entries.slice().sort((a, b) => b.loggedAt.localeCompare(a.loggedAt));
   const shown = sortedEntries.slice(0, EXPANDED_ENTRY_LIMIT);
-
   const daysLeft = habit.targetDate ? Math.max(0, diffDays(habit.targetDate, today)) : null;
 
   let paceStatus: { label: string; color: string } | null = null;
   if (timeRate != null && habit.targetSessions != null) {
     const expectedByNow = Math.ceil(timeRate * habit.targetSessions);
     const deficit = expectedByNow - completedCount;
-    if (sessionRate >= 1) {
-      paceStatus = { label: 'Goal reached', color: colors.success };
-    } else if (deficit <= 0) {
-      paceStatus = { label: 'On pace', color: colors.success };
-    } else if (deficit === 1) {
-      paceStatus = { label: '1 session behind', color: WARNING_COLOR };
-    } else {
-      paceStatus = { label: `${deficit} sessions behind`, color: colors.danger };
-    }
+    if (sessionRate >= 1)        paceStatus = { label: 'Goal reached', color: colors.success };
+    else if (deficit <= 0)       paceStatus = { label: 'On pace', color: colors.success };
+    else if (deficit === 1)      paceStatus = { label: '1 behind', color: WARNING_COLOR };
+    else                         paceStatus = { label: `${deficit} behind`, color: colors.danger };
   }
 
   return (
     <View style={styles.card}>
-      {/* Title + badges (tight group) + action buttons */}
+      {/* Title + badges + buttons */}
       <View style={styles.headerRow}>
         <Pressable style={styles.headerMain} onPress={onPress}>
-          <Text style={styles.title}>{habit.name}</Text>
+          <Text style={styles.title} numberOfLines={2}>{habit.name}</Text>
           <View style={styles.badgeRow}>
             <Badge
               color={colors.accent}
               label={describeSchedule(habit.schedule)}
-              icon={<MaterialIcons name="event-repeat" size={11} color={colors.accent} />}
+              icon={<MaterialIcons name="event-repeat" size={10} color={colors.accent} />}
             />
             {habit.kind === 'limited' && habit.targetDate && (
               <Badge
                 color={LIMITED_COLOR}
                 label={`by ${fromISO(habit.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`}
-                icon={<MaterialIcons name="flag" size={11} color={LIMITED_COLOR} />}
+                icon={<MaterialIcons name="flag" size={10} color={LIMITED_COLOR} />}
               />
             )}
           </View>
@@ -164,27 +160,26 @@ function HabitCard({ habit, completedCount, sessionRate, timeRate, entries, onAd
         </View>
       </View>
 
-      {/* Concentric ring + status */}
+      {/* Ring */}
       <View style={styles.ringArea}>
-        <ConcentricRing
-          sessionRate={sessionRate}
-          timeRate={timeRate}
-          paceRate={timeRate}
-          size={RING_SIZE}
-        />
-        <View style={styles.ringLabels}>
-          <Text style={styles.ringPct}>
-            {habit.kind === 'limited' && habit.targetSessions != null
-              ? `${completedCount} / ${habit.targetSessions}`
-              : `${Math.round(sessionRate * 100)}%`}
-          </Text>
+        <View style={{ width: RING_SIZE, height: RING_SIZE }}>
+          <ConcentricRing sessionRate={sessionRate} timeRate={timeRate} size={RING_SIZE} />
+          <View style={[StyleSheet.absoluteFill, styles.ringCenter]}>
+            <Text style={styles.ringPct}>{Math.round(sessionRate * 100)}%</Text>
+          </View>
+        </View>
+
+        <View style={styles.ringMeta}>
           {paceStatus && (
             <Text style={[styles.paceLabel, { color: paceStatus.color }]}>{paceStatus.label}</Text>
           )}
           {daysLeft != null && (
             <Text style={styles.daysLeft}>
-              {daysLeft > 0 ? `${daysLeft} days left` : 'Deadline passed'}
+              {daysLeft > 0 ? `${daysLeft}d left` : 'Overdue'}
             </Text>
+          )}
+          {habit.kind === 'limited' && habit.targetSessions != null && (
+            <Text style={styles.countLabel}>{completedCount} / {habit.targetSessions}</Text>
           )}
         </View>
       </View>
@@ -210,7 +205,7 @@ function HabitCard({ habit, completedCount, sessionRate, timeRate, entries, onAd
                 ? `View all ${sortedEntries.length} sessions`
                 : 'Manage sessions'}
             </Text>
-            <MaterialIcons name="chevron-right" size={18} color={colors.accent} />
+            <MaterialIcons name="chevron-right" size={16} color={colors.accent} />
           </Pressable>
         </View>
       )}
@@ -227,17 +222,16 @@ function HabitCard({ habit, completedCount, sessionRate, timeRate, entries, onAd
   );
 }
 
-function ConcentricRing({ sessionRate, timeRate, paceRate, size }: {
+function ConcentricRing({ sessionRate, timeRate, size }: {
   sessionRate: number;
   timeRate?: number;
-  paceRate?: number;
   size: number;
 }) {
   const cx = size / 2;
   const cy = size / 2;
-  const OUTER_W = 11;
-  const INNER_W = 7;
-  const GAP = 6;
+  const OUTER_W = 9;
+  const INNER_W = 6;
+  const GAP = 5;
 
   const outerR = size / 2 - OUTER_W / 2 - 1;
   const innerR = outerR - OUTER_W / 2 - GAP - INNER_W / 2;
@@ -245,27 +239,11 @@ function ConcentricRing({ sessionRate, timeRate, paceRate, size }: {
   const clamped = Math.max(0, Math.min(sessionRate, 1));
   const step = 360 / SEGMENTS;
   const filled = Math.round(clamped * SEGMENTS);
-
   const deadlineAngle = timeRate != null ? Math.min(timeRate, 0.9999) * 360 : null;
-
-  let paceLine: { x1: number; y1: number; x2: number; y2: number } | null = null;
-  if (paceRate != null) {
-    const angle = Math.min(paceRate, 0.9999) * 360;
-    const rad = ((angle - 90) * Math.PI) / 180;
-    const r1 = outerR - OUTER_W / 2 - 1;
-    const r2 = outerR + OUTER_W / 2 + 2;
-    paceLine = {
-      x1: cx + r1 * Math.cos(rad), y1: cy + r1 * Math.sin(rad),
-      x2: cx + r2 * Math.cos(rad), y2: cy + r2 * Math.sin(rad),
-    };
-  }
 
   return (
     <Svg width={size} height={size}>
-      {/* Outer track */}
       <Circle cx={cx} cy={cy} r={outerR} stroke={colors.surface2} strokeWidth={OUTER_W} fill="none" />
-
-      {/* Session arc segments */}
       {Array.from({ length: filled }, (_, i) => (
         <Path
           key={i}
@@ -276,13 +254,9 @@ function ConcentricRing({ sessionRate, timeRate, paceRate, size }: {
           fill="none"
         />
       ))}
-
-      {/* Inner deadline track */}
       {timeRate != null && (
         <Circle cx={cx} cy={cy} r={innerR} stroke={colors.surface2} strokeWidth={INNER_W} fill="none" />
       )}
-
-      {/* Inner deadline arc */}
       {deadlineAngle != null && deadlineAngle > 0 && (
         <Path
           d={describeArc(cx, cy, innerR, 0, deadlineAngle)}
@@ -292,17 +266,6 @@ function ConcentricRing({ sessionRate, timeRate, paceRate, size }: {
           fill="none"
         />
       )}
-
-      {/* Pace marker — dotted radial line crossing the outer ring */}
-      {paceLine && (
-        <Line
-          x1={paceLine.x1} y1={paceLine.y1}
-          x2={paceLine.x2} y2={paceLine.y2}
-          stroke={colors.textMuted}
-          strokeWidth={2}
-          strokeDasharray="2,2"
-        />
-      )}
     </Svg>
   );
 }
@@ -310,38 +273,40 @@ function ConcentricRing({ sessionRate, timeRate, paceRate, size }: {
 const styles = StyleSheet.create({
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
   emptyText: { color: colors.textDim, fontSize: font.md, textAlign: 'center', lineHeight: 22 },
-  list: { padding: spacing.lg, gap: spacing.md },
+  list: { padding: spacing.md, gap: spacing.md },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   sectionHeader: {
     fontSize: 11, fontWeight: '600', color: colors.textMuted,
     textTransform: 'uppercase', letterSpacing: 0.8,
-    marginTop: spacing.xs, marginBottom: spacing.xs,
   },
   card: {
+    width: '48.6%',
     backgroundColor: colors.surface,
-    borderRadius: radius.md ?? radius.sm,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.surface2,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    gap: spacing.md,
+    padding: spacing.md,
+    gap: spacing.sm,
   },
-  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
-  headerMain: { flex: 1, gap: 5 },
-  title: { color: colors.text, fontSize: font.md, fontWeight: '600' },
-  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingTop: 2 },
-  iconBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.xs },
+  headerMain: { flex: 1, gap: 4 },
+  title: { color: colors.text, fontSize: font.sm, fontWeight: '600', lineHeight: 17 },
+  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
+  headerActions: { flexDirection: 'row', gap: 4 },
+  iconBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
   listBtn: { backgroundColor: colors.surface2, borderWidth: 1, borderColor: colors.border },
   addBtn: { backgroundColor: colors.accent },
-  ringArea: { alignItems: 'center', gap: spacing.xs },
-  ringLabels: { alignItems: 'center', gap: 3 },
-  ringPct: { color: colors.text, fontSize: font.md, fontWeight: '700' },
-  paceLabel: { fontSize: font.sm, fontWeight: '600' },
-  daysLeft: { color: colors.textDim, fontSize: font.sm },
+  ringArea: { alignItems: 'center', gap: 6 },
+  ringCenter: { alignItems: 'center', justifyContent: 'center' },
+  ringPct: { color: colors.text, fontSize: 15, fontWeight: '700' },
+  ringMeta: { alignItems: 'center', gap: 2 },
+  paceLabel: { fontSize: 11, fontWeight: '600' },
+  daysLeft: { color: colors.textDim, fontSize: 11 },
+  countLabel: { color: colors.textMuted, fontSize: 11 },
   completedRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: radius.sm, borderWidth: 1, borderColor: colors.surface2,
+    backgroundColor: colors.surface, borderRadius: radius.sm,
+    borderWidth: 1, borderColor: colors.surface2,
     paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
   },
   rowMain: { flex: 1, gap: 3 },
@@ -353,10 +318,10 @@ const styles = StyleSheet.create({
   noEntriesText: { color: colors.textDim, fontSize: font.sm },
   entryRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    gap: spacing.md, paddingVertical: spacing.xs,
+    gap: spacing.sm, paddingVertical: 2,
   },
-  entryDate: { color: colors.text, fontSize: font.sm },
-  entryNotes: { color: colors.textDim, fontSize: font.sm, flexShrink: 1, textAlign: 'right' },
+  entryDate: { color: colors.text, fontSize: 11, flex: 1 },
+  entryNotes: { color: colors.textDim, fontSize: 11, flexShrink: 1, textAlign: 'right' },
   viewAllBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 2, paddingTop: spacing.xs },
   viewAllText: { color: colors.accent, fontSize: font.sm, fontWeight: '600' },
 });
