@@ -314,18 +314,21 @@ export function useRoutineReconcile(
 
   useEffect(() => {
     if (!userId || routines.length === 0 || !executionsLoaded || running.current) return;
-    const { toCreate, toFail, exerciseExecsToSkip, exerciseExecsToCreateSkipped } =
+    const { toCreate, toFail, exerciseExecsToSkip, exerciseExecsToCreateSkipped, exerciseExecsToUnskip } =
       reconcileRoutineExecutions(routines, routineExecutions, exerciseExecutions, todayISO());
     if (toCreate.length === 0 && toFail.length === 0 && exerciseExecsToSkip.length === 0
-      && exerciseExecsToCreateSkipped.length === 0) return;
+      && exerciseExecsToCreateSkipped.length === 0 && exerciseExecsToUnskip.length === 0) return;
 
     running.current = true;
     const batch = writeBatch(db);
     toCreate.forEach((exec) => batch.set(userDoc(userId, 'routineExecutions', exec.id), stripUndefined(exec)));
     toFail.forEach((id) => batch.update(userDoc(userId, 'routineExecutions', id), { status: 'failed' }));
-    exerciseExecsToSkip.forEach((id) => batch.update(userDoc(userId, 'exerciseExecutions', id), { skipped: true }));
+    exerciseExecsToSkip.forEach((id) =>
+      batch.update(userDoc(userId, 'exerciseExecutions', id), { skipped: true, autoSkipped: true }));
     exerciseExecsToCreateSkipped.forEach((exec) =>
       batch.set(userDoc(userId, 'exerciseExecutions', exec.id), stripUndefined(exec)));
+    exerciseExecsToUnskip.forEach((id) =>
+      batch.update(userDoc(userId, 'exerciseExecutions', id), { skipped: false, autoSkipped: false }));
     batch
       .commit()
       .catch(() => { /* surfaced on next reconcile */ })

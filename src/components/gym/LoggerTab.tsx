@@ -9,7 +9,7 @@ import { useAuth } from '../../context/AuthContext';
 import {
   useRoutines, useRoutineExecutions, useExercises, useExerciseExecutions,
 } from '../../store/gymStore';
-import { toISO, todayISO, diffDays } from '../../lib/schedule';
+import { toISO, todayISO, diffDays, addDays } from '../../lib/schedule';
 import { useKeyboardHeight } from '../../lib/useKeyboardHeight';
 import { type Exercise, type RoutineExecution, exerciseType, exerciseMuscleGroup, effectiveExerciseIds, effectiveExerciseRole } from '../../types/gym';
 import { colors, font, spacing, radius } from '../../theme';
@@ -37,9 +37,9 @@ const STATUS_COLOR = {
   scheduled: colors.textMuted,
   pending: '#3B82F6',
   'in-progress': '#EAB308',
-  incomplete: '#A855F7',
+  overdue: '#F97316',
+  skipped: colors.danger,
   completed: '#22C55E',
-  overdue: colors.danger,
 } as const;
 
 type DisplayStatus = keyof typeof STATUS_COLOR;
@@ -48,14 +48,14 @@ const STATUS_LABEL: Record<DisplayStatus, string> = {
   scheduled: 'Scheduled',
   pending: 'Pending',
   'in-progress': 'In Progress',
-  incomplete: 'Incomplete',
-  completed: 'Completed',
   overdue: 'Overdue',
+  skipped: 'Skipped',
+  completed: 'Completed',
 };
 
 // Primary sort order when grouping by status; any status not listed here (e.g.
 // incomplete/overdue, which the user didn't call out explicitly) is appended after.
-const STATUS_GROUP_ORDER: DisplayStatus[] = ['in-progress', 'pending', 'scheduled', 'completed'];
+const STATUS_GROUP_ORDER: DisplayStatus[] = ['overdue', 'in-progress', 'pending', 'scheduled', 'completed'];
 
 // Shown as a solid-background star badge when at least one optional set is completed.
 const PERFECT_COLOR = '#00875A';
@@ -259,7 +259,7 @@ export function LoggerTab() {
       isExerciseRunningLive(exec.id, eid) ||
       executions.some((e) =>
         e.routineExecutionId === exec.id && e.exerciseId === eid &&
-        (e.completed || e.setData?.some((s) => s.reps != null && s.weight != null)),
+        (e.completed || e.setData?.some((s) => !s.skipped && s.reps != null && s.weight != null)),
       ),
     ).length;
 
@@ -284,7 +284,7 @@ export function LoggerTab() {
         else if (isSkipped) setsSkipped = 1;
         else if (isInProgress) setsInProgress = 1;
       } else if (exExec?.setData) {
-        setsDone = exExec.setData.filter((s) => s.reps != null && s.weight != null).length;
+        setsDone = exExec.setData.filter((s) => !s.skipped && s.reps != null && s.weight != null).length;
         setsSkipped = exExec.setData.filter((s) => s.skipped).length;
         // Once the exercise as a whole is in progress, every remaining set (whether
         // partially filled or not yet touched at all) counts toward "in progress" —
@@ -324,6 +324,23 @@ export function LoggerTab() {
     };
   }
 
+  // The next live (not deleted/rescheduled-away) occurrence of the same routine, due
+  // strictly after this execution's own due date — null if this is the last one materialized.
+  function nextExecutionDueDate(exec: RoutineExecution): string | null {
+    const upcoming = routineExecutions
+      .filter((e) => e.routineId === exec.routineId && !e.deleted && !e.rescheduledTo && e.dueDate > exec.dueDate)
+      .map((e) => e.dueDate)
+      .sort();
+    return upcoming[0] ?? null;
+  }
+
+  // Last date this execution may be rescheduled to: the day before the next occurrence,
+  // or unbounded (null) if there isn't one yet.
+  function lastReschedulableDate(exec: RoutineExecution): string | null {
+    const next = nextExecutionDueDate(exec);
+    return next ? addDays(next, -1) : null;
+  }
+
   function getDisplayStatus(exec: RoutineExecution): DisplayStatus {
     const routine = routines.find((r) => r.id === exec.routineId);
     const loggedIds = executions.filter((e) => e.routineExecutionId === exec.id).map((e) => e.exerciseId);
@@ -336,10 +353,22 @@ export function LoggerTab() {
     const allMandatoryDone = total > 0 && mandatoryIds.length > 0 && mandatoryIds.every(isFullyLogged);
     if (allMandatoryDone) return 'completed';
 
+    // Explicitly skipped (via the routine's "Skip" action, or the reconciler once the
+    // window closes on it) — every exercise is marked skipped and nothing was completed.
+    // Shows as 'skipped' immediately regardless of due date, unlike the auto path below.
+    const isSkipped = (eid: string): boolean => {
+      const e = executions.find((x) => x.routineExecutionId === exec.id && x.exerciseId === eid);
+      if (!e) return false;
+      const ex = exercises.find((x) => x.id === eid);
+      const isCardio = ex ? exerciseType(ex) === 'cardio' : false;
+      return isCardio ? Boolean(e.skipped) : Boolean(e.setData?.length) && e.setData!.every((s) => s.skipped);
+    };
+    if (total > 0 && allIds.every(isSkipped)) return 'skipped';
+
     const anyLogged = allIds.some((eid) =>
       isExerciseRunningLive(exec.id, eid) ||
       executions.some((e) => e.routineExecutionId === exec.id && e.exerciseId === eid &&
-        (e.completed || e.setData?.some((s) => s.reps != null && s.weight != null) ||
+        (e.completed || e.setData?.some((s) => !s.skipped && s.reps != null && s.weight != null) ||
           Boolean(e.timerStartedAt) || (e.durationMin != null && e.durationMin > 0))));
 
     const delta = diffDays(todayISO(), exec.dueDate); // >0 once past due date
@@ -347,10 +376,20 @@ export function LoggerTab() {
     if (delta < 0) return anyLogged ? 'in-progress' : 'scheduled'; // due date hasn't arrived yet
     if (delta === 0) return anyLogged ? 'in-progress' : 'pending'; // due today
     // Past due date: still show in-progress while any exercise — mandatory or optional
-    // — is actively being worked on, even though the execution has otherwise overdue/incomplete.
+    // — is actively being worked on, even though the execution is otherwise overdue/skipped.
     const anyInProgress = allIds.some((eid) => isExerciseInProgress(exec.id, eid));
     if (anyInProgress) return 'in-progress';
-    return anyLogged ? 'incomplete' : 'overdue'; // past due date, nothing ever logged
+    // A cardio exercise with some elapsed time saved (durationMin > 0) but never actually
+    // completed used to count toward "anyLogged" here, which wrongly kept the execution out
+    // of the fully-untouched bucket. Only an exercise that was actually finished should save
+    // it from 'skipped' — partial/abandoned progress on any exercise type does not count.
+    const anyCompleted = allIds.some(isFullyLogged);
+    if (anyCompleted) return 'overdue'; // past due date, at least one exercise done
+    // Nothing done yet: still just 'overdue' (and still reschedulable/actionable) until the
+    // routine's next occurrence actually arrives — only then does it lock in as 'skipped'.
+    const nextDue = nextExecutionDueDate(exec);
+    const windowClosed = nextDue == null || diffDays(todayISO(), nextDue) >= 0;
+    return windowClosed ? 'skipped' : 'overdue';
   }
 
   function isRoutineExpanded(execId: string): boolean {
@@ -376,6 +415,51 @@ export function LoggerTab() {
     ]);
   }
 
+  function handleSkip(exec: RoutineExecution) {
+    Alert.alert('Skip execution?', 'Every exercise in this routine will be marked skipped.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Skip', style: 'destructive', onPress: async () => {
+        const routine = routines.find((r) => r.id === exec.routineId);
+        const exerciseIds = effectiveExerciseIds(routine, exec);
+        await Promise.all(exerciseIds.map(async (eid) => {
+          const ex = exercises.find((x) => x.id === eid);
+          const existing = executions.find((e) => e.routineExecutionId === exec.id && e.exerciseId === eid);
+          if (existing) {
+            if (existing.completed) return; // already done — leave it alone
+            const isCardio = ex ? exerciseType(ex) === 'cardio' : false;
+            if (isCardio) {
+              await update(existing.id, { skipped: true });
+              return;
+            }
+            // Rebuild to the exercise's full set count (not just however many entries
+            // `existing.setData` already had) — otherwise a still-empty or partially-logged
+            // strength exercise ends up with fewer skipped entries than its set count, and
+            // the "every set skipped" check never recognizes it as skipped.
+            const count = ex?.sets ?? existing.setData?.length ?? 3;
+            const setData = Array.from({ length: count }, (_, i) => ({
+              weight: existing.setData?.[i]?.weight ?? 0,
+              reps: existing.setData?.[i]?.reps ?? 0,
+              skipped: true,
+            }));
+            await update(existing.id, { setData });
+            return;
+          }
+          const isCardio = ex ? exerciseType(ex) === 'cardio' : false;
+          await add({
+            exerciseId: eid,
+            date: exec.dueDate,
+            routineExecutionId: exec.id,
+            paramValues: [],
+            completed: false,
+            ...(isCardio
+              ? { skipped: true }
+              : { setData: Array.from({ length: ex?.sets ?? 3 }, () => ({ weight: 0, reps: 0, skipped: true })) }),
+          });
+        }));
+      }},
+    ]);
+  }
+
   function handleDelete(exec: RoutineExecution) {
     Alert.alert('Delete execution?', 'This routine execution and all its data will be permanently deleted.', [
       { text: 'Cancel', style: 'cancel' },
@@ -385,7 +469,7 @@ export function LoggerTab() {
 
   const dotsByDate = useMemo(() => {
     const priority: Record<DisplayStatus, number> = {
-      overdue: 7, pending: 6, 'in-progress': 5, incomplete: 4, scheduled: 3, completed: 2,
+      skipped: 7, pending: 6, 'in-progress': 5, overdue: 4, scheduled: 3, completed: 2,
     };
     const map = new Map<string, DisplayStatus[]>();
     for (const ex of routineExecutions.filter((e) => !e.rescheduledTo && !e.deleted)) {
@@ -526,7 +610,7 @@ export function LoggerTab() {
       </View>
 
       <View style={styles.groupByBox}>
-        <Text style={styles.groupByLabel}>Group by</Text>
+        <Text style={styles.groupByLabel}>GROUP BY</Text>
         <View style={styles.groupByButtons}>
           <TouchableOpacity
             style={styles.groupByChip}
@@ -806,6 +890,10 @@ export function LoggerTab() {
               <MaterialIcons name="refresh" size={18} color={colors.text} />
               <Text style={styles.menuItemText}>Reset</Text>
             </Pressable>
+            <Pressable style={styles.menuItem} onPress={() => { const e = menuExec!; setMenuExec(null); handleSkip(e); }}>
+              <MaterialIcons name="block" size={18} color={STATUS_COLOR.skipped} />
+              <Text style={[styles.menuItemText, { color: STATUS_COLOR.skipped }]}>Skip</Text>
+            </Pressable>
             <Pressable style={[styles.menuItem, { borderBottomWidth: 0 }]} onPress={() => { const e = menuExec!; setMenuExec(null); handleDelete(e); }}>
               <MaterialIcons name="delete" size={18} color={colors.danger} />
               <Text style={[styles.menuItemText, { color: colors.danger }]}>Delete</Text>
@@ -819,10 +907,14 @@ export function LoggerTab() {
         title="Reschedule to"
         visible={reschedulingExec !== null}
         value={reschedulingExec?.dueDate ?? todayISO()}
+        maxDate={reschedulingExec ? lastReschedulableDate(reschedulingExec) ?? undefined : undefined}
         onSelect={async (newDate) => {
           const exec = reschedulingExec;
           setReschedulingExec(null);
-          if (exec && newDate !== exec.dueDate) await reschedule(exec, newDate);
+          if (!exec || newDate === exec.dueDate) return;
+          const cutoff = lastReschedulableDate(exec);
+          if (cutoff != null && newDate > cutoff) return; // guarded by maxDate in the picker; extra safety
+          await reschedule(exec, newDate);
         }}
         onClose={() => setReschedulingExec(null)}
       />
@@ -967,7 +1059,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: font.md,
     fontWeight: '600',
-    textTransform: 'uppercase',
   },
   groupByChipTextActive: {
     color: STATUS_COLOR.pending,

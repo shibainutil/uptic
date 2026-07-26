@@ -32,10 +32,12 @@ interface Props {
   value: string;
   onSelect: (iso: string) => void;
   onClose: () => void;
+  /** Latest selectable date (inclusive), as ISO yyyy-mm-dd. Later days are shown but disabled. */
+  maxDate?: string;
 }
 
 /** Calendar-only modal (no trigger). Parent controls visibility. */
-export function CalendarModal({ title = 'Select date', visible, value, onSelect, onClose }: Props) {
+export function CalendarModal({ title = 'Select date', visible, value, onSelect, onClose, maxDate }: Props) {
   const selected = fromISO(value);
   const [viewYear, setViewYear] = useState(selected.getFullYear());
   const [viewMonth, setViewMonth] = useState(selected.getMonth());
@@ -85,13 +87,22 @@ export function CalendarModal({ title = 'Select date', visible, value, onSelect,
             if (!date) return <View key={di} style={styles.dayCell} />;
             const isSelected = isSameDay(date, selected);
             const isToday = isSameDay(date, today);
+            const disabled = maxDate != null && toISO(date) > maxDate;
             return (
               <Pressable
                 key={di}
+                disabled={disabled}
                 style={[styles.dayCell, isSelected && styles.dayCellSelected, isToday && !isSelected && styles.dayCellToday]}
                 onPress={() => onSelect(toISO(date))}
               >
-                <Text style={[styles.dayNumber, isSelected && styles.dayNumberSelected, isToday && !isSelected && styles.dayNumberToday]}>
+                <Text
+                  style={[
+                    styles.dayNumber,
+                    isSelected && styles.dayNumberSelected,
+                    isToday && !isSelected && styles.dayNumberToday,
+                    disabled && styles.dayNumberDisabled,
+                  ]}
+                >
                   {date.getDate()}
                 </Text>
               </Pressable>
@@ -131,6 +142,7 @@ const styles = StyleSheet.create({
   dayCellToday: { backgroundColor: `${colors.accent}18` },
   dayCellSelected: { backgroundColor: colors.accent },
   dayNumber: { color: colors.text, fontSize: font.md },
+  dayNumberDisabled: { color: colors.textMuted, opacity: 0.4 },
   dayNumberToday: { color: colors.accent, fontWeight: '700' },
   dayNumberSelected: { color: '#fff', fontWeight: '700' },
 });

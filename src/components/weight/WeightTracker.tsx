@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet, LayoutChangeEvent } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import Svg, { Polyline, Line, Circle, Text as SvgText } from 'react-native-svg';
+import Svg, { Polyline, Line, Circle, Rect, Text as SvgText } from 'react-native-svg';
 import { useAuth } from '../../context/AuthContext';
 import { useWeightEntries, useWeightTarget } from '../../store/weightStore';
 import { WeightEntryModal } from './WeightEntryModal';
@@ -13,20 +13,56 @@ import { fromISO, toISO, diffDays, addDays, todayISO } from '../../lib/schedule'
 import { fitWeightTrend, trendKgAt, prognose, type Prognosis } from '../../lib/weightTrend';
 import { toKg, fromKg, formatDelta, deltaColor, type WeightEntry, type WeightUnit } from '../../types/weight';
 
-const PLOT_HEIGHT = 130;
-const PLOT_Y_PAD = 20;
-const PLOT_X_PAD = 10;
-const XAXIS_HEIGHT = 46; // reserved below the plot for rotated month/15th tick labels
+const PLOT_HEIGHT = 220;
+const PLOT_Y_PAD = 28;
+const PLOT_X_PAD = 12;
+const XAXIS_HEIGHT = 44; // reserved below the plot for rotated tick labels
 const TOTAL_SVG_HEIGHT = PLOT_HEIGHT + XAXIS_HEIGHT;
 const CHART_POINTS = 20;
-const Y_AXIS_WIDTH = 34;
-const Y_AXIS_TITLE_WIDTH = 16;
+const Y_AXIS_WIDTH = 38;
 const GRID_STEP = 5; // y-axis tick spacing, in the displayed unit
 const DEFAULT_MAX = 100; // y-axis max fallback (displayed unit) when nothing is logged yet
 const TREND_COLOR = colors.textMuted;
 const TARGET_COLOR = '#F59E0B';
-const TARGET_FLAG = '🏁';
+const TARGET_ICON = '🎯';
+const CHART_ICON = '📈';
 const PROJECTION_CAP_DAYS = 240; // don't visually extend the chart more than ~8 months out
+const LABEL_FONT_SIZE = 10;
+
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6),16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+/** Rough glyph-width estimate for sizing a label's background pill (no text-measurement
+ * API is available for SVG text in react-native-svg). */
+function estimateTextWidth(text: string, fontSize: number): number {
+  return text.length * fontSize * 0.62;
+}
+
+/** A data-point/target value label with a semi-transparent pill background (matching the
+ * status-badge look, but borderless), sized to the text and horizontally clamped so it
+ * never gets clipped at the chart's edges. `centerY` is the badge's vertical center. */
+function renderLabel(key: string, x: number, centerY: number, text: string, color: string, maxWidth: number) {
+  const w = estimateTextWidth(text, LABEL_FONT_SIZE) + 10;
+  const h = LABEL_FONT_SIZE + 8;
+  const minX = w / 2 + 2;
+  const maxX = maxWidth - w / 2 - 2;
+  const clampedX = maxX >= minX ? Math.min(Math.max(x, minX), maxX) : maxWidth / 2;
+  // Baseline sits a bit below the box's vertical center so the glyph is optically centered.
+  const textY = centerY + LABEL_FONT_SIZE * 0.35;
+  return (
+    <Fragment key={key}>
+      <Rect x={clampedX - w / 2} y={centerY - h / 2} width={w} height={h} rx={4} fill={hexToRgba(color, 0.2)} />
+      <SvgText x={clampedX} y={textY} fontSize={LABEL_FONT_SIZE} fontWeight="700" fill={color} textAnchor="middle">
+        {text}
+      </SvgText>
+    </Fragment>
+  );
+}
 
 function formatRowDate(iso: string): string {
   return fromISO(iso).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
@@ -46,14 +82,8 @@ function formatValue(kg: number, unit: WeightUnit): string {
   return fromKg(kg, unit).toFixed(1);
 }
 
-function formatTickLabel(iso: string): string {
-  const d = fromISO(iso);
-  const month = d.toLocaleDateString(undefined, { month: 'short' });
-  return `${d.getDate()} ${month}`.toUpperCase();
-}
-
 /** Ticks at the 1st and 15th of every month within [startISO, endISO]. */
-function monthTicks(startISO: string, endISO: string): string[] {
+function halfMonthTicks(startISO: string, endISO: string): string[] {
   if (startISO > endISO) return [];
   const start = fromISO(startISO);
   const ticks: string[] = [];
@@ -70,6 +100,76 @@ function monthTicks(startISO: string, endISO: string): string[] {
     if (m > 11) { m = 0; y += 1; }
   }
   return ticks;
+}
+
+/** The 1st of every Nth month (N=1 monthly, 3 quarterly, 6 half-yearly, 12 yearly),
+ * aligned to calendar boundaries (Jan/Apr/Jul/Oct for quarters, etc). */
+function stepMonthTicks(startISO: string, endISO: string, monthStep: number): string[] {
+  const start = fromISO(startISO);
+  let y = start.getFullYear();
+  let m = start.getMonth();
+  const rem = m % monthStep;
+  if (rem !== 0) m += monthStep - rem;
+  if (m > 11) { y += Math.floor(m / 12); m %= 12; }
+  const ticks: string[] = [];
+  let guard = 0;
+  while (guard++ < 400) {
+    const iso = toISO(new Date(y, m, 1));
+    if (iso > endISO) break;
+    if (iso >= startISO) ticks.push(iso);
+    m += monthStep;
+    if (m > 11) { m -= 12; y += 1; }
+  }
+  return ticks;
+}
+
+/** Regular day-spaced ticks from startISO, stepping by `stepDays`. */
+function dayStepTicks(startISO: string, endISO: string, stepDays: number): string[] {
+  const totalDays = diffDays(endISO, startISO);
+  const ticks: string[] = [];
+  for (let d = 0; d <= totalDays; d += stepDays) ticks.push(addDays(startISO, d));
+  return ticks;
+}
+
+type XGranularity = 'day' | 'halfmonth' | 'month' | 'quarter' | 'halfyear' | 'year';
+
+const DAY_STEP_CANDIDATES = [1, 2, 3, 5, 7, 10, 14];
+
+/** Picks a tick granularity/step from the span so the axis always shows a regular,
+ * readable set of ticks (~5-8) — dynamic to whatever timeframe is in view. */
+function chooseXTicks(startISO: string, endISO: string): { ticks: string[]; granularity: XGranularity } {
+  const totalDays = diffDays(endISO, startISO);
+  if (totalDays <= 40) {
+    let step = DAY_STEP_CANDIDATES[DAY_STEP_CANDIDATES.length - 1];
+    for (const s of DAY_STEP_CANDIDATES) {
+      if (Math.ceil(totalDays / s) + 1 <= 8) { step = s; break; }
+    }
+    return { ticks: dayStepTicks(startISO, endISO, step), granularity: 'day' };
+  }
+  if (totalDays <= 120) return { ticks: halfMonthTicks(startISO, endISO), granularity: 'halfmonth' };
+  if (totalDays <= 420) return { ticks: stepMonthTicks(startISO, endISO, 1), granularity: 'month' };
+  if (totalDays <= 1000) return { ticks: stepMonthTicks(startISO, endISO, 3), granularity: 'quarter' };
+  if (totalDays <= 2000) return { ticks: stepMonthTicks(startISO, endISO, 6), granularity: 'halfyear' };
+  return { ticks: stepMonthTicks(startISO, endISO, 12), granularity: 'year' };
+}
+
+function formatXTickLabel(iso: string, granularity: XGranularity): string {
+  const d = fromISO(iso);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mmm = d.toLocaleDateString(undefined, { month: 'short' }).toUpperCase();
+  const yyyy = d.getFullYear();
+  switch (granularity) {
+    case 'day':
+    case 'halfmonth':
+    case 'month':
+      return `${dd} ${mmm} ${yyyy}`;
+    case 'quarter':
+      return `Q${Math.floor(d.getMonth() / 3) + 1} ${yyyy}`;
+    case 'halfyear':
+      return `H${d.getMonth() < 6 ? 1 : 2} ${yyyy}`;
+    case 'year':
+      return `${yyyy}`;
+  }
 }
 
 type TargetProjection =
@@ -250,13 +350,48 @@ export function WeightTracker() {
   const targetLabelX = extendChart && projectedOffset != null
     ? xForOffset(projectedOffset)
     : xForOffset(lastOffset);
+  const targetDateTickX = extendChart && projectedOffset != null ? xForOffset(projectedOffset) : null;
+  const targetDateLabel = extendChart && projectedOffset != null
+    ? formatXTickLabel((prognosis as { date: string }).date, 'day')
+    : null;
 
-  // ── X-axis: ticks at the 1st/15th of each month, rotated only as much as needed to
-  // avoid overlap given the current timeframe (dynamic — recomputed on every filter change).
-  const xTicksRaw = chartBaseISO && trendEndISO ? monthTicks(chartBaseISO, trendEndISO) : [];
-  const xTicks = xTicksRaw.length ? xTicksRaw : (chartBaseISO && trendEndISO ? [chartBaseISO, trendEndISO] : []);
+  // Marker geometry per point — min/max/current get a bigger ringed dot and a label;
+  // everything else stays a small subtle dot. Labels are collected here and rendered as
+  // a separate pass at the end of the SVG so they always paint on top of every line.
+  const pointMarkers = chartEntries.map((e, i) => {
+    const { x, y } = linePoints[i];
+    const kg = barKgValues[i];
+    const isMax = Math.abs(kg - maxLoggedKg) < 0.001;
+    const isMin = Math.abs(kg - minLoggedKg) < 0.001;
+    const isCurrent = i === chartEntries.length - 1;
+    // Priority: minimum > maximum > current — a point that's both the lowest ever and
+    // today's reading reads as the minimum (green).
+    const roleColor = isMin ? colors.success : isMax ? colors.danger : isCurrent ? colors.accent : null;
+    return {
+      key: e.id,
+      entry: e,
+      x, y,
+      dotColor: roleColor ?? colors.accent,
+      dotRadius: roleColor ? 4 : 2,
+      ringRadius: roleColor ? 6 : 4,
+      label: roleColor ? { text: formatValue(kg, displayUnit), color: roleColor } : null,
+    };
+  });
+  const targetLabelData = targetKg != null
+    ? { x: targetLabelX, y: yForKg(targetKg), text: formatValue(targetKg, displayUnit), color: TARGET_COLOR }
+    : null;
+
+  // ── X-axis: granularity (day/half-month/month/quarter/half-year/year) is chosen from
+  // the visible span so ticks stay regular and readable at any timeframe — dynamic,
+  // recomputed whenever the date filter changes what's in view.
+  const xAxisPlan = chartBaseISO && trendEndISO
+    ? chooseXTicks(chartBaseISO, trendEndISO)
+    : { ticks: [] as string[], granularity: 'day' as XGranularity };
+  const xTicks = xAxisPlan.ticks.length
+    ? xAxisPlan.ticks
+    : (chartBaseISO && trendEndISO ? [chartBaseISO, trendEndISO] : []);
   const xTickPositions = xTicks.map((iso) => ({ iso, x: xForOffset(diffDays(iso, chartBaseISO)) }));
-  const xTickLabels = xTicks.map(formatTickLabel);
+  const xTickLabels = xTicks.map((iso) => formatXTickLabel(iso, xAxisPlan.granularity));
   const longestLabelLen = xTickLabels.reduce((m, l) => Math.max(m, l.length), 0);
   const estLabelWidth = longestLabelLen * 5.5;
   const estLabelHeight = 10;
@@ -269,7 +404,7 @@ export function WeightTracker() {
     return estLabelWidth * Math.cos(rad) + estLabelHeight * Math.sin(rad);
   }
   let xLabelRotation = 0;
-  for (const deg of [0, 30, 45, 60, 75, 90]) {
+  for (const deg of [0, 45, 60, 75, 90]) {
     xLabelRotation = deg;
     if (xLabelFootprint(deg) <= minTickGapPx) break;
   }
@@ -343,7 +478,7 @@ export function WeightTracker() {
           <View style={styles.targetCard}>
             <View style={styles.targetHeader}>
               <View style={styles.targetHeaderLeft}>
-                <Text style={styles.targetFlagIcon}>{TARGET_FLAG}</Text>
+                <Text style={styles.targetFlagIcon}>{TARGET_ICON}</Text>
                 <Text style={styles.targetTitle}>Target</Text>
               </View>
               <Pressable onPress={() => setTargetModalOpen(true)} hitSlop={8}>
@@ -368,28 +503,35 @@ export function WeightTracker() {
           </View>
 
           <View style={styles.chartCard}>
+            <View style={styles.chartHeader}>
+              <Text style={styles.chartHeaderIcon}>{CHART_ICON}</Text>
+              <Text style={styles.chartHeaderTitle}>Evolution</Text>
+            </View>
+
             <View style={styles.legendRow}>
               <View style={styles.legendItem}>
-                <View style={[styles.legendLine, { backgroundColor: colors.accent }]} />
-                <Text style={styles.legendText}>Weight</Text>
+                <Svg width={20} height={6}>
+                  <Line x1={0} y1={3} x2={20} y2={3} stroke={colors.accent} strokeWidth={1.5} />
+                </Svg>
+                <Text style={styles.legendText}>Weight ({displayUnit})</Text>
               </View>
               <View style={styles.legendItem}>
-                <View style={[styles.legendLine, { backgroundColor: TREND_COLOR }]} />
+                <Svg width={20} height={6}>
+                  <Line x1={0} y1={3} x2={20} y2={3} stroke={TREND_COLOR} strokeWidth={1.5} strokeDasharray="0.1,6" strokeLinecap="round" />
+                </Svg>
                 <Text style={styles.legendText}>Trend</Text>
               </View>
               {target && (
                 <View style={styles.legendItem}>
-                  <View style={[styles.legendLine, { backgroundColor: TARGET_COLOR }]} />
+                  <Svg width={20} height={6}>
+                    <Line x1={0} y1={3} x2={20} y2={3} stroke={TARGET_COLOR} strokeWidth={0.75} strokeDasharray="4,4" />
+                  </Svg>
                   <Text style={styles.legendText}>Target</Text>
                 </View>
               )}
             </View>
 
             <View style={styles.chartBody}>
-              <View style={styles.yAxisTitleWrap}>
-                <Text style={styles.yAxisTitle}>Weight in {displayUnit}</Text>
-              </View>
-
               <View style={styles.yAxis}>
                 {ticksKg.map((v, i) => (
                   <Text key={i} style={[styles.axisLabel, styles.axisLabelAbs, { top: yForKg(v) }]}>
@@ -408,14 +550,14 @@ export function WeightTracker() {
                     {targetKg != null && (
                       <Line
                         x1={0} y1={yForKg(targetKg)} x2={plotWidth} y2={yForKg(targetKg)}
-                        stroke={TARGET_COLOR} strokeWidth={1.5} strokeDasharray="1,5" strokeLinecap="round"
+                        stroke={TARGET_COLOR} strokeWidth={0.75} strokeDasharray="4,4"
                       />
                     )}
 
-                    {extendChart && (
+                    {targetDateTickX != null && (
                       <Line
-                        x1={xForOffset(lastOffset)} y1={PLOT_Y_PAD} x2={xForOffset(lastOffset)} y2={baselineY}
-                        stroke={colors.border} strokeWidth={1} strokeDasharray="2,3"
+                        x1={targetDateTickX} y1={PLOT_Y_PAD} x2={targetDateTickX} y2={baselineY}
+                        stroke={TARGET_COLOR} strokeWidth={0.75} strokeDasharray="4,4"
                       />
                     )}
 
@@ -424,65 +566,67 @@ export function WeightTracker() {
                         points={linePoints.map((p) => `${p.x},${p.y}`).join(' ')}
                         fill="none"
                         stroke={colors.accent}
-                        strokeWidth={2}
+                        strokeWidth={1.5}
                       />
                     )}
 
-                    {chartEntries.map((e, i) => {
-                      const { x, y } = linePoints[i];
-                      const kg = barKgValues[i];
-                      const isMax = Math.abs(kg - maxLoggedKg) < 0.001;
-                      const isMin = Math.abs(kg - minLoggedKg) < 0.001;
-                      const isLatest = i === chartEntries.length - 1;
-                      const labelColor = isMax ? colors.danger : isMin ? colors.success : isLatest ? colors.accent : null;
-                      return (
-                        <Fragment key={e.id}>
-                          <Circle cx={x} cy={y} r={isLatest ? 4 : 2.5} fill={colors.accent} />
-                          <Circle cx={x} cy={y} r={12} fill="transparent" onPress={() => openDetail(e)} />
-                          {labelColor && (
-                            <SvgText x={x} y={y - 6} fontSize={8} fill={labelColor} fontWeight="700" textAnchor="middle">
-                              {formatValue(kg, displayUnit)}
-                            </SvgText>
-                          )}
-                        </Fragment>
-                      );
-                    })}
+                    {pointMarkers.map((p) => (
+                      <Fragment key={p.key}>
+                        <Circle cx={p.x} cy={p.y} r={p.ringRadius} fill={colors.surface} />
+                        <Circle cx={p.x} cy={p.y} r={p.dotRadius} fill={p.dotColor} />
+                        <Circle cx={p.x} cy={p.y} r={12} fill="transparent" onPress={() => openDetail(p.entry)} />
+                      </Fragment>
+                    ))}
 
                     {fit && trendAtBaseKg != null && trendAtEndKg != null && (
                       <Line
                         x1={xForOffset(0)} y1={yForKg(trendAtBaseKg)}
                         x2={xForOffset(domainEndOffset)} y2={yForKg(trendAtEndKg)}
-                        stroke={TREND_COLOR} strokeWidth={2} strokeDasharray="1,5" strokeLinecap="round"
+                        stroke={TREND_COLOR} strokeWidth={1.5} strokeDasharray="0.1,6" strokeLinecap="round"
                       />
                     )}
 
                     {extendChart && projectedOffset != null && targetKg != null && (
-                      <SvgText x={xForOffset(projectedOffset)} y={yForKg(targetKg) + 5} fontSize={14} textAnchor="middle">
-                        {TARGET_FLAG}
-                      </SvgText>
-                    )}
-
-                    {targetKg != null && (
-                      <SvgText x={targetLabelX} y={yForKg(targetKg) - 6} fontSize={9} fill={TARGET_COLOR} textAnchor="middle">
-                        {formatValue(targetKg, displayUnit)}
+                      <SvgText x={xForOffset(projectedOffset)} y={yForKg(targetKg) + 4} fontSize={11} textAnchor="middle">
+                        {TARGET_ICON}
                       </SvgText>
                     )}
 
                     {xTickPositions.map(({ iso, x }, i) => (
                       <Fragment key={iso}>
-                        <Line x1={x} y1={baselineY} x2={x} y2={baselineY + 4} stroke={colors.border} strokeWidth={1} />
+                        <Line x1={x} y1={baselineY} x2={x} y2={baselineY + 5} stroke={colors.border} strokeWidth={1} />
                         <SvgText
                           x={x}
-                          y={baselineY + 14}
-                          fontSize={9}
+                          y={baselineY + 16}
+                          fontSize={10}
                           fill={colors.textDim}
                           textAnchor={xLabelRotation > 0 ? 'end' : 'middle'}
-                          transform={xLabelRotation > 0 ? `rotate(${-xLabelRotation} ${x} ${baselineY + 14})` : undefined}
+                          transform={xLabelRotation > 0 ? `rotate(${-xLabelRotation} ${x} ${baselineY + 16})` : undefined}
                         >
                           {xTickLabels[i]}
                         </SvgText>
                       </Fragment>
                     ))}
+
+                    {targetDateTickX != null && targetDateLabel != null && (
+                      <SvgText
+                        x={targetDateTickX}
+                        y={baselineY + 16}
+                        fontSize={10}
+                        fontWeight="700"
+                        fill={TARGET_COLOR}
+                        textAnchor={xLabelRotation > 0 ? 'end' : 'middle'}
+                        transform={xLabelRotation > 0 ? `rotate(${-xLabelRotation} ${targetDateTickX} ${baselineY + 16})` : undefined}
+                      >
+                        {targetDateLabel}
+                      </SvgText>
+                    )}
+
+                    {/* Rendered last so labels always sit on top of every line/point. */}
+                    {pointMarkers
+                      .filter((p) => p.label)
+                      .map((p) => renderLabel(`pl-${p.key}`, p.x, p.y - 14, p.label!.text, p.label!.color, plotWidth))}
+                    {targetLabelData && renderLabel('target-label', targetLabelData.x, targetLabelData.y - 12, targetLabelData.text, targetLabelData.color, plotWidth)}
                   </Svg>
                 )}
               </View>
@@ -650,24 +794,16 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     gap: spacing.sm,
   },
+  chartHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  chartHeaderIcon: { fontSize: 16 },
+  chartHeaderTitle: { color: colors.textMuted, fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
   legendRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: spacing.md },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  legendLine: { width: 12, height: 2, borderRadius: 1 },
   legendText: { color: colors.textMuted, fontSize: font.sm },
   chartBody: { flexDirection: 'row', gap: spacing.xs },
-  yAxisTitleWrap: { width: Y_AXIS_TITLE_WIDTH, height: PLOT_HEIGHT, alignItems: 'center', justifyContent: 'center' },
-  yAxisTitle: {
-    width: PLOT_HEIGHT,
-    textAlign: 'center',
-    color: colors.textDim,
-    fontSize: 9,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    transform: [{ rotate: '-90deg' }],
-  },
   yAxis: { width: Y_AXIS_WIDTH, height: PLOT_HEIGHT, position: 'relative' },
   plotArea: { flex: 1, height: TOTAL_SVG_HEIGHT },
-  axisLabel: { color: colors.textDim, fontSize: 9, textTransform: 'uppercase' },
+  axisLabel: { color: colors.textDim, fontSize: 10, textTransform: 'uppercase' },
   axisLabelAbs: {
     position: 'absolute',
     right: 0,

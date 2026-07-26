@@ -54,6 +54,10 @@ export interface ExerciseExecution {
   paramValues: ParamValue[];
   completed: boolean;
   skipped?: boolean;              // whole exercise skipped — either by the user or once the parent routine execution failed
+  // True only when `skipped` was set by the reconciler's auto-skip, never by the user —
+  // lets the reconciler safely reverse its own action later without ever touching a
+  // genuine user-initiated skip, which never sets this.
+  autoSkipped?: boolean;
   notes?: string;
   createdAt: string;
 }

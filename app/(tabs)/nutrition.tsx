@@ -1,2 +1,2 @@
-import { PlaceholderScreen } from '../../src/components/PlaceholderScreen';
-export default function NutritionScreen() { return <PlaceholderScreen name="Nutrition" icon="🥗" />; }
+import { NutritionTracker } from '../../src/components/nutrition/NutritionTracker';
+export default function NutritionScreen() { return <NutritionTracker />; }

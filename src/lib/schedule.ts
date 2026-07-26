@@ -1,20 +1,5 @@
 import { type Routine, type RoutineExecution, type RoutineSchedule, type ExerciseExecution, effectiveExerciseIds } from '../types/gym';
 
-// Whether the user has actually engaged with this exercise at all — a running/paused
-// cardio timer, any weight/reps typed into a set, or an explicit skip. Only exercises
-// with NO trace of engagement get auto-skipped when their routine execution goes past
-// due; anything the user has touched (even mid-workout, timer still running) must be
-// left alone instead of being force-skipped out from under them.
-function hasAnyEngagement(e: ExerciseExecution): boolean {
-  return Boolean(
-    e.completed ||
-    e.skipped ||
-    e.timerStartedAt ||
-    (e.durationMin != null && e.durationMin > 0) ||
-    e.setData?.some((s) => s.weight != null || s.reps != null || s.skipped),
-  );
-}
-
 // ── ISO date helpers (local, no time component) ─────────────────────────────
 
 export function toISO(d: Date): string {
@@ -83,6 +68,7 @@ export interface ReconcileResult {
   toFail: string[]; // routine execution ids to mark failed
   exerciseExecsToSkip: string[]; // existing exercise execution ids to mark skipped
   exerciseExecsToCreateSkipped: ExerciseExecution[]; // stub docs for exercises never logged
+  exerciseExecsToUnskip: string[]; // previously auto-skipped exercise execution ids to un-skip
 }
 
 // Executions are materialized through the end of next week (Mon–Sun), so the whole of
@@ -119,11 +105,29 @@ export function reconcileRoutineExecutions(
     }
   }
 
+  // Past its own due date only makes a routine execution "overdue" — it stays fully
+  // reschedulable/actionable, and its exercises must not be force-skipped, until the
+  // routine's next occurrence actually arrives (matching the reschedule cutoff shown in
+  // the logger).
+  function windowClosed(exec: RoutineExecution): boolean {
+    if (diffDays(today, exec.dueDate) <= 0) return false;
+    const nextDue = existing
+      .filter((e) => e.routineId === exec.routineId && !e.deleted && !e.rescheduledTo && e.dueDate > exec.dueDate)
+      .map((e) => e.dueDate)
+      .sort()[0];
+    return nextDue == null || diffDays(today, nextDue) >= 0;
+  }
+
   const routineById = new Map(routines.map((r) => [r.id, r]));
   const toFail: string[] = [];
   for (const exec of existing) {
     if (exec.status !== 'pending' || exec.rescheduledTo || exec.deleted) continue;
-    if (diffDays(today, exec.dueDate) > 0) toFail.push(exec.id);
+    if (!windowClosed(exec)) continue;
+    // Matches the logger's 'skipped' bucket exactly: window closed AND nothing on this
+    // routine execution was ever completed. If anything was completed, the routine reads
+    // as 'overdue', not 'skipped' — so none of its exercises may be auto-skipped either.
+    const anyCompleted = exerciseExecutions.some((e) => e.routineExecutionId === exec.id && e.completed);
+    if (!anyCompleted) toFail.push(exec.id);
   }
 
   const exerciseExecsToSkip: string[] = [];
@@ -137,10 +141,14 @@ export function reconcileRoutineExecutions(
         (e) => e.routineExecutionId === routineExecId && e.exerciseId === exerciseId,
       );
       if (existingExecExec) {
-        // Only auto-skip exercises with zero trace of engagement — anything the user has
-        // actually started (even mid-workout, e.g. a cardio timer still running) must be
-        // left alone rather than force-skipped just because a day boundary passed.
-        if (!hasAnyEngagement(existingExecExec)) exerciseExecsToSkip.push(existingExecExec.id);
+        // Once the routine execution itself has actually reached 'skipped' (window closed,
+        // nothing on it ever completed — enforced above), every exercise on it is skipped
+        // too, including abandoned partial progress (e.g. a cardio timer once started but
+        // never finished). Before that point (still 'overdue'), engaged exercises are left
+        // alone entirely — this loop simply never runs on those routine executions.
+        if (!existingExecExec.completed && !existingExecExec.skipped) {
+          exerciseExecsToSkip.push(existingExecExec.id);
+        }
       } else {
         exerciseExecsToCreateSkipped.push({
           id: `${routineExecId}_${exerciseId}`,
@@ -150,13 +158,28 @@ export function reconcileRoutineExecutions(
           paramValues: [],
           completed: false,
           skipped: true,
+          autoSkipped: true,
           createdAt: now,
         });
       }
     }
   }
 
-  return { toCreate, toFail, exerciseExecsToSkip, exerciseExecsToCreateSkipped };
+  // Self-heal: an exercise the reconciler itself auto-skipped (never the user — a genuine
+  // user-initiated skip never sets `autoSkipped`) whose parent routine execution's window
+  // isn't (or no longer is, e.g. after a reschedule shifted the next occurrence) closed
+  // should not still be sitting there marked skipped.
+  const toFailSet = new Set(toFail);
+  const exerciseExecsToUnskip: string[] = [];
+  for (const ee of exerciseExecutions) {
+    if (!ee.skipped || !ee.autoSkipped || !ee.routineExecutionId) continue;
+    if (toFailSet.has(ee.routineExecutionId)) continue; // still genuinely locked out
+    const exec = existing.find((e) => e.id === ee.routineExecutionId);
+    if (!exec || exec.rescheduledTo || exec.deleted) continue;
+    if (!windowClosed(exec)) exerciseExecsToUnskip.push(ee.id);
+  }
+
+  return { toCreate, toFail, exerciseExecsToSkip, exerciseExecsToCreateSkipped, exerciseExecsToUnskip };
 }
 
 const WEEKDAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
