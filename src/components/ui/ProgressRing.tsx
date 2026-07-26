@@ -30,12 +30,12 @@ export function ringColor(t: number): string {
   return mix(YELLOW, GREEN, (t - 2 / 3) / (1 / 3));
 }
 
-function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {
+export function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {
   const rad = ((angleDeg - 90) * Math.PI) / 180;
   return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
 }
 
-function describeArc(cx: number, cy: number, r: number, startAngle: number, endAngle: number): string {
+export function describeArc(cx: number, cy: number, r: number, startAngle: number, endAngle: number): string {
   const start = polarToCartesian(cx, cy, r, endAngle);
   const end = polarToCartesian(cx, cy, r, startAngle);
   const largeArc = endAngle - startAngle <= 180 ? 0 : 1;

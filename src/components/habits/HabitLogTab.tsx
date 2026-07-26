@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
+import Svg, { Circle, Path, Line } from 'react-native-svg';
 import { useAuth } from '../../context/AuthContext';
 import { useHabits, useHabitLogEntries } from '../../store/habitStore';
 import { todayISO, fromISO, diffDays } from '../../lib/schedule';
-import { computeRing, describeSchedule, type RingPeriod } from '../../lib/habitSchedule';
+import { computeRing, describeSchedule } from '../../lib/habitSchedule';
 import { isHabitComplete, totalSessions, type Habit, type HabitLogEntry } from '../../types/habits';
-import { ProgressRing } from '../ui/ProgressRing';
+import { ringColor, polarToCartesian, describeArc } from '../ui/ProgressRing';
 import { Badge } from '../ui/Badge';
 import { LogEntryModal } from './LogEntryModal';
 import { colors, spacing, font, radius } from '../../theme';
@@ -16,15 +17,8 @@ const EXPANDED_ENTRY_LIMIT = 10;
 const ICON_SIZE = 18;
 const LIMITED_COLOR = '#A855F7';
 const WARNING_COLOR = '#EAB308';
-
-const RING_PERIODS: { period: RingPeriod; label: string }[] = [
-  { period: 'day', label: 'Day' },
-  { period: 'week', label: 'Week' },
-  { period: 'month', label: 'Month' },
-  { period: 'quarter', label: 'Qtr' },
-  { period: 'year', label: 'Year' },
-  { period: 'allTime', label: 'All' },
-];
+const RING_SIZE = 120;
+const SEGMENTS = 32;
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
@@ -37,7 +31,6 @@ export function HabitLogTab() {
   const { user } = useAuth();
   const { habits } = useHabits(user?.uid);
   const { entries, add } = useHabitLogEntries(user?.uid);
-
   const today = todayISO();
 
   const withProgress = habits.map((habit) => {
@@ -59,17 +52,33 @@ export function HabitLogTab() {
 
   return (
     <ScrollView contentContainerStyle={styles.list}>
-      {active.map(({ habit, completedCount, habitEntries }) => (
-        <HabitCard
-          key={habit.id}
-          habit={habit}
-          rings={RING_PERIODS.map(({ period, label }) => ({ label, ...computeRing(habit, entries, period, today) }))}
-          completedCount={completedCount}
-          entries={habitEntries}
-          onAdd={add}
-          onPress={() => router.push(`/habits/entries/${habit.id}`)}
-        />
-      ))}
+      {active.map(({ habit, completedCount, habitEntries }) => {
+        const allTimeRate = computeRing(habit, entries, 'allTime', today).rate;
+        const sessionRate =
+          habit.kind === 'limited' && habit.targetSessions != null
+            ? Math.min(completedCount / habit.targetSessions, 1)
+            : allTimeRate;
+
+        let timeRate: number | undefined;
+        if (habit.kind === 'limited' && habit.targetDate != null) {
+          const total = Math.max(1, diffDays(habit.targetDate, habit.startDate));
+          const elapsed = Math.min(Math.max(0, diffDays(today, habit.startDate)), total);
+          timeRate = elapsed / total;
+        }
+
+        return (
+          <HabitCard
+            key={habit.id}
+            habit={habit}
+            completedCount={completedCount}
+            sessionRate={sessionRate}
+            timeRate={timeRate}
+            entries={habitEntries}
+            onAdd={add}
+            onPress={() => router.push(`/habits/entries/${habit.id}`)}
+          />
+        );
+      })}
 
       {completed.length > 0 && (
         <>
@@ -79,7 +88,9 @@ export function HabitLogTab() {
               <MaterialIcons name="check-circle" size={20} color={colors.success} />
               <View style={styles.rowMain}>
                 <Text style={styles.rowLabel}>{habit.name}</Text>
-                <Text style={styles.rowDue}>{completedCount} of {habit.targetSessions ?? completedCount} completed</Text>
+                <Text style={styles.rowDue}>
+                  {completedCount} of {habit.targetSessions ?? completedCount} completed
+                </Text>
               </View>
             </Pressable>
           ))}
@@ -89,10 +100,11 @@ export function HabitLogTab() {
   );
 }
 
-function HabitCard({ habit, rings, completedCount, entries, onAdd, onPress }: {
+function HabitCard({ habit, completedCount, sessionRate, timeRate, entries, onAdd, onPress }: {
   habit: Habit;
-  rings: Array<{ label: string; rate: number }>;
   completedCount: number;
+  sessionRate: number;
+  timeRate?: number;
   entries: HabitLogEntry[];
   onAdd: (data: Omit<HabitLogEntry, 'id' | 'createdAt'>) => void;
   onPress: () => void;
@@ -100,17 +112,47 @@ function HabitCard({ habit, rings, completedCount, entries, onAdd, onPress }: {
   const [expanded, setExpanded] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
 
+  const today = todayISO();
   const sortedEntries = entries.slice().sort((a, b) => b.loggedAt.localeCompare(a.loggedAt));
   const shown = sortedEntries.slice(0, EXPANDED_ENTRY_LIMIT);
 
-  const showPaceBars = habit.kind === 'limited' && habit.targetSessions != null && habit.targetDate != null;
+  const daysLeft = habit.targetDate ? Math.max(0, diffDays(habit.targetDate, today)) : null;
+
+  let paceStatus: { label: string; color: string } | null = null;
+  if (timeRate != null && habit.targetSessions != null) {
+    const expectedByNow = Math.ceil(timeRate * habit.targetSessions);
+    const deficit = expectedByNow - completedCount;
+    if (sessionRate >= 1) {
+      paceStatus = { label: 'Goal reached', color: colors.success };
+    } else if (deficit <= 0) {
+      paceStatus = { label: 'On pace', color: colors.success };
+    } else if (deficit === 1) {
+      paceStatus = { label: '1 session behind', color: WARNING_COLOR };
+    } else {
+      paceStatus = { label: `${deficit} sessions behind`, color: colors.danger };
+    }
+  }
 
   return (
     <View style={styles.card}>
-      {/* Title + action buttons */}
+      {/* Title + badges (tight group) + action buttons */}
       <View style={styles.headerRow}>
-        <Pressable style={styles.rowMain} onPress={onPress}>
-          <Text style={styles.rowLabel}>{habit.name}</Text>
+        <Pressable style={styles.headerMain} onPress={onPress}>
+          <Text style={styles.title}>{habit.name}</Text>
+          <View style={styles.badgeRow}>
+            <Badge
+              color={colors.accent}
+              label={describeSchedule(habit.schedule)}
+              icon={<MaterialIcons name="event-repeat" size={11} color={colors.accent} />}
+            />
+            {habit.kind === 'limited' && habit.targetDate && (
+              <Badge
+                color={LIMITED_COLOR}
+                label={`by ${fromISO(habit.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`}
+                icon={<MaterialIcons name="flag" size={11} color={LIMITED_COLOR} />}
+              />
+            )}
+          </View>
         </Pressable>
         <View style={styles.headerActions}>
           <Pressable onPress={() => setExpanded((v) => !v)} style={[styles.iconBtn, styles.listBtn]}>
@@ -122,45 +164,30 @@ function HabitCard({ habit, rings, completedCount, entries, onAdd, onPress }: {
         </View>
       </View>
 
-      {/* Badges */}
-      <View style={styles.badgeRow}>
-        <Badge
-          color={colors.accent}
-          label={describeSchedule(habit.schedule)}
-          icon={<MaterialIcons name="event-repeat" size={11} color={colors.accent} />}
+      {/* Concentric ring + status */}
+      <View style={styles.ringArea}>
+        <ConcentricRing
+          sessionRate={sessionRate}
+          timeRate={timeRate}
+          paceRate={timeRate}
+          size={RING_SIZE}
         />
-        {habit.kind === 'limited' && habit.targetDate && (
-          <Badge
-            color={LIMITED_COLOR}
-            label={`by ${fromISO(habit.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`}
-            icon={<MaterialIcons name="flag" size={11} color={LIMITED_COLOR} />}
-          />
-        )}
-        {habit.kind === 'limited' && habit.targetSessions != null && (
-          <Badge
-            color={LIMITED_COLOR}
-            label={`${completedCount} / ${habit.targetSessions}`}
-            icon={<MaterialIcons name="check-circle-outline" size={11} color={LIMITED_COLOR} />}
-          />
-        )}
+        <View style={styles.ringLabels}>
+          <Text style={styles.ringPct}>
+            {habit.kind === 'limited' && habit.targetSessions != null
+              ? `${completedCount} / ${habit.targetSessions}`
+              : `${Math.round(sessionRate * 100)}%`}
+          </Text>
+          {paceStatus && (
+            <Text style={[styles.paceLabel, { color: paceStatus.color }]}>{paceStatus.label}</Text>
+          )}
+          {daysLeft != null && (
+            <Text style={styles.daysLeft}>
+              {daysLeft > 0 ? `${daysLeft} days left` : 'Deadline passed'}
+            </Text>
+          )}
+        </View>
       </View>
-
-      {/* Progress rings */}
-      <View style={styles.ringsRow}>
-        {rings.map((r) => (
-          <ProgressRing key={r.label} rate={r.rate} label={r.label} size={44} strokeWidth={4} />
-        ))}
-      </View>
-
-      {/* Pace bars (limited habits only) */}
-      {showPaceBars && (
-        <LimitedPaceBars
-          startDate={habit.startDate}
-          targetDate={habit.targetDate!}
-          targetSessions={habit.targetSessions!}
-          completedCount={completedCount}
-        />
-      )}
 
       {/* Expanded session list */}
       {expanded && (
@@ -179,7 +206,9 @@ function HabitCard({ habit, rings, completedCount, entries, onAdd, onPress }: {
           )}
           <Pressable onPress={onPress} style={styles.viewAllBtn}>
             <Text style={styles.viewAllText}>
-              {sortedEntries.length > EXPANDED_ENTRY_LIMIT ? `View all ${sortedEntries.length} sessions` : 'Manage sessions'}
+              {sortedEntries.length > EXPANDED_ENTRY_LIMIT
+                ? `View all ${sortedEntries.length} sessions`
+                : 'Manage sessions'}
             </Text>
             <MaterialIcons name="chevron-right" size={18} color={colors.accent} />
           </Pressable>
@@ -198,196 +227,136 @@ function HabitCard({ habit, rings, completedCount, entries, onAdd, onPress }: {
   );
 }
 
-function LimitedPaceBars({ startDate, targetDate, targetSessions, completedCount }: {
-  startDate: string;
-  targetDate: string;
-  targetSessions: number;
-  completedCount: number;
+function ConcentricRing({ sessionRate, timeRate, paceRate, size }: {
+  sessionRate: number;
+  timeRate?: number;
+  paceRate?: number;
+  size: number;
 }) {
-  const today = todayISO();
-  const totalDays = Math.max(1, diffDays(targetDate, startDate));
-  const elapsedDays = Math.min(Math.max(0, diffDays(today, startDate)), totalDays);
-  const timeRate = elapsedDays / totalDays;
-  const sessionRate = Math.min(completedCount / targetSessions, 1);
+  const cx = size / 2;
+  const cy = size / 2;
+  const OUTER_W = 11;
+  const INNER_W = 7;
+  const GAP = 6;
 
-  const expectedByNow = Math.ceil(timeRate * targetSessions);
-  const deficit = expectedByNow - completedCount;
-  const onTrack = deficit <= 0;
+  const outerR = size / 2 - OUTER_W / 2 - 1;
+  const innerR = outerR - OUTER_W / 2 - GAP - INNER_W / 2;
 
-  const fillColor =
-    sessionRate >= 1 ? colors.success :
-    onTrack ? colors.success :
-    deficit === 1 ? WARNING_COLOR :
-    colors.danger;
+  const clamped = Math.max(0, Math.min(sessionRate, 1));
+  const step = 360 / SEGMENTS;
+  const filled = Math.round(clamped * SEGMENTS);
 
-  const daysLeft = Math.max(0, diffDays(targetDate, today));
-  const sessionsLeft = Math.max(0, targetSessions - completedCount);
+  const deadlineAngle = timeRate != null ? Math.min(timeRate, 0.9999) * 360 : null;
 
-  const paceLabel = sessionRate >= 1
-    ? 'Goal reached'
-    : onTrack
-    ? 'On pace'
-    : `${deficit} behind pace`;
+  let paceLine: { x1: number; y1: number; x2: number; y2: number } | null = null;
+  if (paceRate != null) {
+    const angle = Math.min(paceRate, 0.9999) * 360;
+    const rad = ((angle - 90) * Math.PI) / 180;
+    const r1 = outerR - OUTER_W / 2 - 1;
+    const r2 = outerR + OUTER_W / 2 + 2;
+    paceLine = {
+      x1: cx + r1 * Math.cos(rad), y1: cy + r1 * Math.sin(rad),
+      x2: cx + r2 * Math.cos(rad), y2: cy + r2 * Math.sin(rad),
+    };
+  }
 
   return (
-    <View style={paceStyles.container}>
-      {/* Sessions bar */}
-      <View style={paceStyles.barSection}>
-        <View style={paceStyles.barHeader}>
-          <Text style={paceStyles.barTitle}>Sessions</Text>
-          <Text style={[paceStyles.barValue, { color: fillColor }]}>
-            {completedCount} <Text style={paceStyles.barValueDim}>/ {targetSessions}</Text>
-          </Text>
-        </View>
-        <View style={paceStyles.trackOuter}>
-          <View style={paceStyles.track}>
-            <View style={[paceStyles.fill, { width: `${sessionRate * 100}%` as any, backgroundColor: fillColor }]} />
-          </View>
-          {/* Pace marker: where you should be now given elapsed time */}
-          <View style={[paceStyles.paceMarker, { left: `${Math.min(timeRate * 100, 99)}%` as any }]}>
-            <View style={paceStyles.paceMarkerLine} />
-            <View style={paceStyles.paceMarkerDot} />
-          </View>
-        </View>
-        <View style={paceStyles.barFooter}>
-          <Text style={paceStyles.paceText}>
-            <MaterialIcons name="schedule" size={10} color={colors.textDim} /> pace
-          </Text>
-          <Text style={[paceStyles.paceStatus, { color: onTrack ? colors.success : deficit === 1 ? WARNING_COLOR : colors.danger }]}>
-            {paceLabel}
-          </Text>
-        </View>
-      </View>
+    <Svg width={size} height={size}>
+      {/* Outer track */}
+      <Circle cx={cx} cy={cy} r={outerR} stroke={colors.surface2} strokeWidth={OUTER_W} fill="none" />
 
-      {/* Deadline bar */}
-      <View style={paceStyles.barSection}>
-        <View style={paceStyles.barHeader}>
-          <Text style={paceStyles.barTitle}>Deadline</Text>
-          <Text style={paceStyles.barValue}>
-            {daysLeft > 0
-              ? <>{daysLeft} <Text style={paceStyles.barValueDim}>days left</Text></>
-              : <Text style={{ color: colors.danger }}>Overdue</Text>
-            }
-          </Text>
-        </View>
-        <View style={paceStyles.track}>
-          <View style={[paceStyles.fill, { width: `${timeRate * 100}%` as any, backgroundColor: colors.accent }]} />
-        </View>
-      </View>
-    </View>
+      {/* Session arc segments */}
+      {Array.from({ length: filled }, (_, i) => (
+        <Path
+          key={i}
+          d={describeArc(cx, cy, outerR, i * step, (i + 1) * step)}
+          stroke={ringColor(i / SEGMENTS)}
+          strokeWidth={OUTER_W}
+          strokeLinecap="round"
+          fill="none"
+        />
+      ))}
+
+      {/* Inner deadline track */}
+      {timeRate != null && (
+        <Circle cx={cx} cy={cy} r={innerR} stroke={colors.surface2} strokeWidth={INNER_W} fill="none" />
+      )}
+
+      {/* Inner deadline arc */}
+      {deadlineAngle != null && deadlineAngle > 0 && (
+        <Path
+          d={describeArc(cx, cy, innerR, 0, deadlineAngle)}
+          stroke={colors.accent}
+          strokeWidth={INNER_W}
+          strokeLinecap="round"
+          fill="none"
+        />
+      )}
+
+      {/* Pace marker — dotted radial line crossing the outer ring */}
+      {paceLine && (
+        <Line
+          x1={paceLine.x1} y1={paceLine.y1}
+          x2={paceLine.x2} y2={paceLine.y2}
+          stroke={colors.textMuted}
+          strokeWidth={2}
+          strokeDasharray="2,2"
+        />
+      )}
+    </Svg>
   );
 }
-
-const paceStyles = StyleSheet.create({
-  container: {
-    gap: spacing.md,
-    paddingTop: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.surface2,
-  },
-  barSection: { gap: 6 },
-  barHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
-  barTitle: { color: colors.textMuted, fontSize: font.sm - 1, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  barValue: { color: colors.text, fontSize: font.sm, fontWeight: '700' },
-  barValueDim: { color: colors.textDim, fontWeight: '400' },
-  trackOuter: { position: 'relative' },
-  track: {
-    height: 8,
-    backgroundColor: colors.surface2,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: colors.border,
-    overflow: 'hidden',
-  },
-  fill: { height: '100%', borderRadius: 4 },
-  paceMarker: { position: 'absolute', top: -3, alignItems: 'center' },
-  paceMarkerLine: { width: 1.5, height: 14, backgroundColor: colors.textMuted, borderRadius: 1 },
-  paceMarkerDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: colors.textMuted, marginTop: -2 },
-  barFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 },
-  paceText: { color: colors.textDim, fontSize: 10 },
-  paceStatus: { fontSize: font.sm - 1, fontWeight: '600' },
-});
 
 const styles = StyleSheet.create({
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
   emptyText: { color: colors.textDim, fontSize: font.md, textAlign: 'center', lineHeight: 22 },
-  list: { padding: spacing.lg, gap: spacing.sm },
+  list: { padding: spacing.lg, gap: spacing.md },
   sectionHeader: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
+    fontSize: 11, fontWeight: '600', color: colors.textMuted,
+    textTransform: 'uppercase', letterSpacing: 0.8,
+    marginTop: spacing.xs, marginBottom: spacing.xs,
   },
-  headerRow: { flexDirection: 'row', alignItems: 'center' },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  iconBtn: {
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radius.sm,
-  },
-  listBtn: {
-    backgroundColor: colors.surface2,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  addBtn: { backgroundColor: colors.accent },
-  rowMain: { flex: 1 },
-  rowLabel: { color: colors.text, fontSize: font.md, fontWeight: '500' },
-  rowDue: { color: colors.textDim, fontSize: font.sm },
-  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   card: {
     backgroundColor: colors.surface,
-    borderRadius: radius.sm,
+    borderRadius: radius.md ?? radius.sm,
     borderWidth: 1,
     borderColor: colors.surface2,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     gap: spacing.md,
-    marginBottom: spacing.sm,
   },
-  ringsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  headerMain: { flex: 1, gap: 5 },
+  title: { color: colors.text, fontSize: font.md, fontWeight: '600' },
+  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingTop: 2 },
+  iconBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
+  listBtn: { backgroundColor: colors.surface2, borderWidth: 1, borderColor: colors.border },
+  addBtn: { backgroundColor: colors.accent },
+  ringArea: { alignItems: 'center', gap: spacing.xs },
+  ringLabels: { alignItems: 'center', gap: 3 },
+  ringPct: { color: colors.text, fontSize: font.md, fontWeight: '700' },
+  paceLabel: { fontSize: font.sm, fontWeight: '600' },
+  daysLeft: { color: colors.textDim, fontSize: font.sm },
   completedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
     backgroundColor: colors.surface,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.surface2,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    marginBottom: spacing.sm,
+    borderRadius: radius.sm, borderWidth: 1, borderColor: colors.surface2,
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
   },
+  rowMain: { flex: 1, gap: 3 },
+  rowLabel: { color: colors.text, fontSize: font.md, fontWeight: '500' },
+  rowDue: { color: colors.textDim, fontSize: font.sm },
   entriesList: {
-    gap: spacing.xs,
-    borderTopWidth: 1,
-    borderTopColor: colors.surface2,
-    paddingTop: spacing.sm,
+    gap: spacing.xs, borderTopWidth: 1, borderTopColor: colors.surface2, paddingTop: spacing.sm,
   },
   noEntriesText: { color: colors.textDim, fontSize: font.sm },
   entryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-    paddingVertical: spacing.xs,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    gap: spacing.md, paddingVertical: spacing.xs,
   },
   entryDate: { color: colors.text, fontSize: font.sm },
   entryNotes: { color: colors.textDim, fontSize: font.sm, flexShrink: 1, textAlign: 'right' },
-  viewAllBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 2,
-    paddingTop: spacing.xs,
-  },
+  viewAllBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 2, paddingTop: spacing.xs },
   viewAllText: { color: colors.accent, fontSize: font.sm, fontWeight: '600' },
 });
