@@ -797,18 +797,21 @@ export function LoggerTab() {
                           const exExec = executions.find(
                             (e) => e.routineExecutionId === exec.id && e.exerciseId === ex.id,
                           ) ?? null;
-                          const lastExec = executions
+                          // Full past history (most recent first), not just the single nearest
+                          // execution — lets the form fall further back per-set when the most
+                          // recent log was skipped/incomplete for a given set index.
+                          const exHistory = executions
                             .filter((e) => e.exerciseId === ex.id && e.id !== exExec?.id &&
                               (e.weight != null || e.setData?.some((s) => s.weight != null) ||
                                 e.durationMin != null || (e.paramValues && e.paramValues.length > 0)))
-                            .sort((a, b) => b.date.localeCompare(a.date))[0] ?? null;
+                            .sort((a, b) => b.date.localeCompare(a.date));
                           return (
                             <ExerciseInlineForm
                               key={ex.id}
                               exercise={ex}
                               badge={exerciseBadge(ex)}
                               execution={exExec}
-                              lastExecution={lastExec}
+                              history={exHistory}
                               routineExecutionId={exec.id}
                               dueDate={exec.dueDate}
                               canDelete={roleFor(ex.id) === 'optional'}

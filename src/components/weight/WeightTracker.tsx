@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet, LayoutChangeEvent } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import Svg, { Polyline, Line, Circle, Rect, Text as SvgText } from 'react-native-svg';
+import Svg, { Polyline, Line, Circle, Text as SvgText } from 'react-native-svg';
 import { useAuth } from '../../context/AuthContext';
 import { useWeightEntries, useWeightTarget } from '../../store/weightStore';
 import { WeightEntryModal } from './WeightEntryModal';
@@ -10,15 +10,19 @@ import { WeightDateFilterModal, type DateRange } from './WeightDateFilterModal';
 import { WeightPointDetailModal } from './WeightPointDetailModal';
 import { colors, spacing, font, radius } from '../../theme';
 import { fromISO, toISO, diffDays, addDays, todayISO } from '../../lib/schedule';
-import { fitWeightTrend, trendKgAt, prognose, type Prognosis } from '../../lib/weightTrend';
+import { fitWeightTrend } from '../../lib/weightTrend';
 import { toKg, fromKg, formatDelta, deltaColor, type WeightEntry, type WeightUnit } from '../../types/weight';
 
 const PLOT_HEIGHT = 220;
 const PLOT_Y_PAD = 28;
-const PLOT_X_PAD = 12;
+// Every tick label is the same fixed "DD MMM YYYY" shape at a fixed 45° slant, so this can be
+// a precise constant rather than a guess: ~11 chars * 5.5px * cos(45°) ≈ 43px of leftward
+// overhang from the first tick (which sits exactly at offset 0, i.e. this same x). Sized so
+// the label's own left edge lands right at the plot's left boundary — no extra gap, no clip.
+const PLOT_LEFT_PAD = 44;
+const PLOT_RIGHT_PAD = 12;
 const XAXIS_HEIGHT = 44; // reserved below the plot for rotated tick labels
 const TOTAL_SVG_HEIGHT = PLOT_HEIGHT + XAXIS_HEIGHT;
-const CHART_POINTS = 20;
 const Y_AXIS_WIDTH = 38;
 const GRID_STEP = 5; // y-axis tick spacing, in the displayed unit
 const DEFAULT_MAX = 100; // y-axis max fallback (displayed unit) when nothing is logged yet
@@ -26,43 +30,10 @@ const TREND_COLOR = colors.textMuted;
 const TARGET_COLOR = '#F59E0B';
 const TARGET_ICON = '🎯';
 const CHART_ICON = '📈';
-const PROJECTION_CAP_DAYS = 240; // don't visually extend the chart more than ~8 months out
-const LABEL_FONT_SIZE = 10;
-
-function hexToRgba(hex: string, alpha: number): string {
-  const h = hex.replace('#', '');
-  const r = parseInt(h.substring(0, 2), 16);
-  const g = parseInt(h.substring(2, 4), 16);
-  const b = parseInt(h.substring(4, 6),16);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
-/** Rough glyph-width estimate for sizing a label's background pill (no text-measurement
- * API is available for SVG text in react-native-svg). */
-function estimateTextWidth(text: string, fontSize: number): number {
-  return text.length * fontSize * 0.62;
-}
-
-/** A data-point/target value label with a semi-transparent pill background (matching the
- * status-badge look, but borderless), sized to the text and horizontally clamped so it
- * never gets clipped at the chart's edges. `centerY` is the badge's vertical center. */
-function renderLabel(key: string, x: number, centerY: number, text: string, color: string, maxWidth: number) {
-  const w = estimateTextWidth(text, LABEL_FONT_SIZE) + 10;
-  const h = LABEL_FONT_SIZE + 8;
-  const minX = w / 2 + 2;
-  const maxX = maxWidth - w / 2 - 2;
-  const clampedX = maxX >= minX ? Math.min(Math.max(x, minX), maxX) : maxWidth / 2;
-  // Baseline sits a bit below the box's vertical center so the glyph is optically centered.
-  const textY = centerY + LABEL_FONT_SIZE * 0.35;
-  return (
-    <Fragment key={key}>
-      <Rect x={clampedX - w / 2} y={centerY - h / 2} width={w} height={h} rx={4} fill={hexToRgba(color, 0.2)} />
-      <SvgText x={clampedX} y={textY} fontSize={LABEL_FONT_SIZE} fontWeight="700" fill={color} textAnchor="middle">
-        {text}
-      </SvgText>
-    </Fragment>
-  );
-}
+const DOT_DASH = '0.1,6'; // near-zero dash + round cap renders as a true dot, not a short dash
+const DOT_CYCLE = 6.1;
+const REF_DASH = '4,4'; // regular dashes for the max/min/current/target reference lines
+const REF_DASH_CYCLE = 8;
 
 function formatRowDate(iso: string): string {
   return fromISO(iso).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
@@ -82,48 +53,13 @@ function formatValue(kg: number, unit: WeightUnit): string {
   return fromKg(kg, unit).toFixed(1);
 }
 
-/** Ticks at the 1st and 15th of every month within [startISO, endISO]. */
-function halfMonthTicks(startISO: string, endISO: string): string[] {
-  if (startISO > endISO) return [];
-  const start = fromISO(startISO);
-  const ticks: string[] = [];
-  let y = start.getFullYear();
-  let m = start.getMonth();
-  let guard = 0;
-  while (guard++ < 600) {
-    const first = toISO(new Date(y, m, 1));
-    const fifteenth = toISO(new Date(y, m, 15));
-    if (first > endISO) break;
-    if (first >= startISO) ticks.push(first);
-    if (fifteenth >= startISO && fifteenth <= endISO) ticks.push(fifteenth);
-    m += 1;
-    if (m > 11) { m = 0; y += 1; }
-  }
-  return ticks;
+function subtractMonths(iso: string, months: number): string {
+  const d = fromISO(iso);
+  return toISO(new Date(d.getFullYear(), d.getMonth() - months, d.getDate()));
 }
 
-/** The 1st of every Nth month (N=1 monthly, 3 quarterly, 6 half-yearly, 12 yearly),
- * aligned to calendar boundaries (Jan/Apr/Jul/Oct for quarters, etc). */
-function stepMonthTicks(startISO: string, endISO: string, monthStep: number): string[] {
-  const start = fromISO(startISO);
-  let y = start.getFullYear();
-  let m = start.getMonth();
-  const rem = m % monthStep;
-  if (rem !== 0) m += monthStep - rem;
-  if (m > 11) { y += Math.floor(m / 12); m %= 12; }
-  const ticks: string[] = [];
-  let guard = 0;
-  while (guard++ < 400) {
-    const iso = toISO(new Date(y, m, 1));
-    if (iso > endISO) break;
-    if (iso >= startISO) ticks.push(iso);
-    m += monthStep;
-    if (m > 11) { m -= 12; y += 1; }
-  }
-  return ticks;
-}
-
-/** Regular day-spaced ticks from startISO, stepping by `stepDays`. */
+/** Regular day-spaced ticks from startISO, stepping by `stepDays` — always starts exactly at
+ * startISO, so the first tick lines up precisely with the left edge of the plot. */
 function dayStepTicks(startISO: string, endISO: string, stepDays: number): string[] {
   const totalDays = diffDays(endISO, startISO);
   const ticks: string[] = [];
@@ -131,45 +67,30 @@ function dayStepTicks(startISO: string, endISO: string, stepDays: number): strin
   return ticks;
 }
 
-type XGranularity = 'day' | 'halfmonth' | 'month' | 'quarter' | 'halfyear' | 'year';
+// Covers anything from a few days to decades, always keeping tick count to ~5-8. A uniform
+// day step (rather than calendar-month alignment) is what guarantees the ticks land exactly
+// equidistant in pixels, since the x-scale itself is linear in days.
+const DAY_STEP_CANDIDATES = [
+  1, 2, 3, 5, 7, 10, 14, 21, 30, 45, 60, 90, 120, 182, 270,
+  365, 548, 730, 1095, 1461, 1826, 2557, 3653, 5479, 7305,
+];
 
-const DAY_STEP_CANDIDATES = [1, 2, 3, 5, 7, 10, 14];
-
-/** Picks a tick granularity/step from the span so the axis always shows a regular,
+/** Picks a uniform day step from the span so the axis always shows a regular, equidistant,
  * readable set of ticks (~5-8) — dynamic to whatever timeframe is in view. */
-function chooseXTicks(startISO: string, endISO: string): { ticks: string[]; granularity: XGranularity } {
+function chooseXTicks(startISO: string, endISO: string): string[] {
   const totalDays = diffDays(endISO, startISO);
-  if (totalDays <= 40) {
-    let step = DAY_STEP_CANDIDATES[DAY_STEP_CANDIDATES.length - 1];
-    for (const s of DAY_STEP_CANDIDATES) {
-      if (Math.ceil(totalDays / s) + 1 <= 8) { step = s; break; }
-    }
-    return { ticks: dayStepTicks(startISO, endISO, step), granularity: 'day' };
+  let step = DAY_STEP_CANDIDATES[DAY_STEP_CANDIDATES.length - 1];
+  for (const s of DAY_STEP_CANDIDATES) {
+    if (Math.ceil(totalDays / s) + 1 <= 8) { step = s; break; }
   }
-  if (totalDays <= 120) return { ticks: halfMonthTicks(startISO, endISO), granularity: 'halfmonth' };
-  if (totalDays <= 420) return { ticks: stepMonthTicks(startISO, endISO, 1), granularity: 'month' };
-  if (totalDays <= 1000) return { ticks: stepMonthTicks(startISO, endISO, 3), granularity: 'quarter' };
-  if (totalDays <= 2000) return { ticks: stepMonthTicks(startISO, endISO, 6), granularity: 'halfyear' };
-  return { ticks: stepMonthTicks(startISO, endISO, 12), granularity: 'year' };
+  return dayStepTicks(startISO, endISO, step);
 }
 
-function formatXTickLabel(iso: string, granularity: XGranularity): string {
+function formatXTickLabel(iso: string): string {
   const d = fromISO(iso);
   const dd = String(d.getDate()).padStart(2, '0');
   const mmm = d.toLocaleDateString(undefined, { month: 'short' }).toUpperCase();
-  const yyyy = d.getFullYear();
-  switch (granularity) {
-    case 'day':
-    case 'halfmonth':
-    case 'month':
-      return `${dd} ${mmm} ${yyyy}`;
-    case 'quarter':
-      return `Q${Math.floor(d.getMonth() / 3) + 1} ${yyyy}`;
-    case 'halfyear':
-      return `H${d.getMonth() < 6 ? 1 : 2} ${yyyy}`;
-    case 'year':
-      return `${yyyy}`;
-  }
+  return `${dd} ${mmm} ${d.getFullYear()}`;
 }
 
 type TargetProjection =
@@ -177,8 +98,10 @@ type TargetProjection =
   | { kind: 'projected'; date: string }
   | { kind: 'never' };
 
-/** Projects when the target would be hit at the current weekly rate — independent of the
- * chart's own regression-based prognosis, per the simpler "weekly average" rule. */
+/** Projects when the target would be hit at the current weekly rate. This is the single
+ * source of truth for "when will I reach my target" — both the chart's projection line/
+ * marker and the target card's badge/comment use this same result, so the date never
+ * disagrees between the two. */
 function projectTargetDate(currentKg: number | null, targetKg: number | null, weeklyRateKg: number | null): TargetProjection {
   if (currentKg == null || targetKg == null) return { kind: 'never' };
   if (Math.abs(targetKg - currentKg) < 0.05) return { kind: 'reached' };
@@ -213,6 +136,24 @@ function isOnTrack(projection: TargetProjection, byDate: string | undefined, wee
   return weeklyRateKg != null && weeklyRateKg < 0;
 }
 
+type RangeSelection =
+  | { kind: 'preset'; months: number; label: string }
+  | { kind: 'all' }
+  | { kind: 'custom'; from: string; to: string };
+
+const RANGE_PRESETS: { months: number; label: string }[] = [
+  { months: 1, label: '1M' },
+  { months: 3, label: '3M' },
+  { months: 6, label: '6M' },
+  { months: 12, label: '1Y' },
+];
+
+function resolveRange(range: RangeSelection): DateRange | null {
+  if (range.kind === 'all') return null;
+  if (range.kind === 'custom') return { from: range.from, to: range.to };
+  return { from: subtractMonths(todayISO(), range.months), to: todayISO() };
+}
+
 export function WeightTracker() {
   const { user } = useAuth();
   const { entries, loaded, upsert, remove } = useWeightEntries(user?.uid);
@@ -221,7 +162,7 @@ export function WeightTracker() {
   const [targetModalOpen, setTargetModalOpen] = useState(false);
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<WeightEntry | undefined>(undefined);
-  const [dateFilter, setDateFilter] = useState<DateRange | null>(null);
+  const [range, setRange] = useState<RangeSelection>({ kind: 'all' });
   const [plotWidth, setPlotWidth] = useState(0);
   const [selectedEntry, setSelectedEntry] = useState<WeightEntry | null>(null);
 
@@ -272,19 +213,29 @@ export function WeightTracker() {
     setSelectedEntry(entry);
   }
 
-  const filteredAscending = dateFilter
-    ? ascending.filter((e) => e.date >= dateFilter.from && e.date <= dateFilter.to)
+  const resolvedFilter = resolveRange(range);
+  const filteredAscending = resolvedFilter
+    ? ascending.filter((e) => e.date >= resolvedFilter.from && e.date <= resolvedFilter.to)
     : ascending;
 
-  // Trend, prognosis, and the weekly rate all derive from the filtered window, so they
-  // reflect whatever date range the user is currently viewing.
+  const chartSubtitle = (() => {
+    if (range.kind === 'all') {
+      if (!filteredAscending.length) return 'All time';
+      return `${formatAxisDate(filteredAscending[0].date)} – ${formatAxisDate(filteredAscending[filteredAscending.length - 1].date)} · All time`;
+    }
+    const label = range.kind === 'preset' ? range.label : 'Custom';
+    return `${formatAxisDate(resolvedFilter!.from)} – ${formatAxisDate(resolvedFilter!.to)} · ${label}`;
+  })();
+
+  // Trend and the weekly rate derive from the filtered window, so they reflect whatever
+  // date range the user is currently viewing.
   const fit = fitWeightTrend(filteredAscending);
   const targetKg = target ? toKg(target.value, target.unit) : null;
-  const prognosis: Prognosis | null = targetKg != null ? prognose(fit, targetKg, todayISO()) : null;
   const weeklyRateKg = fit ? fit.slopeKgPerDay * 7 : null;
 
-  // With a deadline set, on/off track compares the projected reach date against it;
-  // otherwise it falls back to the simple "losing weight" rule.
+  // Single source of truth for "when will the target be reached" — the chart's projection
+  // line/marker/x-axis label and the target card's badge/comment both read this, so the
+  // date is always the same in both places.
   const targetProjection = projectTargetDate(currentKg, targetKg, weeklyRateKg);
   const onTrack = isOnTrack(targetProjection, target?.byDate, weeklyRateKg);
 
@@ -298,45 +249,66 @@ export function WeightTracker() {
     : null;
 
   // ── Chart geometry ─────────────────────────────────────────────────────
-  const chartEntries = filteredAscending.slice(-CHART_POINTS);
+  // No point cap — the chart always plots exactly the entries in the selected range, so it
+  // never disagrees with the list below it.
+  const chartEntries = filteredAscending;
   const chartBaseISO = chartEntries[0]?.date;
-  const lastOffset = chartEntries.length ? diffDays(chartEntries[chartEntries.length - 1].date, chartBaseISO) : 0;
+  const lastEntryISO = chartEntries[chartEntries.length - 1]?.date;
+  const lastOffset = chartEntries.length ? diffDays(lastEntryISO, chartBaseISO) : 0;
 
-  const extendChart = !!(prognosis?.kind === 'onTrack' && prognosis.daysAway <= PROJECTION_CAP_DAYS);
-  const projectedOffset = extendChart ? diffDays((prognosis as { date: string }).date, chartBaseISO) : null;
+  // Always extend to show the projection, no matter how far out it lands — a distant
+  // target shouldn't make its own marker disappear.
+  const targetReachDate = targetProjection.kind === 'projected' ? targetProjection.date : null;
+  const extendChart = targetReachDate != null;
+  const projectedOffset = extendChart && targetReachDate && chartBaseISO ? diffDays(targetReachDate, chartBaseISO) : null;
   const domainEndOffset = Math.max(lastOffset, projectedOffset ?? 0, 1);
 
   function xForOffset(offset: number): number {
-    if (chartEntries.length <= 1) return plotWidth / 2;
-    const usable = plotWidth - PLOT_X_PAD * 2;
-    return PLOT_X_PAD + (offset / domainEndOffset) * usable;
+    if (chartEntries.length <= 1) return (PLOT_LEFT_PAD + (plotWidth - PLOT_RIGHT_PAD)) / 2;
+    const usable = plotWidth - PLOT_LEFT_PAD - PLOT_RIGHT_PAD;
+    return PLOT_LEFT_PAD + (offset / domainEndOffset) * usable;
   }
 
   const barKgValues = chartEntries.map((e) => toKg(e.value, e.unit));
 
-  const trendAtBaseKg = fit && chartBaseISO ? trendKgAt(fit, chartBaseISO) : null;
-  const trendEndISO = extendChart ? (prognosis as { date: string }).date : chartEntries[chartEntries.length - 1]?.date;
-  const trendAtEndKg = fit && trendEndISO ? trendKgAt(fit, trendEndISO) : null;
+  // The drawn trend line uses the regression's *slope* but is anchored at (today, currentKg)
+  // — the exact same anchor projectTargetDate() uses — instead of the regression's own
+  // intercept. That keeps it a single straight line (constant slope, no kink) while also
+  // guaranteeing it actually passes through the target at the projected reach date: that
+  // date was solved for on this same line, so evaluating it here lands back on targetKg
+  // (up to sub-day rounding). Anchoring at the regression's own fitted "today" value instead
+  // would drift away from the target the further out the projection reaches.
+  function anchoredTrendKgAt(dateISO: string): number | null {
+    if (!fit || currentKg == null) return null;
+    return currentKg + fit.slopeKgPerDay * diffDays(dateISO, todayISO());
+  }
+  const trendAtBaseKg = chartBaseISO ? anchoredTrendKgAt(chartBaseISO) : null;
+  const trendAtDomainEndKg = chartBaseISO ? anchoredTrendKgAt(addDays(chartBaseISO, domainEndOffset)) : null;
 
-  // Y-axis: top is the highest logged value (or the target, if that's higher; 100 as a
-  // sane default with no data yet). Ticks are equidistant GRID_STEP-unit steps, and the
-  // bottom tick is always at least one full step below the lowest logged value/target,
-  // so both ends land cleanly on the same 5-unit grid.
+  // Y-axis: top is the highest of the logged values / target / trend line (100 as a sane
+  // default with no data yet) — folding the trend line's own endpoints in here guarantees
+  // it's always fully contained inside the plot, never drawn above/below the visible area.
+  // Ticks are equidistant GRID_STEP-unit steps, and the bottom tick is always at least one
+  // full step below the lowest such value, so both ends land cleanly on the same 5-unit grid.
   const stepKg = toKg(GRID_STEP, displayUnit);
   const maxLoggedKg = barKgValues.length ? Math.max(...barKgValues) : toKg(DEFAULT_MAX, displayUnit);
   const minLoggedKg = barKgValues.length ? Math.min(...barKgValues) : 0;
-  const maxWithTargetKg = targetKg != null ? Math.max(maxLoggedKg, targetKg) : maxLoggedKg;
-  const minWithTargetKg = targetKg != null ? Math.min(minLoggedKg, targetKg) : minLoggedKg;
+  const rangeCandidates = [maxLoggedKg, minLoggedKg];
+  if (targetKg != null) rangeCandidates.push(targetKg);
+  if (trendAtBaseKg != null) rangeCandidates.push(trendAtBaseKg);
+  if (trendAtDomainEndKg != null) rangeCandidates.push(trendAtDomainEndKg);
+  const maxWithTargetKg = Math.max(...rangeCandidates);
+  const minWithTargetKg = Math.min(...rangeCandidates);
   const maxKg = Math.ceil(maxWithTargetKg / stepKg) * stepKg;
   const minKg = Math.floor((minWithTargetKg - stepKg) / stepKg) * stepKg;
-  const range = maxKg - minKg;
+  const range_ = maxKg - minKg;
 
-  const tickCount = Math.round(range / stepKg);
+  const tickCount = Math.round(range_ / stepKg);
   const ticksKg = Array.from({ length: tickCount + 1 }, (_, i) => maxKg - i * stepKg);
 
   function yForKg(kg: number): number {
     const usable = PLOT_HEIGHT - PLOT_Y_PAD * 2;
-    return PLOT_Y_PAD + (1 - (kg - minKg) / range) * usable;
+    return PLOT_Y_PAD + (1 - (kg - minKg) / range_) * usable;
   }
 
   const baselineY = PLOT_HEIGHT - PLOT_Y_PAD;
@@ -345,25 +317,18 @@ export function WeightTracker() {
     y: yForKg(barKgValues[i]),
   }));
 
-  // The target label sits above whichever point it's most relevant to: the projected
-  // reach-date marker if the trend gets there, otherwise the latest logged point.
-  const targetLabelX = extendChart && projectedOffset != null
-    ? xForOffset(projectedOffset)
-    : xForOffset(lastOffset);
   const targetDateTickX = extendChart && projectedOffset != null ? xForOffset(projectedOffset) : null;
-  const targetDateLabel = extendChart && projectedOffset != null
-    ? formatXTickLabel((prognosis as { date: string }).date, 'day')
-    : null;
+  const targetDateLabel = extendChart && targetReachDate ? formatXTickLabel(targetReachDate) : null;
 
-  // Marker geometry per point — min/max/current get a bigger ringed dot and a label;
-  // everything else stays a small subtle dot. Labels are collected here and rendered as
-  // a separate pass at the end of the SVG so they always paint on top of every line.
+  // Marker geometry per point — min/max/current get a bigger ringed dot; everything else
+  // stays a small subtle dot. Values are shown as badges to the right of the chart instead
+  // of floating on the chart itself, so they never overlap the data.
   const pointMarkers = chartEntries.map((e, i) => {
     const { x, y } = linePoints[i];
     const kg = barKgValues[i];
     const isMax = Math.abs(kg - maxLoggedKg) < 0.001;
     const isMin = Math.abs(kg - minLoggedKg) < 0.001;
-    const isCurrent = i === chartEntries.length - 1;
+    const isCurrent = latest ? e.id === latest.id : false;
     // Priority: minimum > maximum > current — a point that's both the lowest ever and
     // today's reading reads as the minimum (green).
     const roleColor = isMin ? colors.success : isMax ? colors.danger : isCurrent ? colors.accent : null;
@@ -374,40 +339,51 @@ export function WeightTracker() {
       dotColor: roleColor ?? colors.accent,
       dotRadius: roleColor ? 4 : 2,
       ringRadius: roleColor ? 6 : 4,
-      label: roleColor ? { text: formatValue(kg, displayUnit), color: roleColor } : null,
     };
   });
-  const targetLabelData = targetKg != null
-    ? { x: targetLabelX, y: yForKg(targetKg), text: formatValue(targetKg, displayUnit), color: TARGET_COLOR }
-    : null;
 
-  // ── X-axis: granularity (day/half-month/month/quarter/half-year/year) is chosen from
-  // the visible span so ticks stay regular and readable at any timeframe — dynamic,
-  // recomputed whenever the date filter changes what's in view.
-  const xAxisPlan = chartBaseISO && trendEndISO
-    ? chooseXTicks(chartBaseISO, trendEndISO)
-    : { ticks: [] as string[], granularity: 'day' as XGranularity };
-  const xTicks = xAxisPlan.ticks.length
-    ? xAxisPlan.ticks
-    : (chartBaseISO && trendEndISO ? [chartBaseISO, trendEndISO] : []);
+  const currentInView = !!(latest && chartEntries.some((e) => e.id === latest.id));
+
+  // Horizontal dotted reference lines for max/min/current/target. When two or more land at
+  // (nearly) the same height, they'd otherwise just paint over each other — instead each
+  // member of the cluster gets the dash pattern offset by an even fraction of the cycle, so
+  // the dots interleave into one continuous line alternating between the colors.
+  const refLineDefs: { key: string; kg: number; color: string }[] = [];
+  if (chartEntries.length > 0) {
+    refLineDefs.push({ key: 'max', kg: maxLoggedKg, color: colors.danger });
+    refLineDefs.push({ key: 'min', kg: minLoggedKg, color: colors.success });
+    if (currentInView && currentKg != null) refLineDefs.push({ key: 'now', kg: currentKg, color: colors.accent });
+  }
+  if (targetKg != null) refLineDefs.push({ key: 'goal', kg: targetKg, color: TARGET_COLOR });
+
+  const refLinesWithY = refLineDefs.map((l) => ({ ...l, y: yForKg(l.kg) }));
+  const refLineClusters: (typeof refLinesWithY)[] = [];
+  {
+    const used = new Set<number>();
+    refLinesWithY.forEach((l, i) => {
+      if (used.has(i)) return;
+      const cluster = [l];
+      used.add(i);
+      refLinesWithY.forEach((other, j) => {
+        if (i !== j && !used.has(j) && Math.abs(other.y - l.y) < 2) {
+          cluster.push(other);
+          used.add(j);
+        }
+      });
+      refLineClusters.push(cluster);
+    });
+  }
+
+  // ── X-axis: a uniform day step is chosen from the visible span so ticks stay regular,
+  // equidistant, and readable at any timeframe — dynamic, recomputed whenever the range
+  // selection (or the projection) changes what's in view. Always the same 45° slant so it's
+  // predictable rather than jumping between angles.
+  const axisEndISO = extendChart && targetReachDate ? targetReachDate : lastEntryISO;
+  const xTicksRaw = chartBaseISO && axisEndISO ? chooseXTicks(chartBaseISO, axisEndISO) : [];
+  const xTicks = xTicksRaw.length ? xTicksRaw : (chartBaseISO && axisEndISO ? [chartBaseISO, axisEndISO] : []);
   const xTickPositions = xTicks.map((iso) => ({ iso, x: xForOffset(diffDays(iso, chartBaseISO)) }));
-  const xTickLabels = xTicks.map((iso) => formatXTickLabel(iso, xAxisPlan.granularity));
-  const longestLabelLen = xTickLabels.reduce((m, l) => Math.max(m, l.length), 0);
-  const estLabelWidth = longestLabelLen * 5.5;
-  const estLabelHeight = 10;
-  const minTickGapPx = xTickPositions.length > 1
-    ? Math.min(...xTickPositions.slice(1).map((t, i) => t.x - xTickPositions[i].x))
-    : Infinity;
-
-  function xLabelFootprint(deg: number): number {
-    const rad = (deg * Math.PI) / 180;
-    return estLabelWidth * Math.cos(rad) + estLabelHeight * Math.sin(rad);
-  }
-  let xLabelRotation = 0;
-  for (const deg of [0, 45, 60, 75, 90]) {
-    xLabelRotation = deg;
-    if (xLabelFootprint(deg) <= minTickGapPx) break;
-  }
+  const xTickLabels = xTicks.map((iso) => formatXTickLabel(iso));
+  const xLabelRotation = 45;
 
   const descendingWithDelta = [...filteredAscending].reverse().map((e) => {
     const prevChron = prevOf(e);
@@ -508,6 +484,32 @@ export function WeightTracker() {
               <Text style={styles.chartHeaderTitle}>Evolution</Text>
             </View>
 
+            <View style={styles.rangeRow}>
+              {RANGE_PRESETS.map((p) => {
+                const active = range.kind === 'preset' && range.months === p.months;
+                return (
+                  <Pressable
+                    key={p.months}
+                    onPress={() => setRange({ kind: 'preset', months: p.months, label: p.label })}
+                    style={[styles.rangeChip, active && styles.rangeChipActive]}
+                  >
+                    <Text style={[styles.rangeChipText, active && styles.rangeChipTextActive]}>{p.label}</Text>
+                  </Pressable>
+                );
+              })}
+              <Pressable onPress={() => setRange({ kind: 'all' })} style={[styles.rangeChip, range.kind === 'all' && styles.rangeChipActive]}>
+                <Text style={[styles.rangeChipText, range.kind === 'all' && styles.rangeChipTextActive]}>All</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setFilterModalOpen(true)}
+                style={[styles.rangeChip, styles.rangeChipIcon, range.kind === 'custom' && styles.rangeChipActive]}
+              >
+                <MaterialIcons name="tune" size={14} color={range.kind === 'custom' ? '#fff' : colors.textMuted} />
+              </Pressable>
+            </View>
+
+            <Text style={styles.chartSubtitle}>{chartSubtitle} · {chartEntries.length} {chartEntries.length === 1 ? 'entry' : 'entries'}</Text>
+
             <View style={styles.legendRow}>
               <View style={styles.legendItem}>
                 <Svg width={20} height={6}>
@@ -521,10 +523,34 @@ export function WeightTracker() {
                 </Svg>
                 <Text style={styles.legendText}>Trend</Text>
               </View>
+              {chartEntries.length > 0 && (
+                <View style={styles.legendItem}>
+                  <Svg width={20} height={6}>
+                    <Line x1={0} y1={3} x2={20} y2={3} stroke={colors.danger} strokeWidth={1} strokeDasharray={REF_DASH} />
+                  </Svg>
+                  <Text style={styles.legendText}>Max</Text>
+                </View>
+              )}
+              {chartEntries.length > 0 && (
+                <View style={styles.legendItem}>
+                  <Svg width={20} height={6}>
+                    <Line x1={0} y1={3} x2={20} y2={3} stroke={colors.success} strokeWidth={1} strokeDasharray={REF_DASH} />
+                  </Svg>
+                  <Text style={styles.legendText}>Min</Text>
+                </View>
+              )}
+              {currentInView && (
+                <View style={styles.legendItem}>
+                  <Svg width={20} height={6}>
+                    <Line x1={0} y1={3} x2={20} y2={3} stroke={colors.accent} strokeWidth={1} strokeDasharray={REF_DASH} />
+                  </Svg>
+                  <Text style={styles.legendText}>Now</Text>
+                </View>
+              )}
               {target && (
                 <View style={styles.legendItem}>
                   <Svg width={20} height={6}>
-                    <Line x1={0} y1={3} x2={20} y2={3} stroke={TARGET_COLOR} strokeWidth={0.75} strokeDasharray="4,4" />
+                    <Line x1={0} y1={3} x2={20} y2={3} stroke={TARGET_COLOR} strokeWidth={1} strokeDasharray={REF_DASH} />
                   </Svg>
                   <Text style={styles.legendText}>Target</Text>
                 </View>
@@ -547,12 +573,15 @@ export function WeightTracker() {
                       <Line key={i} x1={0} y1={yForKg(v)} x2={plotWidth} y2={yForKg(v)} stroke={colors.border} strokeWidth={1} />
                     ))}
 
-                    {targetKg != null && (
+                    {refLineClusters.map((cluster) => cluster.map((l, idx) => (
                       <Line
-                        x1={0} y1={yForKg(targetKg)} x2={plotWidth} y2={yForKg(targetKg)}
-                        stroke={TARGET_COLOR} strokeWidth={0.75} strokeDasharray="4,4"
+                        key={l.key}
+                        x1={0} y1={l.y} x2={plotWidth} y2={l.y}
+                        stroke={l.color} strokeWidth={1}
+                        strokeDasharray={REF_DASH}
+                        strokeDashoffset={cluster.length > 1 ? (idx * REF_DASH_CYCLE) / cluster.length : 0}
                       />
-                    )}
+                    )))}
 
                     {targetDateTickX != null && (
                       <Line
@@ -578,11 +607,11 @@ export function WeightTracker() {
                       </Fragment>
                     ))}
 
-                    {fit && trendAtBaseKg != null && trendAtEndKg != null && (
+                    {fit && trendAtBaseKg != null && trendAtDomainEndKg != null && (
                       <Line
                         x1={xForOffset(0)} y1={yForKg(trendAtBaseKg)}
-                        x2={xForOffset(domainEndOffset)} y2={yForKg(trendAtEndKg)}
-                        stroke={TREND_COLOR} strokeWidth={1.5} strokeDasharray="0.1,6" strokeLinecap="round"
+                        x2={xForOffset(domainEndOffset)} y2={yForKg(trendAtDomainEndKg)}
+                        stroke={TREND_COLOR} strokeWidth={1.5} strokeDasharray={DOT_DASH} strokeLinecap="round"
                       />
                     )}
 
@@ -621,31 +650,10 @@ export function WeightTracker() {
                         {targetDateLabel}
                       </SvgText>
                     )}
-
-                    {/* Rendered last so labels always sit on top of every line/point. */}
-                    {pointMarkers
-                      .filter((p) => p.label)
-                      .map((p) => renderLabel(`pl-${p.key}`, p.x, p.y - 14, p.label!.text, p.label!.color, plotWidth))}
-                    {targetLabelData && renderLabel('target-label', targetLabelData.x, targetLabelData.y - 12, targetLabelData.text, targetLabelData.color, plotWidth)}
                   </Svg>
                 )}
               </View>
             </View>
-          </View>
-
-          <View style={styles.filterRow}>
-            <Pressable onPress={() => setFilterModalOpen(true)} style={styles.filterRowBtn}>
-              <MaterialIcons name="filter-list" size={16} color={dateFilter ? colors.accent : colors.textMuted} />
-              <Text style={[styles.filterRowBtnText, dateFilter && { color: colors.accent }]}>
-                {dateFilter ? 'Edit filter' : 'Filter by date'}
-              </Text>
-            </Pressable>
-            {dateFilter && (
-              <Pressable onPress={() => setDateFilter(null)} style={styles.filterRowChip} hitSlop={8}>
-                <Text style={styles.filterRowChipText}>{formatAxisDate(dateFilter.from)} – {formatAxisDate(dateFilter.to)}</Text>
-                <MaterialIcons name="close" size={14} color={colors.textMuted} />
-              </Pressable>
-            )}
           </View>
 
           <View style={styles.list}>
@@ -694,9 +702,9 @@ export function WeightTracker() {
       <WeightDateFilterModal
         visible={filterModalOpen}
         onClose={() => setFilterModalOpen(false)}
-        value={dateFilter}
-        onApply={setDateFilter}
-        onClear={() => setDateFilter(null)}
+        value={range.kind === 'custom' ? { from: range.from, to: range.to } : null}
+        onApply={(r) => setRange({ kind: 'custom', from: r.from, to: r.to })}
+        onClear={() => setRange({ kind: 'all' })}
       />
 
       <WeightPointDetailModal
@@ -729,21 +737,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
   },
   addBtnText: { color: '#fff', fontSize: font.sm, fontWeight: '600' },
-  filterRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
-  filterRowBtn: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, padding: spacing.xs },
-  filterRowBtnText: { color: colors.textMuted, fontSize: font.sm, fontWeight: '600' },
-  filterRowChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.sm,
-    backgroundColor: colors.surface2,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  filterRowChipText: { color: colors.textMuted, fontSize: font.sm },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
   emptyText: { color: colors.textDim, fontSize: font.md, textAlign: 'center', lineHeight: 22 },
   scrollContent: { padding: spacing.lg, gap: spacing.lg },
@@ -797,6 +790,22 @@ const styles = StyleSheet.create({
   chartHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   chartHeaderIcon: { fontSize: 16 },
   chartHeaderTitle: { color: colors.textMuted, fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  rangeRow: { flexDirection: 'row', gap: spacing.xs },
+  rangeChip: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.sm,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface2,
+  },
+  rangeChipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  rangeChipText: { fontSize: font.sm, fontWeight: '600', color: colors.textMuted },
+  rangeChipTextActive: { color: '#fff' },
+  rangeChipIcon: { flex: 0.7 },
+  chartSubtitle: { color: colors.textDim, fontSize: font.sm },
   legendRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: spacing.md },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   legendText: { color: colors.textMuted, fontSize: font.sm },

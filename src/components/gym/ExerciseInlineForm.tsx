@@ -25,7 +25,8 @@ interface Props {
   exercise: Exercise;
   badge?: string;
   execution: ExerciseExecution | null;
-  lastExecution: ExerciseExecution | null;
+  /** Past executions of this exercise, most recent first (current one excluded). */
+  history: ExerciseExecution[];
   routineExecutionId: string;
   dueDate: string;
   // data=null means "delete the current execution"; returns the saved/existing exec ID
@@ -154,7 +155,7 @@ function HmsEditor({ minutes, seconds, onIncrementMinutes, onDecrementMinutes, o
   );
 }
 
-export function ExerciseInlineForm({ exercise, badge, execution, lastExecution, routineExecutionId, dueDate, onSave, onUpdateExercise, onReplace, canDelete = true, onTimerChange, expanded, onToggleExpanded }: Props) {
+export function ExerciseInlineForm({ exercise, badge, execution, history, routineExecutionId, dueDate, onSave, onUpdateExercise, onReplace, canDelete = true, onTimerChange, expanded, onToggleExpanded }: Props) {
   const isStrength = exerciseType(exercise) === 'strength';
   // `canDelete` doubles as "this exercise is optional" (only optional exercises can be
   // deleted) — skipping optional exercises works the same but is shown in grey, not red.
@@ -247,7 +248,7 @@ export function ExerciseInlineForm({ exercise, badge, execution, lastExecution, 
   useEffect(() => {
     if (isEditingRef.current || isLocallyModifiedRef.current) return;
     const count = exercise.sets ?? 3;
-    const fmt = (w: number | undefined) => w != null ? w.toFixed(1) : '';
+    const fmt = (w: number | undefined) => w != null ? w.toFixed(2) : '';
     if (execution?.setData && execution?.setData.length > 0) {
       setRows(Array.from({ length: count }, (_, i) => {
         const s = execution?.setData![i];
@@ -285,27 +286,46 @@ export function ExerciseInlineForm({ exercise, badge, execution, lastExecution, 
     if (!expanded) isLocallyModifiedRef.current = false;
   }, [expanded]);
 
+  // Flattened, most-recent-first sequence of every real (non-skipped) value ever logged
+  // for this exercise, in the order they were actually logged — a set within an execution
+  // keeps its own internal order, but a short/incomplete recent execution no longer starves
+  // later slots: they just pull from the next execution back instead of going blank.
+  const recentWeights: number[] = [];
+  const recentReps: number[] = [];
+  for (const src of history) {
+    if (src.setData && src.setData.length > 0) {
+      for (const s of src.setData) {
+        if (s.skipped) continue;
+        if (s.weight != null && s.weight > 0) recentWeights.push(s.weight);
+        if (s.reps != null && s.reps > 0) recentReps.push(s.reps);
+      }
+    } else {
+      if (src.weight != null && src.weight > 0) recentWeights.push(src.weight);
+      if (src.reps != null && src.reps > 0) recentReps.push(src.reps);
+    }
+  }
+
   const weightPlaceholders: string[] = Array.from({ length: setCount }, (_, i) => {
     for (let j = i - 1; j >= 0; j--) {
       if (isValidWeight(rows[j].weight)) return rows[j].weight;
     }
-    const src = lastExecution;
-    if (!src) return '—';
-    if (src.setData && src.setData.length > 0) {
-      // The last non-skipped, non-zero set actually logged last time — not just
-      // whichever set shares this same index, which could be blank or skipped.
-      const lastValid = [...src.setData].reverse()
-        .find((s) => !s.skipped && s.weight != null && s.weight > 0);
-      return lastValid?.weight != null ? lastValid.weight.toFixed(1) : '—';
-    }
-    return src.weight != null && src.weight > 0 ? src.weight.toFixed(1) : '—';
+    const v = recentWeights[i] ?? recentWeights[recentWeights.length - 1];
+    return v != null ? v.toFixed(2) : '—';
   });
 
-  const repsSuggestion = exercise.repsMin != null
+  const repsRangeFallback = exercise.repsMin != null
     ? exercise.repsMax != null && exercise.repsMax !== exercise.repsMin
       ? `${exercise.repsMin} - ${exercise.repsMax}`
       : String(exercise.repsMin)
     : '—';
+
+  const repsPlaceholders: string[] = Array.from({ length: setCount }, (_, i) => {
+    for (let j = i - 1; j >= 0; j--) {
+      if (isValidReps(rows[j].reps)) return rows[j].reps;
+    }
+    const v = recentReps[i] ?? recentReps[recentReps.length - 1];
+    return v != null ? String(v) : repsRangeFallback;
+  });
 
   function updateRow(i: number, field: keyof SetRow, raw: string) {
     isLocallyModifiedRef.current = true;
@@ -689,7 +709,7 @@ export function ExerciseInlineForm({ exercise, badge, execution, lastExecution, 
       const next = prev.map((r, idx) => {
         if (idx !== i) return r;
         const n = parseFloat(r.weight);
-        return { ...r, weight: isNaN(n) ? r.weight : n.toFixed(1) };
+        return { ...r, weight: isNaN(n) ? r.weight : n.toFixed(2) };
       });
       triggerSave(next);
       return next;
@@ -980,7 +1000,11 @@ export function ExerciseInlineForm({ exercise, badge, execution, lastExecution, 
         }
 
         function paramPlaceholder(param: Exercise['params'][number]): string {
-          return lastExecution?.paramValues?.find((pv) => pv.paramId === param.id)?.value ?? '—';
+          for (const src of history) {
+            const v = src.paramValues?.find((pv) => pv.paramId === param.id)?.value;
+            if (v) return v;
+          }
+          return '—';
         }
 
         function paramValueField(param: Exercise['params'][number], i: number) {
@@ -1099,7 +1123,7 @@ export function ExerciseInlineForm({ exercise, badge, execution, lastExecution, 
                     placeholder=""
                     editable={editable}
                   />
-                  {editable && !row.skipped && row.weight === '' && focused !== `w${i}` && (
+                  {!row.skipped && row.weight === '' && focused !== `w${i}` && (
                     <View pointerEvents="none" style={styles.cellPlaceholder}>
                       <Text style={styles.cellPlaceholderText}>{weightPlaceholders[i]}</Text>
                     </View>
@@ -1120,9 +1144,9 @@ export function ExerciseInlineForm({ exercise, badge, execution, lastExecution, 
                     placeholder=""
                     editable={editable}
                   />
-                  {editable && !row.skipped && row.reps === '' && focused !== `r${i}` && (
+                  {!row.skipped && row.reps === '' && focused !== `r${i}` && (
                     <View pointerEvents="none" style={styles.cellPlaceholder}>
-                      <Text style={styles.cellPlaceholderText}>{repsSuggestion}</Text>
+                      <Text style={styles.cellPlaceholderText}>{repsPlaceholders[i]}</Text>
                     </View>
                   )}
                 </View>
