@@ -3,16 +3,19 @@ import {
   doc,
   onSnapshot,
   setDoc,
-  deleteDoc,
   updateDoc,
   deleteField,
   writeBatch,
+  getDocs,
+  query,
+  where,
 } from 'firebase/firestore';
 import { useEffect, useState, useCallback } from 'react';
 import { db } from '../firebase';
 import type { Goal, GoalInput } from '../types/goals';
 
 const GOALS_COL = 'goals';
+const HABITS_COL = 'cleaningTasks'; // see habitStore: legacy collection name
 
 function uid() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -71,27 +74,25 @@ export function useGoals(userId: string | null | undefined) {
     await updateDoc(goalDoc(userId!, id), toUpdate(patch));
   }, [userId, goals, nextOrder]);
 
-  /** Swaps a goal with its neighbour inside the same pillar (-1 = up, +1 = down). */
-  const move = useCallback(async (id: string, direction: -1 | 1) => {
-    const goal = goals.find((g) => g.id === id);
-    if (!goal) return;
-    const siblings = goals.filter((g) => g.pillarId === goal.pillarId);
-    const idx = siblings.findIndex((g) => g.id === id);
-    const other = siblings[idx + direction];
-    if (!other) return;
-    const reordered = siblings.slice();
-    [reordered[idx], reordered[idx + direction]] = [other, reordered[idx]];
+  /** Persists a new order within one pillar: `ids` are that pillar's goal ids in their new order. */
+  const reorder = useCallback(async (ids: string[]) => {
     const batch = writeBatch(db);
-    reordered.forEach((g, i) => {
-      if (g.order !== i) batch.update(goalDoc(userId!, g.id), { order: i });
+    ids.forEach((id, i) => {
+      const g = goals.find((x) => x.id === id);
+      if (g && g.order !== i) batch.update(goalDoc(userId!, id), { order: i });
     });
     await batch.commit();
   }, [userId, goals]);
 
-  // TODO(habits/projects): once those link to goals, block or cascade deletion here too.
+  // Linked habits are unlinked (not deleted) so their logs survive.
+  // TODO(projects): block or cascade once projects link to goals.
   const remove = useCallback(async (id: string) => {
-    await deleteDoc(goalDoc(userId!, id));
+    const linked = await getDocs(query(collection(db, 'users', userId!, HABITS_COL), where('goalId', '==', id)));
+    const batch = writeBatch(db);
+    linked.docs.forEach((d) => batch.update(d.ref, { goalId: deleteField() }));
+    batch.delete(goalDoc(userId!, id));
+    await batch.commit();
   }, [userId]);
 
-  return { goals, loaded, add, update, move, remove };
+  return { goals, loaded, add, update, reorder, remove };
 }

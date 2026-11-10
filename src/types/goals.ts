@@ -60,3 +60,15 @@ function formatDate(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
+
+// ── Maintenance success rate ────────────────────────────────────────────────
+
+export type MaintenanceHealth = 'onTrack' | 'slipping' | 'noData';
+
+export interface MaintenanceProgress {
+  health: MaintenanceHealth;
+  rate: number;        // 0..1, successful ÷ scheduled across all linked habits
+  completed: number;   // successful occurrences (capped per habit at what was scheduled)
+  expected: number;    // scheduled occurrences in the window
+  windowStart: string; // ISO yyyy-mm-dd
+}

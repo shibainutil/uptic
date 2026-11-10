@@ -15,6 +15,7 @@ export interface Habit {
   name: string;
   description?: string;
   kind: HabitKind;
+  goalId?: string;               // the goal this habit serves (Core Concept: every habit should have one)
   startDate: string;             // ISO yyyy-mm-dd; schedule anchor
   schedule: HabitSchedule;
 

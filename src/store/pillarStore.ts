@@ -5,6 +5,7 @@ import {
   setDoc,
   deleteDoc,
   updateDoc,
+  deleteField,
   writeBatch,
 } from 'firebase/firestore';
 import { useEffect, useState, useCallback } from 'react';
@@ -73,25 +74,25 @@ export function usePillars(userId: string | null | undefined) {
     await updateDoc(pillarDoc(userId!, id), stripUndefined(data));
   }, [userId]);
 
-  /** Swaps a pillar with its neighbour (-1 = up, +1 = down). */
-  const move = useCallback(async (id: string, direction: -1 | 1) => {
-    const idx = pillars.findIndex((p) => p.id === id);
-    const other = pillars[idx + direction];
-    if (idx < 0 || !other) return;
-    const reordered = pillars.slice();
-    [reordered[idx], reordered[idx + direction]] = [other, reordered[idx]];
-    // Rewrite every position so gaps or duplicate orders self-heal.
+  /** Persists a new display order: `ids` is the full list of pillar ids in their new order. */
+  const reorder = useCallback(async (ids: string[]) => {
     const batch = writeBatch(db);
-    reordered.forEach((p, i) => {
-      if (p.order !== i) batch.update(pillarDoc(userId!, p.id), { order: i });
+    ids.forEach((id, i) => {
+      const p = pillars.find((x) => x.id === id);
+      if (p && p.order !== i) batch.update(pillarDoc(userId!, id), { order: i });
     });
     await batch.commit();
   }, [userId, pillars]);
+
+  /** Callers must check first: a pillar may only be archived once all its goals are achieved. */
+  const setArchived = useCallback(async (id: string, archived: boolean) => {
+    await updateDoc(pillarDoc(userId!, id), { archivedAt: archived ? new Date().toISOString() : deleteField() });
+  }, [userId]);
 
   // Callers must check for goals first: app/(tabs)/pillars.tsx blocks deleting a pillar that still has goals.
   const remove = useCallback(async (id: string) => {
     await deleteDoc(pillarDoc(userId!, id));
   }, [userId]);
 
-  return { pillars, loaded, add, addMany, update, move, remove };
+  return { pillars, loaded, add, addMany, update, reorder, setArchived, remove };
 }

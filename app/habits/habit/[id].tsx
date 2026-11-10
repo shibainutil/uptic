@@ -6,6 +6,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../../src/context/AuthContext';
 import { useHabits } from '../../../src/store/habitStore';
+import { useGoals } from '../../../src/store/goalStore';
+import { usePillars } from '../../../src/store/pillarStore';
 import { Input } from '../../../src/components/ui/Input';
 import { Button } from '../../../src/components/ui/Button';
 import { Segmented } from '../../../src/components/ui/Segmented';
@@ -94,7 +96,16 @@ function Header({ title, onBack }: { title: string; onBack: () => void }) {
 function HabitForm({ existing }: { existing?: Habit }) {
   const router = useRouter();
   const { user } = useAuth();
-  const { add, update } = useHabits(user?.uid);
+  const { add, update, setHabitGoal } = useHabits(user?.uid);
+  const { goals } = useGoals(user?.uid);
+  const { pillars } = usePillars(user?.uid);
+  const { goalId: goalIdParam } = useLocalSearchParams<{ goalId?: string }>();
+  const [goalId, setGoalId] = useState<string | null>(existing?.goalId ?? goalIdParam ?? null);
+
+  // Open goals in active pillars, in pillar order; the current goal stays listed even if achieved/archived.
+  const goalOptions = pillars.flatMap((p) => goals
+    .filter((g) => g.pillarId === p.id && (g.id === goalId || (!g.achievedAt && !p.archivedAt)))
+    .map((g) => ({ goal: g, pillar: p })));
 
   const isNew = !existing;
 
@@ -150,11 +161,8 @@ function HabitForm({ existing }: { existing?: Habit }) {
 
     setSaving(true);
     try {
-      if (isNew) {
-        await add(data);
-      } else {
-        await update(existing!.id, data);
-      }
+      const habitId = isNew ? await add(data) : (await update(existing!.id, data), existing!.id);
+      if (goalId !== (existing?.goalId ?? null)) await setHabitGoal(habitId, goalId);
       router.back();
     } catch (e: unknown) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Could not save habit.');
@@ -169,6 +177,32 @@ function HabitForm({ existing }: { existing?: Habit }) {
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         <Input label="Name" value={name} onChangeText={setName} placeholder="e.g. Clean the kitchen" />
         <Input label="Description (optional)" value={description} onChangeText={setDescription} placeholder="Notes" />
+
+        <View style={styles.field}>
+          <Text style={styles.label}>Serves goal</Text>
+          {goalOptions.length === 0 ? (
+            <Text style={styles.goalHint}>No open goals yet. Create one in the Goals tab.</Text>
+          ) : (
+            <View style={styles.goalChips}>
+              <Pressable onPress={() => setGoalId(null)} style={[styles.goalChip, goalId === null && styles.goalChipNone]}>
+                <Text style={[styles.goalChipText, goalId === null && { color: colors.text }]}>None</Text>
+              </Pressable>
+              {goalOptions.map(({ goal, pillar }) => {
+                const on = goal.id === goalId;
+                return (
+                  <Pressable
+                    key={goal.id}
+                    onPress={() => setGoalId(goal.id)}
+                    style={[styles.goalChip, on && { borderColor: pillar.color, backgroundColor: `${pillar.color}22` }]}
+                  >
+                    <View style={[styles.goalDot, { backgroundColor: pillar.color }]} />
+                    <Text style={[styles.goalChipText, on && { color: pillar.color }]} numberOfLines={1}>{goal.name}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+        </View>
 
         <View style={styles.field}>
           <Text style={styles.label}>Kind</Text>
@@ -294,6 +328,16 @@ const styles = StyleSheet.create({
   scheduleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   everyText: { color: colors.textMuted, fontSize: font.md },
   intervalInput: { width: 56, textAlign: 'center' },
+  goalHint: { color: colors.textDim, fontSize: font.sm },
+  goalChips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  goalChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '100%',
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface2,
+  },
+  goalChipNone: { borderColor: colors.textMuted },
+  goalDot: { width: 8, height: 8, borderRadius: 4 },
+  goalChipText: { color: colors.textMuted, fontSize: font.sm, fontWeight: '600', flexShrink: 1 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   dayChip: {
     width: 52,

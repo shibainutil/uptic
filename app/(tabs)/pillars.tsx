@@ -1,46 +1,47 @@
-import { View, Text, Pressable, FlatList, StyleSheet, Alert } from 'react-native';
+import { useEffect, useState } from 'react';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
+import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import { useAuth } from '../../src/context/AuthContext';
 import { usePillars } from '../../src/store/pillarStore';
 import { useGoals } from '../../src/store/goalStore';
-import { SUGGESTED_PILLARS } from '../../src/types/pillars';
+import { SUGGESTED_PILLARS, type Pillar } from '../../src/types/pillars';
+import type { Goal } from '../../src/types/goals';
 import { Button } from '../../src/components/ui/Button';
+import { DragHandle } from '../../src/components/ui/DragHandle';
 import { colors, spacing, font, radius } from '../../src/theme';
+
+function goalSummary(goals: Goal[]): string {
+  if (goals.length === 0) return 'No goals';
+  const open = goals.filter((g) => !g.achievedAt).length;
+  const total = `${goals.length} goal${goals.length !== 1 ? 's' : ''}`;
+  if (open === goals.length) return total;
+  return open === 0 ? `${total} · all achieved` : `${total} · ${open} open`;
+}
 
 export default function PillarsScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const { pillars, loaded, addMany, move, remove } = usePillars(user?.uid);
+  const { pillars, loaded, addMany, reorder } = usePillars(user?.uid);
   const { goals } = useGoals(user?.uid);
-  const goalCount = (pillarId: string) => goals.filter((g) => g.pillarId === pillarId).length;
+  const [showArchived, setShowArchived] = useState(false);
 
-  function confirmDelete(id: string, name: string) {
-    const count = goalCount(id);
-    if (count > 0) {
-      Alert.alert(
-        'Pillar has goals',
-        `"${name}" still has ${count} goal${count !== 1 ? 's' : ''}. Move or delete ${count !== 1 ? 'them' : 'it'} first.`,
-      );
-      return;
-    }
-    Alert.alert('Delete Pillar', `Remove "${name}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => remove(id) },
-    ]);
-  }
+  const active = pillars.filter((p) => !p.archivedAt);
+  const archived = pillars.filter((p) => p.archivedAt);
+  const goalsOf = (pillarId: string) => goals.filter((g) => g.pillarId === pillarId);
 
-  return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
-      <View style={styles.header}>
-        <Text style={styles.count}>{pillars.length} pillar{pillars.length !== 1 ? 's' : ''}</Text>
-        <Pressable onPress={() => router.push('/pillars/new')} style={styles.addBtn}>
-          <Text style={styles.addBtnText}>+ Add</Text>
-        </Pressable>
-      </View>
+  // Show the dropped order immediately; Firestore's snapshot catches up a moment later.
+  const [dragOrder, setDragOrder] = useState<Pillar[] | null>(null);
+  useEffect(() => setDragOrder(null), [pillars]);
+  const list = dragOrder ?? active;
 
-      {loaded && pillars.length === 0 ? (
+  const open = (id: string) => router.push(`/pillars/${id}`);
+
+  if (loaded && pillars.length === 0) {
+    return (
+      <SafeAreaView style={styles.container} edges={['bottom']}>
         <View style={styles.empty}>
           <MaterialIcons name="account-balance" size={48} color={colors.textDim} />
           <Text style={styles.emptyTitle}>No pillars yet</Text>
@@ -60,47 +61,90 @@ export default function PillarsScreen() {
             <Text style={styles.link}>or create your own</Text>
           </Pressable>
         </View>
-      ) : (
-        <FlatList
-          data={pillars}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.list}
-          ItemSeparatorComponent={() => <View style={styles.sep} />}
-          renderItem={({ item, index }) => (
-            <Pressable style={styles.card} onPress={() => router.push(`/pillars/${item.id}`)}>
-              <View style={[styles.iconWrap, { backgroundColor: `${item.color}22` }]}>
-                <MaterialIcons name={item.icon} size={22} color={item.color} />
-              </View>
-              <View style={styles.cardMain}>
-                <Text style={styles.cardName}>{item.name}</Text>
-                {item.description ? <Text style={styles.cardDesc} numberOfLines={2}>{item.description}</Text> : null}
-                <Text style={styles.cardGoals}>
-                  {goalCount(item.id) || 'No'} goal{goalCount(item.id) !== 1 ? 's' : ''}
-                </Text>
-              </View>
-              <View style={styles.cardActions}>
-                <View style={styles.reorder}>
-                  <Pressable onPress={() => move(item.id, -1)} disabled={index === 0} hitSlop={6}>
-                    <MaterialIcons name="keyboard-arrow-up" size={20} color={index === 0 ? colors.textDim : colors.textMuted} />
-                  </Pressable>
-                  <Pressable onPress={() => move(item.id, 1)} disabled={index === pillars.length - 1} hitSlop={6}>
-                    <MaterialIcons name="keyboard-arrow-down" size={20} color={index === pillars.length - 1 ? colors.textDim : colors.textMuted} />
-                  </Pressable>
-                </View>
-                <Pressable onPress={() => confirmDelete(item.id, item.name)} hitSlop={8}>
-                  <Text style={styles.actionDelete}>Delete</Text>
-                </Pressable>
-              </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container} edges={['bottom']}>
+      <View style={styles.header}>
+        <Text style={styles.count}>{active.length} pillar{active.length !== 1 ? 's' : ''}</Text>
+        <Pressable onPress={() => router.push('/pillars/new')} style={styles.addBtn}>
+          <Text style={styles.addBtnText}>+ Add</Text>
+        </Pressable>
+      </View>
+
+      <DraggableFlatList
+        data={list}
+        keyExtractor={(item) => item.id}
+        containerStyle={styles.flex}
+        contentContainerStyle={styles.list}
+        activationDistance={10}
+        onDragEnd={({ data }) => {
+          setDragOrder(data);
+          reorder([...data.map((p) => p.id), ...archived.map((p) => p.id)]);
+        }}
+        renderItem={({ item, drag, isActive }) => (
+          <ScaleDecorator activeScale={1.03}>
+            <PillarCard
+              pillar={item}
+              summary={goalSummary(goalsOf(item.id))}
+              onPress={() => open(item.id)}
+              onDrag={drag}
+              dragging={isActive}
+            />
+          </ScaleDecorator>
+        )}
+        ListFooterComponent={archived.length ? (
+          <View style={styles.archived}>
+            <Pressable style={styles.archivedToggle} onPress={() => setShowArchived((v) => !v)} hitSlop={6}>
+              <MaterialIcons name={showArchived ? 'expand-less' : 'expand-more'} size={20} color={colors.textMuted} />
+              <Text style={styles.archivedTitle}>Archived ({archived.length})</Text>
             </Pressable>
-          )}
-        />
-      )}
+            {showArchived && archived.map((p) => (
+              <PillarCard key={p.id} pillar={p} summary={goalSummary(goalsOf(p.id))} onPress={() => open(p.id)} dimmed />
+            ))}
+          </View>
+        ) : null}
+      />
     </SafeAreaView>
+  );
+}
+
+function PillarCard({
+  pillar, summary, onPress, onDrag, dragging, dimmed,
+}: {
+  pillar: Pillar;
+  summary: string;
+  onPress: () => void;
+  onDrag?: () => void;
+  dragging?: boolean;
+  dimmed?: boolean;
+}) {
+  return (
+    <Pressable
+      style={[styles.card, dragging && styles.cardDragging, dimmed && styles.cardDimmed]}
+      onPress={onPress}
+      onLongPress={onDrag}
+      delayLongPress={250}
+      disabled={dragging}
+    >
+      <View style={[styles.iconWrap, { backgroundColor: `${pillar.color}22` }]}>
+        <MaterialIcons name={pillar.icon} size={22} color={pillar.color} />
+      </View>
+      <View style={styles.cardMain}>
+        <Text style={styles.cardName}>{pillar.name}</Text>
+        {pillar.description ? <Text style={styles.cardDesc} numberOfLines={2}>{pillar.description}</Text> : null}
+        <Text style={styles.cardGoals}>{summary}</Text>
+      </View>
+      {onDrag && <DragHandle onPress={onPress} onDrag={onDrag} active={dragging} />}
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  flex: { flex: 1 },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -126,7 +170,6 @@ const styles = StyleSheet.create({
   suggestionText: { fontSize: font.sm, fontWeight: '600' },
   link: { color: colors.accent, fontSize: font.sm },
   list: { padding: spacing.lg },
-  sep: { height: 8 },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -137,13 +180,16 @@ const styles = StyleSheet.create({
     borderColor: colors.surface2,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
+    marginBottom: 8,
   },
+  cardDragging: { borderColor: colors.accent, elevation: 8 },
+  cardDimmed: { opacity: 0.6 },
   iconWrap: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   cardMain: { flex: 1, gap: 2 },
   cardName: { color: colors.text, fontSize: font.md, fontWeight: '600' },
   cardDesc: { color: colors.textDim, fontSize: font.sm },
   cardGoals: { color: colors.textMuted, fontSize: font.sm },
-  cardActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  reorder: { alignItems: 'center' },
-  actionDelete: { color: colors.danger, fontSize: font.sm },
+  archived: { marginTop: spacing.lg, gap: 8 },
+  archivedToggle: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },
+  archivedTitle: { color: colors.textMuted, fontSize: font.sm, fontWeight: '600' },
 });

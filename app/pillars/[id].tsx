@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../src/context/AuthContext';
 import { usePillars } from '../../src/store/pillarStore';
+import { useGoals } from '../../src/store/goalStore';
 import { Input } from '../../src/components/ui/Input';
 import { Button } from '../../src/components/ui/Button';
 import { PILLAR_COLORS, PILLAR_ICONS, type Pillar, type PillarIcon } from '../../src/types/pillars';
@@ -14,13 +15,14 @@ export default function PillarScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { user } = useAuth();
-  const { pillars, loaded, add, update } = usePillars(user?.uid);
+  const { pillars, loaded, add, update, setArchived, remove } = usePillars(user?.uid);
+  const { goals, loaded: goalsLoaded } = useGoals(user?.uid);
 
   const isNew = id === 'new';
   const existing = isNew ? undefined : pillars.find((p) => p.id === id);
 
   // Wait for Firestore before mounting the form so initial state isn't empty defaults.
-  if (!isNew && (!loaded || !existing)) {
+  if (!isNew && (!loaded || !goalsLoaded || !existing)) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <Header title="Pillar" onBack={() => router.back()} />
@@ -31,7 +33,19 @@ export default function PillarScreen() {
     );
   }
 
-  return <PillarForm key={existing?.id ?? 'new'} existing={existing} add={add} update={update} />;
+  const own = existing ? goals.filter((g) => g.pillarId === existing.id) : [];
+  return (
+    <PillarForm
+      key={existing?.id ?? 'new'}
+      existing={existing}
+      goalCount={own.length}
+      openGoalCount={own.filter((g) => !g.achievedAt).length}
+      add={add}
+      update={update}
+      setArchived={setArchived}
+      remove={remove}
+    />
+  );
 }
 
 function Header({ title, onBack }: { title: string; onBack: () => void }) {
@@ -44,9 +58,11 @@ function Header({ title, onBack }: { title: string; onBack: () => void }) {
   );
 }
 
-type PillarActions = Pick<ReturnType<typeof usePillars>, 'add' | 'update'>;
+type PillarActions = Pick<ReturnType<typeof usePillars>, 'add' | 'update' | 'setArchived' | 'remove'>;
 
-function PillarForm({ existing, add, update }: { existing?: Pillar } & PillarActions) {
+function PillarForm({
+  existing, goalCount, openGoalCount, add, update, setArchived, remove,
+}: { existing?: Pillar; goalCount: number; openGoalCount: number } & PillarActions) {
   const router = useRouter();
   const isNew = !existing;
 
@@ -70,9 +86,53 @@ function PillarForm({ existing, add, update }: { existing?: Pillar } & PillarAct
     }
   }
 
+  async function run(action: () => Promise<unknown>) {
+    setSaving(true);
+    try {
+      await action();
+      router.back();
+    } catch (e: unknown) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Something went wrong.');
+      setSaving(false);
+    }
+  }
+
+  function toggleArchived() {
+    if (!existing) return;
+    if (existing.archivedAt) { run(() => setArchived(existing.id, false)); return; }
+    if (openGoalCount > 0) {
+      Alert.alert(
+        "Can't archive yet",
+        `"${existing.name}" still has ${openGoalCount} open goal${openGoalCount !== 1 ? 's' : ''}. `
+          + 'Achieve, move or delete them first.',
+      );
+      return;
+    }
+    Alert.alert('Archive Pillar', `Hide "${existing.name}" from your pillars and goals? You can unarchive it any time.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Archive', onPress: () => run(() => setArchived(existing.id, true)) },
+    ]);
+  }
+
+  function confirmDelete() {
+    if (!existing) return;
+    if (goalCount > 0) {
+      Alert.alert(
+        "Can't delete",
+        `"${existing.name}" has ${goalCount} goal${goalCount !== 1 ? 's' : ''}. `
+          + (openGoalCount === 0 ? 'Archive it instead to keep its history.' : 'Move or delete them first.'),
+      );
+      return;
+    }
+    Alert.alert('Delete Pillar', `Remove "${existing.name}"? This can't be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => run(() => remove(existing.id)) },
+    ]);
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <Header title={isNew ? 'New Pillar' : 'Edit Pillar'} onBack={() => router.back()} />
+      <Header title={isNew ? 'New Pillar' : existing.archivedAt ? 'Archived Pillar' : 'Edit Pillar'} onBack={() => router.back()} />
 
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         <View style={styles.preview}>
@@ -134,6 +194,18 @@ function PillarForm({ existing, add, update }: { existing?: Pillar } & PillarAct
             style={styles.flex1}
           />
         </View>
+
+        {existing && (
+          <View style={styles.secondary}>
+            <Pressable onPress={toggleArchived} disabled={saving} style={styles.archiveBtn}>
+              <MaterialIcons name={existing.archivedAt ? 'unarchive' : 'archive'} size={18} color={colors.textMuted} />
+              <Text style={styles.archiveText}>{existing.archivedAt ? 'Unarchive pillar' : 'Archive pillar'}</Text>
+            </Pressable>
+            <Pressable onPress={confirmDelete} disabled={saving} hitSlop={8}>
+              <Text style={styles.delete}>Delete pillar</Text>
+            </Pressable>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -174,4 +246,12 @@ const styles = StyleSheet.create({
   },
   formRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
   flex1: { flex: 1 },
+  secondary: { alignItems: 'center', gap: spacing.lg, marginTop: spacing.md },
+  archiveBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
+    alignSelf: 'stretch', paddingVertical: spacing.md, borderRadius: radius.sm,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  archiveText: { color: colors.textMuted, fontSize: font.md, fontWeight: '600' },
+  delete: { color: colors.danger, fontSize: font.sm },
 });

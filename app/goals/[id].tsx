@@ -6,17 +6,20 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../src/context/AuthContext';
 import { usePillars } from '../../src/store/pillarStore';
 import { useGoals } from '../../src/store/goalStore';
+import { useHabits, useHabitLogEntries } from '../../src/store/habitStore';
 import { Input } from '../../src/components/ui/Input';
 import { Button } from '../../src/components/ui/Button';
 import { Segmented } from '../../src/components/ui/Segmented';
 import { DatePicker } from '../../src/components/ui/DatePicker';
 import { Toggle } from '../../src/components/ui/Toggle';
 import { addDays, todayISO } from '../../src/lib/schedule';
+import { computeMaintenanceProgress, describeSchedule } from '../../src/lib/habitSchedule';
 import {
   DEFAULT_TARGET_RATE, DEFAULT_WINDOW_WEEKS,
   type Goal, type GoalInput, type GoalMode,
 } from '../../src/types/goals';
 import type { Pillar } from '../../src/types/pillars';
+import type { Habit, HabitLogEntry } from '../../src/types/habits';
 import { colors, spacing, font, radius } from '../../src/theme';
 
 const MODE_OPTIONS: { value: GoalMode; label: string }[] = [
@@ -35,7 +38,9 @@ export default function GoalScreen() {
   const { user } = useAuth();
   const { pillars, loaded: pillarsLoaded } = usePillars(user?.uid);
   const { goals, loaded: goalsLoaded, add, update, remove } = useGoals(user?.uid);
-  const loaded = pillarsLoaded && goalsLoaded;
+  const { habits, loaded: habitsLoaded, setGoalHabits } = useHabits(user?.uid);
+  const { entries } = useHabitLogEntries(user?.uid);
+  const loaded = pillarsLoaded && goalsLoaded && habitsLoaded;
 
   const isNew = id === 'new';
   const existing = isNew ? undefined : goals.find((g) => g.id === id);
@@ -56,8 +61,13 @@ export default function GoalScreen() {
     <GoalForm
       key={existing?.id ?? 'new'}
       existing={existing}
-      pillars={pillars}
-      initialPillarId={existing?.pillarId ?? pillarId ?? pillars[0]?.id}
+      // Archived pillars can't take new goals, but a goal already in one keeps showing it.
+      pillars={pillars.filter((p) => !p.archivedAt || p.id === existing?.pillarId)}
+      initialPillarId={existing?.pillarId ?? pillarId ?? pillars.find((p) => !p.archivedAt)?.id}
+      goals={goals}
+      habits={habits}
+      entries={entries}
+      setGoalHabits={setGoalHabits}
       add={add}
       update={update}
       remove={remove}
@@ -75,11 +85,19 @@ function Header({ title, onBack }: { title: string; onBack: () => void }) {
   );
 }
 
-type GoalActions = Pick<ReturnType<typeof useGoals>, 'add' | 'update' | 'remove'>;
+type GoalActions = Pick<ReturnType<typeof useGoals>, 'add' | 'update' | 'remove'>
+  & Pick<ReturnType<typeof useHabits>, 'setGoalHabits'>;
 
 function GoalForm({
-  existing, pillars, initialPillarId, add, update, remove,
-}: { existing?: Goal; pillars: Pillar[]; initialPillarId?: string } & GoalActions) {
+  existing, pillars, initialPillarId, goals, habits, entries, add, update, remove, setGoalHabits,
+}: {
+  existing?: Goal;
+  pillars: Pillar[];
+  initialPillarId?: string;
+  goals: Goal[];
+  habits: Habit[];
+  entries: HabitLogEntry[];
+} & GoalActions) {
   const router = useRouter();
   const isNew = !existing;
 
@@ -92,6 +110,29 @@ function GoalForm({
   const [targetRate, setTargetRate] = useState(String(existing?.targetRate ?? DEFAULT_TARGET_RATE));
   const [windowWeeks, setWindowWeeks] = useState(String(existing?.windowWeeks ?? DEFAULT_WINDOW_WEEKS));
   const [saving, setSaving] = useState(false);
+  const [habitIds, setHabitIds] = useState<string[]>(
+    existing ? habits.filter((h) => h.goalId === existing.id).map((h) => h.id) : [],
+  );
+
+  function toggleHabit(id: string) {
+    setHabitIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  }
+
+  // Live preview of the success rate with the current selection and target, before saving.
+  const previewId = existing?.id ?? '__new__';
+  const preview = mode === 'maintenance'
+    ? computeMaintenanceProgress(
+      {
+        id: previewId, pillarId: pillarId ?? '', name, mode, order: 0, createdAt: '',
+        targetRate: parseInt(targetRate, 10) || DEFAULT_TARGET_RATE,
+        windowWeeks: parseInt(windowWeeks, 10) || DEFAULT_WINDOW_WEEKS,
+      },
+      habits.map((h) => ({ ...h, goalId: habitIds.includes(h.id) ? previewId : undefined })),
+      entries,
+      todayISO(),
+    )
+    : null;
+  const goalName = (id?: string) => goals.find((g) => g.id === id)?.name;
 
   const pillar = pillars.find((p) => p.id === pillarId);
   const accent = pillar?.color ?? colors.accent;
@@ -132,7 +173,10 @@ function GoalForm({
     if (saving) return;
     const result = validate();
     if (typeof result === 'string') { Alert.alert('Check the goal', result); return; }
-    run(() => (isNew ? add(result) : update(existing!.id, result)));
+    run(async () => {
+      const goalId = isNew ? await add(result) : (await update(existing!.id, result), existing!.id);
+      await setGoalHabits(goalId, habitIds);
+    });
   }
 
   function toggleAchieved() {
@@ -211,11 +255,65 @@ function GoalForm({
               </View>
             </View>
             <Text style={styles.hint}>
-              On track when ≥ {targetRate || '?'}% of the linked habits' scheduled occurrences succeed over the
-              last {windowWeeks || '?'} weeks. Habits will link to goals in a later update.
+              On track when you log at least {targetRate || '?'}% of the sessions your linked habits schedule,
+              counted over the last {windowWeeks || '?'} weeks.
             </Text>
+            {preview && (
+              <View style={styles.preview}>
+                {preview.health === 'noData' ? (
+                  <Text style={styles.previewText}>
+                    {habitIds.length ? 'No sessions scheduled in this window yet.' : 'Link a habit below to measure this goal.'}
+                  </Text>
+                ) : (
+                  <>
+                    <Text style={[styles.previewRate, { color: preview.health === 'onTrack' ? colors.success : '#F97316' }]}>
+                      {Math.round(preview.rate * 100)}%
+                    </Text>
+                    <Text style={styles.previewText}>
+                      {preview.completed} of {preview.expected} sessions · {preview.health === 'onTrack' ? 'on track' : 'slipping'}
+                    </Text>
+                  </>
+                )}
+              </View>
+            )}
           </View>
         )}
+
+        <View style={styles.field}>
+          <Text style={styles.label}>Habits serving this goal</Text>
+          {habits.length === 0 ? (
+            <Text style={styles.hint}>No habits yet. Create one in the Habits tab and pick this goal there.</Text>
+          ) : (
+            <View style={styles.habitList}>
+              {habits.map((h) => {
+                const on = habitIds.includes(h.id);
+                const elsewhere = !on && h.goalId && h.goalId !== existing?.id ? goalName(h.goalId) : undefined;
+                return (
+                  <Pressable
+                    key={h.id}
+                    onPress={() => toggleHabit(h.id)}
+                    style={[styles.habitRow, on && { borderColor: accent, backgroundColor: `${accent}14` }]}
+                  >
+                    <MaterialIcons
+                      name={on ? 'check-box' : 'check-box-outline-blank'}
+                      size={22}
+                      color={on ? accent : colors.textDim}
+                    />
+                    <View style={styles.flex1}>
+                      <Text style={styles.habitName}>{h.name}</Text>
+                      <Text style={styles.habitMeta} numberOfLines={1}>
+                        {describeSchedule(h.schedule)}{elsewhere ? ` · serves "${elsewhere}"` : ''}
+                      </Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+          {habits.length > 0 && (
+            <Text style={styles.hint}>A habit serves one goal. Ticking one that serves another goal moves it here.</Text>
+          )}
+        </View>
 
         <View style={styles.formRow}>
           <Button label="Cancel" onPress={() => router.back()} style={styles.flex1} disabled={saving} />
@@ -292,4 +390,19 @@ const styles = StyleSheet.create({
   },
   achieveText: { fontSize: font.md, fontWeight: '600' },
   delete: { color: colors.danger, fontSize: font.sm },
+  preview: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    backgroundColor: colors.surface, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.surface2,
+    padding: spacing.md,
+  },
+  previewRate: { fontSize: font.xl, fontWeight: '700' },
+  previewText: { flex: 1, color: colors.textMuted, fontSize: font.sm },
+  habitList: { gap: spacing.sm },
+  habitRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    padding: spacing.md, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border,
+    backgroundColor: colors.surface2,
+  },
+  habitName: { color: colors.text, fontSize: font.md, fontWeight: '600' },
+  habitMeta: { color: colors.textDim, fontSize: font.sm },
 });

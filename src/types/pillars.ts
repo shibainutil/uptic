@@ -15,6 +15,7 @@ export interface Pillar {
   icon: PillarIcon;
   color: string;      // hex, e.g. '#22C55E'
   order: number;      // display position, ascending
+  archivedAt?: string; // ISO datetime; archived pillars are hidden from Goals and pickers
   createdAt: string;
 }
 
