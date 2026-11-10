@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Alert, type TextInput } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Alert, Platform, type TextInput } from 'react-native';
 import type { ScrollView } from 'react-native-gesture-handler';
 import { NestableScrollContainer } from 'react-native-draggable-flatlist';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../src/context/AuthContext';
 import { usePillars } from '../../src/store/pillarStore';
@@ -52,6 +52,7 @@ export default function ProjectOverviewScreen() {
   // absolute and re-running is harmless. Re-checked when the keyboard opens, when
   // a field gets focus, and when content grows (an added task pushes the field down).
   const keyboard = useKeyboardFrame();
+  const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
   const contentTopRef = useRef<View>(null);
   const scrollFrameRef = useRef<View>(null);
@@ -64,7 +65,10 @@ export default function ProjectOverviewScreen() {
     const frame = scrollFrameRef.current;
     if (!input || !anchor || !frame || keyboard.height === 0 || !input.isFocused()) return;
     input.measureInWindow((_x, inputY, _w, inputH) => {
-      const limit = keyboard.top - 16;           // field bottom must stay above this
+      // keyboard.top is in screen coordinates, but on Android measureInWindow starts
+      // below the status bar (measured: 53dp off). Convert so both use the same origin.
+      const keyboardTop = keyboard.top - (Platform.OS === 'android' ? insets.top : 0);
+      const limit = keyboardTop - 16;            // field bottom must stay above this
       const overlap = inputY + inputH - limit;
       if (overlap <= 0) return;
       anchor.measureInWindow((_ax, anchorY) => {
@@ -78,7 +82,7 @@ export default function ProjectOverviewScreen() {
         });
       });
     });
-  }, [keyboard.height, keyboard.top]);
+  }, [keyboard.height, keyboard.top, insets.top]);
   useEffect(() => {
     // Wait a frame so the keyboard padding below is laid out before scrolling.
     const id = requestAnimationFrame(() => revealFocused());
