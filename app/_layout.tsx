@@ -1,9 +1,15 @@
 import { useEffect } from 'react';
-import { StyleSheet } from 'react-native';
+import { LogBox, StyleSheet } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider, useAuth } from '../src/context/AuthContext';
+
+// react-native-draggable-flatlist's nested lists (NestableDraggableFlatList inside
+// NestableScrollContainer) call measureLayout against the animated outer ScrollView,
+// which the new architecture warns about on every render. Dragging works fine; this
+// only silences the dev-only red toast.
+LogBox.ignoreLogs(['ref.measureLayout must be called with a ref to a native component']);
 
 function RootNavigator() {
   const { user, loading } = useAuth();

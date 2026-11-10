@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { View, Text, Pressable, StyleSheet, Alert, type TextInput } from 'react-native';
+import type { ScrollView } from 'react-native-gesture-handler';
 import { NestableScrollContainer } from 'react-native-draggable-flatlist';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,6 +18,7 @@ import { ProjectOptionsSheet } from '../../src/components/projects/ProjectOption
 import { MilestoneBox } from '../../src/components/projects/MilestoneBox';
 import { milestoneMet, projectProgress } from '../../src/lib/projectProgress';
 import { diffDays, todayISO } from '../../src/lib/schedule';
+import { useKeyboardFrame } from '../../src/lib/useKeyboardHeight';
 import type { Milestone, Project } from '../../src/types/projects';
 import { colors, spacing, font, radius } from '../../src/theme';
 
@@ -42,6 +44,46 @@ export default function ProjectOverviewScreen() {
   useProjectLatches(projects, habits, entries, loaded && habitsLoaded && entriesLoaded, applyLatches);
   const [menuProject, setMenuProject] = useState<Project | null>(null);
   const [menuMilestone, setMenuMilestone] = useState<Milestone | null>(null);
+
+  // Keep the focused task field above the keyboard. The app is edge-to-edge, so
+  // Android doesn't resize the window: pad the content by the keyboard height and
+  // scroll so the field sits just above the keyboard's top edge. Every value is
+  // measured fresh (field, content top, keyboard edge), so the target offset is
+  // absolute and re-running is harmless. Re-checked when the keyboard opens, when
+  // a field gets focus, and when content grows (an added task pushes the field down).
+  const keyboard = useKeyboardFrame();
+  const scrollRef = useRef<ScrollView>(null);
+  const contentTopRef = useRef<View>(null);
+  const scrollFrameRef = useRef<View>(null);
+  const focusedInput = useRef<TextInput | null>(null);
+  const revealFocused = useCallback(() => {
+    const input = focusedInput.current;
+    const anchor = contentTopRef.current;
+    if (!input || !anchor || keyboard.height === 0 || !input.isFocused()) return;
+    input.measureInWindow((_x, inputY, _w, inputH) => {
+      anchor.measureInWindow((_ax, anchorY) => {
+        const limit = keyboard.top - 16;           // field bottom must stay above this
+        const overlap = inputY + inputH - limit;
+        if (overlap <= 0) return;
+        // anchorY = (scroll view top + padding) - offset, so moving content up by
+        // `overlap` means an offset of (current offset + overlap). The current
+        // offset isn't tracked; derive it from where the content top sits now.
+        scrollFrameRef.current?.measureInWindow((_sx, scrollTop) => {
+          const currentOffset = scrollTop + spacing.lg - anchorY;
+          scrollRef.current?.scrollTo({ y: Math.max(0, currentOffset + overlap), animated: true });
+        });
+      });
+    });
+  }, [keyboard.height, keyboard.top]);
+  useEffect(() => {
+    // Wait a frame so the keyboard padding below is laid out before scrolling.
+    const id = requestAnimationFrame(revealFocused);
+    return () => cancelAnimationFrame(id);
+  }, [revealFocused]);
+  const onInputFocus = useCallback((input: TextInput | null) => {
+    focusedInput.current = input;
+    requestAnimationFrame(revealFocused);
+  }, [revealFocused]);
 
   const project = projects.find((p) => p.id === id);
   const pillar = pillars.find((p) => p.id === project?.pillarId);
@@ -113,7 +155,14 @@ export default function ProjectOverviewScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       {header}
-      <NestableScrollContainer contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+      <View ref={scrollFrameRef} collapsable={false} style={styles.flex1}>
+      <NestableScrollContainer
+        ref={scrollRef}
+        contentContainerStyle={[styles.body, { paddingBottom: spacing.xl + keyboard.height }]}
+        keyboardShouldPersistTaps="handled"
+        onContentSizeChange={() => requestAnimationFrame(revealFocused)}
+      >
+        <View ref={contentTopRef} collapsable={false} style={styles.contentTop} />
         {/* Hero */}
         <View style={styles.hero}>
           {pillar && (
@@ -190,11 +239,13 @@ export default function ProjectOverviewScreen() {
                 renameTask={renameTask}
                 removeTask={removeTask}
                 reorderTasks={reorderTasks}
+                onInputFocus={onInputFocus}
               />
             ))
           )}
         </View>
       </NestableScrollContainer>
+      </View>
 
       <ProjectOptionsSheet project={menuProject} onClose={() => setMenuProject(null)} onDeleted={() => router.back()} />
       <ActionSheet
@@ -221,6 +272,8 @@ const styles = StyleSheet.create({
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   emptyText: { color: colors.textDim, fontSize: font.md },
   body: { padding: spacing.lg, gap: spacing.xl },
+  // Zero-size marker at the top of the scroll content; measured to derive the scroll offset.
+  contentTop: { height: 0, marginBottom: -spacing.xl },
   hero: { gap: spacing.sm },
   pillarChip: {
     flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start',

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, TextInput, StyleSheet, Alert } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { NestableDraggableFlatList } from 'react-native-draggable-flatlist';
@@ -26,6 +26,8 @@ interface Props extends TaskActions {
   today: string;
   onMenu: () => void;
   onOpenHabit: (habitId: string) => void;
+  /** A text field in this box got focus; the screen scrolls it above the keyboard. */
+  onInputFocus?: (input: TextInput | null) => void;
 }
 
 function errorAlert(e: unknown) {
@@ -33,12 +35,13 @@ function errorAlert(e: unknown) {
 }
 
 /**
- * One milestone on the project overview. Tasks can be ticked, added inline,
- * renamed or deleted (☰ tap) and reordered (☰ hold) without leaving the page.
+ * One milestone on the project overview, editable in place: tick a task with
+ * its checkbox, tap its name to rename it, add tasks inline, ☰ tap for
+ * Rename/Delete and ☰ hold to reorder.
  * Must be rendered inside a NestableScrollContainer.
  */
 export function MilestoneBox({
-  projectId, milestone: m, index, met, isNext, accent, habits, entries, today, onMenu, onOpenHabit,
+  projectId, milestone: m, index, met, isNext, accent, habits, entries, today, onMenu, onOpenHabit, onInputFocus,
   setTaskDone, addTask, renameTask, removeTask, reorderTasks,
 }: Props) {
   const tasks = m.criteria.filter((c): c is TaskCriterion => c.kind === 'task');
@@ -53,6 +56,8 @@ export function MilestoneBox({
   const [menuTask, setMenuTask] = useState<TaskCriterion | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  const draftRef = useRef<TextInput>(null);
+  const renameRef = useRef<TextInput>(null);
 
   function submitDraft() {
     const t = draft.trim();
@@ -69,32 +74,42 @@ export function MilestoneBox({
     if (id && t && current && t !== current.title) renameTask(projectId, m.id, id, t).catch(errorAlert);
   }
 
+  function startRename(t: TaskCriterion) {
+    setEditText(t.title);
+    setEditingId(t.id);
+  }
+
   const renderTask = (t: TaskCriterion, drag?: () => void, isActive?: boolean) => (
-    <View style={[styles.task, isActive && styles.taskDragging]}>
+    <View style={styles.task}>
       <Pressable
-        style={styles.taskTap}
         onPress={() => setTaskDone(projectId, m.id, t.id, !t.doneAt).catch(errorAlert)}
-        disabled={editingId === t.id}
+        hitSlop={8}
+        style={styles.check}
       >
         <MaterialIcons
           name={t.doneAt ? 'check-box' : 'check-box-outline-blank'}
           size={22}
           color={t.doneAt ? colors.success : colors.textMuted}
         />
-        {editingId === t.id ? (
-          <TextInput
-            value={editText}
-            onChangeText={setEditText}
-            onSubmitEditing={commitRename}
-            onBlur={commitRename}
-            autoFocus
-            returnKeyType="done"
-            style={[styles.taskText, styles.taskEdit]}
-          />
-        ) : (
-          <Text style={[styles.taskText, t.doneAt && styles.taskDone]}>{t.title}</Text>
-        )}
       </Pressable>
+      {editingId === t.id ? (
+        <TextInput
+          ref={renameRef}
+          onFocus={() => onInputFocus?.(renameRef.current)}
+          value={editText}
+          onChangeText={setEditText}
+          onSubmitEditing={commitRename}
+          onBlur={commitRename}
+          autoFocus
+          selectTextOnFocus
+          returnKeyType="done"
+          style={[styles.taskText, styles.taskEdit]}
+        />
+      ) : (
+        <Pressable style={styles.taskName} onPress={() => startRename(t)} onLongPress={drag} delayLongPress={250}>
+          <Text style={[styles.taskText, t.doneAt && styles.taskDone]}>{t.title}</Text>
+        </Pressable>
+      )}
       <DragHandle onPress={() => setMenuTask(t)} onDrag={tasks.length > 1 ? drag : undefined} active={isActive} />
     </View>
   );
@@ -135,8 +150,10 @@ export function MilestoneBox({
         <View style={styles.addRow}>
           <MaterialIcons name="add" size={22} color={draft.trim() ? accent : colors.textDim} />
           <TextInput
+            ref={draftRef}
             value={draft}
             onChangeText={setDraft}
+            onFocus={() => onInputFocus?.(draftRef.current)}
             onSubmitEditing={submitDraft}
             placeholder="Add a task"
             placeholderTextColor={colors.textDim}
@@ -175,7 +192,7 @@ export function MilestoneBox({
           {
             label: 'Rename',
             icon: 'edit',
-            onPress: () => { setEditText(menuTask.title); setEditingId(menuTask.id); },
+            onPress: () => startRename(menuTask),
           },
           {
             label: 'Delete',
@@ -200,11 +217,12 @@ const styles = StyleSheet.create({
   titleMet: { color: colors.textMuted },
   due: { color: colors.textDim, fontSize: font.sm },
   body: { marginLeft: 34, borderTopWidth: 1, borderTopColor: colors.surface2, paddingTop: spacing.xs },
-  task: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, backgroundColor: colors.surface, borderRadius: radius.sm },
-  taskDragging: { backgroundColor: colors.surface2 },
-  taskTap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
+  // Same background as the box so a dragged row covers what's under it without looking like a box.
+  task: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.surface },
+  check: { paddingVertical: spacing.sm },
+  taskName: { flex: 1, paddingVertical: spacing.sm },
   taskText: { flex: 1, color: colors.text, fontSize: font.md },
-  taskEdit: { paddingVertical: 0, borderBottomWidth: 1, borderBottomColor: colors.accent },
+  taskEdit: { paddingVertical: spacing.xs, borderBottomWidth: 1, borderBottomColor: colors.accent },
   taskDone: { color: colors.textMuted, textDecorationLine: 'line-through' },
   addRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   addInput: { flex: 1, color: colors.text, fontSize: font.md, paddingVertical: spacing.sm },
