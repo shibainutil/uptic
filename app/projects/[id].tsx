@@ -56,33 +56,37 @@ export default function ProjectOverviewScreen() {
   const contentTopRef = useRef<View>(null);
   const scrollFrameRef = useRef<View>(null);
   const focusedInput = useRef<TextInput | null>(null);
-  const revealFocused = useCallback(() => {
+  const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const revealFocused = useCallback((attempt = 0) => {
+    if (revealTimer.current) { clearTimeout(revealTimer.current); revealTimer.current = null; }
     const input = focusedInput.current;
     const anchor = contentTopRef.current;
-    if (!input || !anchor || keyboard.height === 0 || !input.isFocused()) return;
+    const frame = scrollFrameRef.current;
+    if (!input || !anchor || !frame || keyboard.height === 0 || !input.isFocused()) return;
     input.measureInWindow((_x, inputY, _w, inputH) => {
+      const limit = keyboard.top - 16;           // field bottom must stay above this
+      const overlap = inputY + inputH - limit;
+      if (overlap <= 0) return;
       anchor.measureInWindow((_ax, anchorY) => {
-        const limit = keyboard.top - 16;           // field bottom must stay above this
-        const overlap = inputY + inputH - limit;
-        if (overlap <= 0) return;
-        // anchorY = (scroll view top + padding) - offset, so moving content up by
-        // `overlap` means an offset of (current offset + overlap). The current
-        // offset isn't tracked; derive it from where the content top sits now.
-        scrollFrameRef.current?.measureInWindow((_sx, scrollTop) => {
-          const currentOffset = scrollTop + spacing.lg - anchorY;
+        frame.measureInWindow((_fx, frameTop) => {
+          // anchorY = (frame top + padding) - offset → derive the current offset.
+          const currentOffset = frameTop + spacing.lg - anchorY;
           scrollRef.current?.scrollTo({ y: Math.max(0, currentOffset + overlap), animated: true });
+          // The keyboard padding may not have reached the native scroll view yet, in
+          // which case that scroll was capped short. Measure again once it settles.
+          if (attempt < 3) revealTimer.current = setTimeout(() => revealFocused(attempt + 1), 350);
         });
       });
     });
   }, [keyboard.height, keyboard.top]);
   useEffect(() => {
     // Wait a frame so the keyboard padding below is laid out before scrolling.
-    const id = requestAnimationFrame(revealFocused);
+    const id = requestAnimationFrame(() => revealFocused());
     return () => cancelAnimationFrame(id);
   }, [revealFocused]);
   const onInputFocus = useCallback((input: TextInput | null) => {
     focusedInput.current = input;
-    requestAnimationFrame(revealFocused);
+    requestAnimationFrame(() => revealFocused());
   }, [revealFocused]);
 
   const project = projects.find((p) => p.id === id);
@@ -160,7 +164,7 @@ export default function ProjectOverviewScreen() {
         ref={scrollRef}
         contentContainerStyle={[styles.body, { paddingBottom: spacing.xl + keyboard.height }]}
         keyboardShouldPersistTaps="handled"
-        onContentSizeChange={() => requestAnimationFrame(revealFocused)}
+        onContentSizeChange={() => requestAnimationFrame(() => revealFocused())}
       >
         <View ref={contentTopRef} collapsable={false} style={styles.contentTop} />
         {/* Hero */}

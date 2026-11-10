@@ -11,6 +11,13 @@ import type { HabitCriterion, Milestone, TaskCriterion } from '../../types/proje
 import type { Habit, HabitLogEntry } from '../../types/habits';
 import { colors, spacing, font, radius } from '../../theme';
 
+// Task rows: the tickbox square and the title's line box are the same height and
+// share a top edge. MaterialIcons draws the check-box square from 3 to 21 inside its
+// 24-unit box, so a 24px icon pulled in by -3px renders an exact 18px square.
+const ROW = 18;
+const ICON = 24;
+const ICON_INSET = (ICON - ROW) / 2;
+
 type TaskActions = Pick<ReturnType<typeof useProjects>,
   'setTaskDone' | 'addTask' | 'renameTask' | 'removeTask' | 'reorderTasks'>;
 
@@ -84,12 +91,13 @@ export function MilestoneBox({
       <Pressable
         onPress={() => setTaskDone(projectId, m.id, t.id, !t.doneAt).catch(errorAlert)}
         hitSlop={8}
-        style={styles.check}
+        style={styles.slot}
       >
         <MaterialIcons
           name={t.doneAt ? 'check-box' : 'check-box-outline-blank'}
-          size={22}
+          size={ICON}
           color={t.doneAt ? colors.success : colors.textMuted}
+          style={styles.slotIcon}
         />
       </Pressable>
       {editingId === t.id ? (
@@ -110,7 +118,10 @@ export function MilestoneBox({
           <Text style={[styles.taskText, t.doneAt && styles.taskDone]}>{t.title}</Text>
         </Pressable>
       )}
-      <DragHandle onPress={() => setMenuTask(t)} onDrag={tasks.length > 1 ? drag : undefined} active={isActive} />
+      {/* The handle is taller than the 18px line; centre it on the line instead of growing the row. */}
+      <View style={styles.handleSlot}>
+        <DragHandle onPress={() => setMenuTask(t)} onDrag={tasks.length > 1 ? drag : undefined} active={isActive} />
+      </View>
     </View>
   );
 
@@ -148,7 +159,9 @@ export function MilestoneBox({
         />
 
         <View style={styles.addRow}>
-          <MaterialIcons name="add" size={22} color={draft.trim() ? accent : colors.textDim} />
+          <View style={styles.slot}>
+            <MaterialIcons name="add" size={ICON} color={draft.trim() ? accent : colors.textDim} style={styles.slotIcon} />
+          </View>
           <TextInput
             ref={draftRef}
             value={draft}
@@ -218,14 +231,27 @@ const styles = StyleSheet.create({
   due: { color: colors.textDim, fontSize: font.sm },
   body: { marginLeft: 34, borderTopWidth: 1, borderTopColor: colors.surface2, paddingTop: spacing.xs },
   // Same background as the box so a dragged row covers what's under it without looking like a box.
-  task: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.surface },
-  check: { paddingVertical: spacing.sm },
-  taskName: { flex: 1, paddingVertical: spacing.sm },
-  taskText: { flex: 1, color: colors.text, fontSize: font.md },
-  taskEdit: { paddingVertical: spacing.xs, borderBottomWidth: 1, borderBottomColor: colors.accent },
+  task: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md,
+    paddingVertical: spacing.sm, backgroundColor: colors.surface,
+  },
+  // Fixed ROW×ROW slot for the tickbox / "+" so titles and the add field start at the same x.
+  slot: { width: ROW, height: ROW, alignItems: 'center', justifyContent: 'center', overflow: 'visible' },
+  slotIcon: { margin: -ICON_INSET },
+  taskName: { flex: 1 },
+  handleSlot: { height: ROW, justifyContent: 'center', overflow: 'visible' },
+  // Line box exactly ROW tall with no Android font padding, so its top meets the tickbox's top.
+  taskText: {
+    flex: 1, color: colors.text, fontSize: 15, lineHeight: ROW,
+    includeFontPadding: false, textAlignVertical: 'top',
+  },
+  taskEdit: { padding: 0, margin: 0, borderBottomWidth: 1, borderBottomColor: colors.accent },
   taskDone: { color: colors.textMuted, textDecorationLine: 'line-through' },
-  addRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  addInput: { flex: 1, color: colors.text, fontSize: font.md, paddingVertical: spacing.sm },
+  addRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md, paddingVertical: spacing.sm },
+  addInput: {
+    flex: 1, color: colors.text, fontSize: 15, lineHeight: ROW, minHeight: ROW,
+    padding: 0, margin: 0, includeFontPadding: false, textAlignVertical: 'top',
+  },
   addBtn: { fontSize: font.sm, fontWeight: '600' },
   targets: { borderTopWidth: 1, borderTopColor: colors.surface2, marginTop: spacing.xs, paddingTop: spacing.xs },
 });
