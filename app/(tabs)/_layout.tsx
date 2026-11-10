@@ -13,6 +13,7 @@ import BugReportPickerSheet from '../../src/components/BugReportPickerSheet';
 type IconName = React.ComponentProps<typeof MaterialIcons>['name'];
 
 const TABS: { name: string; title: string; icon: IconName }[] = [
+  { name: 'pillars',   title: 'Pillars',   icon: 'account-balance' },
   { name: 'weight',    title: 'Weight',    icon: 'monitor-weight' },
   { name: 'fitness',   title: 'Fitness',   icon: 'fitness-center' },
   { name: 'habits',    title: 'Habits',    icon: 'track-changes' },
