@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
+import { NestableScrollContainer } from 'react-native-draggable-flatlist';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -13,7 +14,7 @@ import { Button } from '../../src/components/ui/Button';
 import { ActionSheet, type ActionSheetItem } from '../../src/components/ui/ActionSheet';
 import { STATUS_BADGE, formatShortDate } from '../../src/components/projects/ProjectCard';
 import { ProjectOptionsSheet } from '../../src/components/projects/ProjectOptionsSheet';
-import { HabitTargetRow } from '../../src/components/projects/HabitTargetRow';
+import { MilestoneBox } from '../../src/components/projects/MilestoneBox';
 import { milestoneMet, projectProgress } from '../../src/lib/projectProgress';
 import { diffDays, todayISO } from '../../src/lib/schedule';
 import type { Milestone, Project } from '../../src/types/projects';
@@ -33,7 +34,8 @@ export default function ProjectOverviewScreen() {
   const { user } = useAuth();
   const { pillars } = usePillars(user?.uid);
   const {
-    projects, loaded, setTaskDone, removeMilestone, reorderMilestones, applyLatches,
+    projects, loaded, removeMilestone, reorderMilestones, applyLatches,
+    setTaskDone, addTask, renameTask, removeTask, reorderTasks,
   } = useProjects(user?.uid);
   const { habits, loaded: habitsLoaded } = useHabits(user?.uid);
   const { entries, loaded: entriesLoaded } = useHabitLogEntries(user?.uid);
@@ -111,7 +113,7 @@ export default function ProjectOverviewScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       {header}
-      <ScrollView contentContainerStyle={styles.body}>
+      <NestableScrollContainer contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         {/* Hero */}
         <View style={styles.hero}>
           {pillar && (
@@ -169,68 +171,30 @@ export default function ProjectOverviewScreen() {
               <Button label="Add first milestone" variant="primary" onPress={addMilestone} />
             </View>
           ) : (
-            project.milestones.map((m, i) => {
-              const met = milestoneMet(m, habits, entries, today);
-              const isNext = progress.next?.id === m.id;
-              const overdue = !met && m.dueDate && today > m.dueDate;
-              return (
-                <View key={m.id} style={[styles.milestone, isNext && { borderColor: `${accent}88` }]}>
-                  <View style={styles.milestoneHead}>
-                    <MaterialIcons
-                      name={met ? 'check-circle' : 'radio-button-unchecked'}
-                      size={22}
-                      color={met ? colors.success : isNext ? accent : colors.textDim}
-                    />
-                    <View style={styles.flex1}>
-                      <Text style={[styles.milestoneTitle, met && styles.milestoneTitleMet]}>
-                        {i + 1}. {m.title}
-                      </Text>
-                      {m.dueDate ? (
-                        <Text style={[styles.milestoneDue, overdue && { color: colors.danger }]}>
-                          {overdue ? 'Overdue · ' : 'Due '}{formatShortDate(m.dueDate)}
-                        </Text>
-                      ) : null}
-                    </View>
-                    <Pressable onPress={() => setMenuMilestone(m)} hitSlop={10}>
-                      <MaterialIcons name="menu" size={22} color={colors.textMuted} />
-                    </Pressable>
-                  </View>
-
-                  {m.criteria.length === 0 ? (
-                    <Text style={styles.criteriaEmpty}>No tasks or habit targets yet. Edit to add some.</Text>
-                  ) : (
-                    <View style={styles.criteria}>
-                      {m.criteria.map((c) => (c.kind === 'task' ? (
-                        <Pressable
-                          key={c.id}
-                          style={styles.task}
-                          onPress={() => setTaskDone(project.id, m.id, c.id, !c.doneAt).catch(errorAlert)}
-                        >
-                          <MaterialIcons
-                            name={c.doneAt ? 'check-box' : 'check-box-outline-blank'}
-                            size={22}
-                            color={c.doneAt ? colors.success : colors.textMuted}
-                          />
-                          <Text style={[styles.taskText, c.doneAt && styles.taskDone]}>{c.title}</Text>
-                        </Pressable>
-                      ) : (
-                        <HabitTargetRow
-                          key={c.id}
-                          criterion={c}
-                          habits={habits}
-                          entries={entries}
-                          today={today}
-                          onPress={() => router.push(`/habits/habit/${c.habitId}`)}
-                        />
-                      )))}
-                    </View>
-                  )}
-                </View>
-              );
-            })
+            project.milestones.map((m, i) => (
+              <MilestoneBox
+                key={m.id}
+                projectId={project.id}
+                milestone={m}
+                index={i}
+                met={milestoneMet(m, habits, entries, today)}
+                isNext={progress.next?.id === m.id}
+                accent={accent}
+                habits={habits}
+                entries={entries}
+                today={today}
+                onMenu={() => setMenuMilestone(m)}
+                onOpenHabit={(habitId) => router.push(`/habits/habit/${habitId}`)}
+                setTaskDone={setTaskDone}
+                addTask={addTask}
+                renameTask={renameTask}
+                removeTask={removeTask}
+                reorderTasks={reorderTasks}
+              />
+            ))
           )}
         </View>
-      </ScrollView>
+      </NestableScrollContainer>
 
       <ProjectOptionsSheet project={menuProject} onClose={() => setMenuProject(null)} onDeleted={() => router.back()} />
       <ActionSheet
@@ -290,17 +254,4 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.surface2, borderStyle: 'dashed',
   },
   placeholderText: { color: colors.textDim, fontSize: font.sm, lineHeight: 20 },
-  milestone: {
-    backgroundColor: colors.surface, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.surface2,
-    padding: spacing.md, gap: spacing.sm,
-  },
-  milestoneHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  milestoneTitle: { color: colors.text, fontSize: font.md, fontWeight: '600' },
-  milestoneTitleMet: { color: colors.textMuted },
-  milestoneDue: { color: colors.textDim, fontSize: font.sm },
-  criteriaEmpty: { color: colors.textDim, fontSize: font.sm, marginLeft: 34 },
-  criteria: { marginLeft: 34, borderTopWidth: 1, borderTopColor: colors.surface2, paddingTop: spacing.xs },
-  task: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
-  taskText: { flex: 1, color: colors.text, fontSize: font.md },
-  taskDone: { color: colors.textMuted, textDecorationLine: 'line-through' },
 });

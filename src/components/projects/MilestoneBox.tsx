@@ -1,0 +1,213 @@
+import { useEffect, useState } from 'react';
+import { View, Text, Pressable, TextInput, StyleSheet, Alert } from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
+import { NestableDraggableFlatList } from 'react-native-draggable-flatlist';
+import { DragHandle } from '../ui/DragHandle';
+import { ActionSheet } from '../ui/ActionSheet';
+import { HabitTargetRow } from './HabitTargetRow';
+import { formatShortDate } from './ProjectCard';
+import type { useProjects } from '../../store/projectStore';
+import type { HabitCriterion, Milestone, TaskCriterion } from '../../types/projects';
+import type { Habit, HabitLogEntry } from '../../types/habits';
+import { colors, spacing, font, radius } from '../../theme';
+
+type TaskActions = Pick<ReturnType<typeof useProjects>,
+  'setTaskDone' | 'addTask' | 'renameTask' | 'removeTask' | 'reorderTasks'>;
+
+interface Props extends TaskActions {
+  projectId: string;
+  milestone: Milestone;
+  index: number;
+  met: boolean;
+  isNext: boolean;
+  accent: string;
+  habits: Habit[];
+  entries: HabitLogEntry[];
+  today: string;
+  onMenu: () => void;
+  onOpenHabit: (habitId: string) => void;
+}
+
+function errorAlert(e: unknown) {
+  Alert.alert('Error', e instanceof Error ? e.message : 'Something went wrong.');
+}
+
+/**
+ * One milestone on the project overview. Tasks can be ticked, added inline,
+ * renamed or deleted (☰ tap) and reordered (☰ hold) without leaving the page.
+ * Must be rendered inside a NestableScrollContainer.
+ */
+export function MilestoneBox({
+  projectId, milestone: m, index, met, isNext, accent, habits, entries, today, onMenu, onOpenHabit,
+  setTaskDone, addTask, renameTask, removeTask, reorderTasks,
+}: Props) {
+  const tasks = m.criteria.filter((c): c is TaskCriterion => c.kind === 'task');
+  const targets = m.criteria.filter((c): c is HabitCriterion => c.kind === 'habit');
+  const overdue = !met && !!m.dueDate && today > m.dueDate;
+
+  // Show the dropped order immediately; Firestore's snapshot catches up a moment later.
+  const [dragOrder, setDragOrder] = useState<TaskCriterion[] | null>(null);
+  useEffect(() => setDragOrder(null), [m]);
+
+  const [draft, setDraft] = useState('');
+  const [menuTask, setMenuTask] = useState<TaskCriterion | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+
+  function submitDraft() {
+    const t = draft.trim();
+    if (!t) return;
+    setDraft('');
+    addTask(projectId, m.id, t).catch(errorAlert);
+  }
+
+  function commitRename() {
+    const id = editingId;
+    const t = editText.trim();
+    setEditingId(null);
+    const current = tasks.find((x) => x.id === id);
+    if (id && t && current && t !== current.title) renameTask(projectId, m.id, id, t).catch(errorAlert);
+  }
+
+  const renderTask = (t: TaskCriterion, drag?: () => void, isActive?: boolean) => (
+    <View style={[styles.task, isActive && styles.taskDragging]}>
+      <Pressable
+        style={styles.taskTap}
+        onPress={() => setTaskDone(projectId, m.id, t.id, !t.doneAt).catch(errorAlert)}
+        disabled={editingId === t.id}
+      >
+        <MaterialIcons
+          name={t.doneAt ? 'check-box' : 'check-box-outline-blank'}
+          size={22}
+          color={t.doneAt ? colors.success : colors.textMuted}
+        />
+        {editingId === t.id ? (
+          <TextInput
+            value={editText}
+            onChangeText={setEditText}
+            onSubmitEditing={commitRename}
+            onBlur={commitRename}
+            autoFocus
+            returnKeyType="done"
+            style={[styles.taskText, styles.taskEdit]}
+          />
+        ) : (
+          <Text style={[styles.taskText, t.doneAt && styles.taskDone]}>{t.title}</Text>
+        )}
+      </Pressable>
+      <DragHandle onPress={() => setMenuTask(t)} onDrag={tasks.length > 1 ? drag : undefined} active={isActive} />
+    </View>
+  );
+
+  return (
+    <View style={[styles.box, isNext && { borderColor: `${accent}88` }]}>
+      <View style={styles.head}>
+        <MaterialIcons
+          name={met ? 'check-circle' : 'radio-button-unchecked'}
+          size={22}
+          color={met ? colors.success : isNext ? accent : colors.textDim}
+        />
+        <View style={styles.flex1}>
+          <Text style={[styles.title, met && styles.titleMet]}>{index + 1}. {m.title}</Text>
+          {m.dueDate ? (
+            <Text style={[styles.due, overdue && { color: colors.danger }]}>
+              {overdue ? 'Overdue · ' : 'Due '}{formatShortDate(m.dueDate)}
+            </Text>
+          ) : null}
+        </View>
+        <Pressable onPress={onMenu} hitSlop={10}>
+          <MaterialIcons name="more-vert" size={22} color={colors.textMuted} />
+        </Pressable>
+      </View>
+
+      <View style={styles.body}>
+        <NestableDraggableFlatList
+          data={dragOrder ?? tasks}
+          keyExtractor={(t) => t.id}
+          activationDistance={10}
+          onDragEnd={({ data }) => {
+            setDragOrder(data);
+            reorderTasks(projectId, m.id, data.map((t) => t.id)).catch(errorAlert);
+          }}
+          renderItem={({ item, drag, isActive }) => renderTask(item, drag, isActive)}
+        />
+
+        <View style={styles.addRow}>
+          <MaterialIcons name="add" size={22} color={draft.trim() ? accent : colors.textDim} />
+          <TextInput
+            value={draft}
+            onChangeText={setDraft}
+            onSubmitEditing={submitDraft}
+            placeholder="Add a task"
+            placeholderTextColor={colors.textDim}
+            returnKeyType="done"
+            blurOnSubmit={false}
+            style={styles.addInput}
+          />
+          {draft.trim() ? (
+            <Pressable onPress={submitDraft} hitSlop={8}>
+              <Text style={[styles.addBtn, { color: accent }]}>Add</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        {targets.length > 0 && (
+          <View style={styles.targets}>
+            {targets.map((c) => (
+              <HabitTargetRow
+                key={c.id}
+                criterion={c}
+                habits={habits}
+                entries={entries}
+                today={today}
+                onPress={() => onOpenHabit(c.habitId)}
+              />
+            ))}
+          </View>
+        )}
+      </View>
+
+      <ActionSheet
+        visible={!!menuTask}
+        title={menuTask?.title}
+        onClose={() => setMenuTask(null)}
+        items={menuTask ? [
+          {
+            label: 'Rename',
+            icon: 'edit',
+            onPress: () => { setEditText(menuTask.title); setEditingId(menuTask.id); },
+          },
+          {
+            label: 'Delete',
+            icon: 'delete-outline',
+            destructive: true,
+            onPress: () => removeTask(projectId, m.id, menuTask.id).catch(errorAlert),
+          },
+        ] : []}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  flex1: { flex: 1 },
+  box: {
+    backgroundColor: colors.surface, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.surface2,
+    padding: spacing.md, gap: spacing.sm, marginBottom: spacing.sm,
+  },
+  head: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  title: { color: colors.text, fontSize: font.md, fontWeight: '600' },
+  titleMet: { color: colors.textMuted },
+  due: { color: colors.textDim, fontSize: font.sm },
+  body: { marginLeft: 34, borderTopWidth: 1, borderTopColor: colors.surface2, paddingTop: spacing.xs },
+  task: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, backgroundColor: colors.surface, borderRadius: radius.sm },
+  taskDragging: { backgroundColor: colors.surface2 },
+  taskTap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
+  taskText: { flex: 1, color: colors.text, fontSize: font.md },
+  taskEdit: { paddingVertical: 0, borderBottomWidth: 1, borderBottomColor: colors.accent },
+  taskDone: { color: colors.textMuted, textDecorationLine: 'line-through' },
+  addRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  addInput: { flex: 1, color: colors.text, fontSize: font.md, paddingVertical: spacing.sm },
+  addBtn: { fontSize: font.sm, fontWeight: '600' },
+  targets: { borderTopWidth: 1, borderTopColor: colors.surface2, marginTop: spacing.xs, paddingTop: spacing.xs },
+});

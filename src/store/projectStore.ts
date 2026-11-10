@@ -114,15 +114,42 @@ export function useProjects(userId: string | null | undefined) {
     projectId, (ms) => ids.map((id) => ms.find((m) => m.id === id)).filter((m): m is Milestone => !!m),
   ), [writeMilestones]);
 
-  /** Ticks or unticks one task. */
-  const setTaskDone = useCallback((projectId: string, milestoneId: string, taskId: string, done: boolean) => writeMilestones(
-    projectId, (ms) => ms.map((m) => (m.id !== milestoneId ? m : {
-      ...m,
-      criteria: m.criteria.map((c): Criterion => (
-        c.kind === 'task' && c.id === taskId ? { ...c, doneAt: done ? new Date().toISOString() : undefined } : c
-      )),
-    })),
+  /** Rewrites one milestone's criteria. */
+  const writeCriteria = useCallback((projectId: string, milestoneId: string, fn: (cs: Criterion[]) => Criterion[]) => (
+    writeMilestones(projectId, (ms) => ms.map((m) => (m.id !== milestoneId ? m : { ...m, criteria: fn(m.criteria) })))
   ), [writeMilestones]);
+
+  /** Ticks or unticks one task. */
+  const setTaskDone = useCallback((projectId: string, milestoneId: string, taskId: string, done: boolean) => writeCriteria(
+    projectId, milestoneId, (cs) => cs.map((c): Criterion => (
+      c.kind === 'task' && c.id === taskId ? { ...c, doneAt: done ? new Date().toISOString() : undefined } : c
+    )),
+  ), [writeCriteria]);
+
+  /** Appends a task after the milestone's existing tasks (habit targets stay after tasks). */
+  const addTask = useCallback((projectId: string, milestoneId: string, title: string) => writeCriteria(
+    projectId, milestoneId, (cs) => {
+      const tasks = cs.filter((c) => c.kind === 'task');
+      const rest = cs.filter((c) => c.kind !== 'task');
+      return [...tasks, { kind: 'task', id: newId(), title }, ...rest];
+    },
+  ), [writeCriteria]);
+
+  const renameTask = useCallback((projectId: string, milestoneId: string, taskId: string, title: string) => writeCriteria(
+    projectId, milestoneId, (cs) => cs.map((c) => (c.kind === 'task' && c.id === taskId ? { ...c, title } : c)),
+  ), [writeCriteria]);
+
+  const removeTask = useCallback((projectId: string, milestoneId: string, taskId: string) => writeCriteria(
+    projectId, milestoneId, (cs) => cs.filter((c) => c.id !== taskId),
+  ), [writeCriteria]);
+
+  /** Puts the milestone's tasks in the given order; habit targets keep their order after them. */
+  const reorderTasks = useCallback((projectId: string, milestoneId: string, taskIds: string[]) => writeCriteria(
+    projectId, milestoneId, (cs) => [
+      ...taskIds.map((id) => cs.find((c) => c.id === id)).filter((c): c is Criterion => !!c),
+      ...cs.filter((c) => c.kind !== 'task'),
+    ],
+  ), [writeCriteria]);
 
   /** Writes latches computed by pendingLatches (habit targets reached, completedAt). */
   const applyLatches = useCallback(async (projectId: string, data: Pick<Project, 'milestones' | 'completedAt'>) => {
@@ -131,7 +158,8 @@ export function useProjects(userId: string | null | undefined) {
 
   return {
     projects, loaded, add, update, reorder, remove,
-    saveMilestone, removeMilestone, reorderMilestones, setTaskDone, applyLatches,
+    saveMilestone, removeMilestone, reorderMilestones, applyLatches,
+    setTaskDone, addTask, renameTask, removeTask, reorderTasks,
   };
 }
 
