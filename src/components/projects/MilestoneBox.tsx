@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Keyboard } from 'react-native';
 import { View, Text, Pressable, TextInput, StyleSheet, Alert } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -20,13 +20,13 @@ const ICON_INSET = (ICON - ROW) / 2;
 // Title text sized so its ink (ascender top to descender bottom) spans the same 18px
 // as the tickbox; measured on device: Roboto ink ≈ 0.87 em. TITLE_SHIFT pulls the
 // first line up so the ink top meets the tickbox top.
-const TITLE_SIZE = 20.5;
+const TITLE_SIZE = 16;
 const TITLE_LINE = 24;
-const TITLE_SHIFT = -2.7; // measured on device: puts the ink top exactly on the tickbox top
+const TITLE_SHIFT = -1; // measured on device: puts the ink top exactly on the tickbox top
 // The 'menu' glyph's three bars span y 6–18 and x 3–21 of its 24-unit box, so a 36px
 // icon draws bars exactly 18px tall (27px wide); negative margins trim the empty box.
-const HANDLE_ICON = 36;
-const HANDLE_W = 27;
+const HANDLE_ICON = 20;
+const HANDLE_W = 25;
 
 type TaskActions = Pick<ReturnType<typeof useProjects>,
   'setTaskDone' | 'addTask' | 'renameTask' | 'removeTask' | 'reorderTasks'>;
@@ -65,9 +65,28 @@ export function MilestoneBox({
   const targets = m.criteria.filter((c): c is HabitCriterion => c.kind === 'habit');
   const overdue = !met && !!m.dueDate && today > m.dueDate;
 
-  // Show the dropped order immediately; Firestore's snapshot catches up a moment later.
-  const [dragOrder, setDragOrder] = useState<TaskCriterion[] | null>(null);
-  useEffect(() => setDragOrder(null), [m]);
+  // The drag list resets (and visibly flickers) whenever its `data` changes. So:
+  // - after a drop, hold the dropped order until Firestore's order matches it;
+  // - reuse the previous task objects when nothing in them changed, and the
+  //   previous array when nothing changed at all, so the snapshot confirming a
+  //   reorder doesn't hand the list "new" data.
+  const [dropOrder, setDropOrder] = useState<string[] | null>(null);
+  const taskIds = tasks.map((t) => t.id).join('|');
+  useEffect(() => {
+    if (dropOrder && dropOrder.join('|') === taskIds) setDropOrder(null);
+  }, [taskIds, dropOrder]);
+  const prevData = useRef<TaskCriterion[]>([]);
+  const listData = useMemo(() => {
+    const ordered = dropOrder && dropOrder.length === tasks.length
+      ? dropOrder.map((id) => tasks.find((t) => t.id === id)).filter((t): t is TaskCriterion => !!t)
+      : tasks;
+    const prev = prevData.current;
+    const stable = ordered.map((t) => prev.find((p) => p.id === t.id && p.title === t.title && p.doneAt === t.doneAt) ?? t);
+    const unchanged = stable.length === prev.length && stable.every((t, i) => t === prev[i]);
+    const next = unchanged ? prev : stable;
+    prevData.current = next;
+    return next;
+  }, [tasks, dropOrder]);
 
   const [draft, setDraft] = useState('');
   const [menuTask, setMenuTask] = useState<TaskCriterion | null>(null);
@@ -174,11 +193,11 @@ export function MilestoneBox({
 
       <View style={styles.body}>
         <NestableDraggableFlatList
-          data={dragOrder ?? tasks}
+          data={listData}
           keyExtractor={(t) => t.id}
           activationDistance={10}
           onDragEnd={({ data }) => {
-            setDragOrder(data);
+            setDropOrder(data.map((t) => t.id));
             reorderTasks(projectId, m.id, data.map((t) => t.id)).catch(errorAlert);
           }}
           renderItem={({ item, drag, isActive }) => renderTask(item, drag, isActive)}
