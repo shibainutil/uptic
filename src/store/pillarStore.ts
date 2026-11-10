@@ -88,7 +88,7 @@ export function usePillars(userId: string | null | undefined) {
     await batch.commit();
   }, [userId, pillars]);
 
-  // TODO(goals): once goals exist, block or cascade deletion of pillars that still have goals.
+  // Callers must check for goals first: app/(tabs)/pillars.tsx blocks deleting a pillar that still has goals.
   const remove = useCallback(async (id: string) => {
     await deleteDoc(pillarDoc(userId!, id));
   }, [userId]);

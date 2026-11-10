@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../src/context/AuthContext';
 import { usePillars } from '../../src/store/pillarStore';
+import { useGoals } from '../../src/store/goalStore';
 import { SUGGESTED_PILLARS } from '../../src/types/pillars';
 import { Button } from '../../src/components/ui/Button';
 import { colors, spacing, font, radius } from '../../src/theme';
@@ -12,8 +13,18 @@ export default function PillarsScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const { pillars, loaded, addMany, move, remove } = usePillars(user?.uid);
+  const { goals } = useGoals(user?.uid);
+  const goalCount = (pillarId: string) => goals.filter((g) => g.pillarId === pillarId).length;
 
   function confirmDelete(id: string, name: string) {
+    const count = goalCount(id);
+    if (count > 0) {
+      Alert.alert(
+        'Pillar has goals',
+        `"${name}" still has ${count} goal${count !== 1 ? 's' : ''}. Move or delete ${count !== 1 ? 'them' : 'it'} first.`,
+      );
+      return;
+    }
     Alert.alert('Delete Pillar', `Remove "${name}"?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: () => remove(id) },
@@ -63,6 +74,9 @@ export default function PillarsScreen() {
               <View style={styles.cardMain}>
                 <Text style={styles.cardName}>{item.name}</Text>
                 {item.description ? <Text style={styles.cardDesc} numberOfLines={2}>{item.description}</Text> : null}
+                <Text style={styles.cardGoals}>
+                  {goalCount(item.id) || 'No'} goal{goalCount(item.id) !== 1 ? 's' : ''}
+                </Text>
               </View>
               <View style={styles.cardActions}>
                 <View style={styles.reorder}>
@@ -128,6 +142,7 @@ const styles = StyleSheet.create({
   cardMain: { flex: 1, gap: 2 },
   cardName: { color: colors.text, fontSize: font.md, fontWeight: '600' },
   cardDesc: { color: colors.textDim, fontSize: font.sm },
+  cardGoals: { color: colors.textMuted, fontSize: font.sm },
   cardActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   reorder: { alignItems: 'center' },
   actionDelete: { color: colors.danger, fontSize: font.sm },

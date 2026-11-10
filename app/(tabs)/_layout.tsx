@@ -14,6 +14,7 @@ type IconName = React.ComponentProps<typeof MaterialIcons>['name'];
 
 const TABS: { name: string; title: string; icon: IconName }[] = [
   { name: 'pillars',   title: 'Pillars',   icon: 'account-balance' },
+  { name: 'goals',     title: 'Goals',     icon: 'flag' },
   { name: 'weight',    title: 'Weight',    icon: 'monitor-weight' },
   { name: 'fitness',   title: 'Fitness',   icon: 'fitness-center' },
   { name: 'habits',    title: 'Habits',    icon: 'track-changes' },
