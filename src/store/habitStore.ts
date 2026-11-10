@@ -9,7 +9,6 @@ import {
   query,
   where,
   writeBatch,
-  deleteField,
 } from 'firebase/firestore';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { db } from '../firebase';
@@ -79,27 +78,7 @@ export function useHabits(userId: string | null | undefined) {
     await batch.commit();
   }, [userId]);
 
-  /**
-   * Makes exactly `habitIds` the habits linked to `goalId`: links those, and
-   * unlinks any other habit currently pointing at the goal.
-   */
-  const setGoalHabits = useCallback(async (goalId: string, habitIds: string[]) => {
-    const batch = writeBatch(db);
-    let changed = false;
-    for (const h of habits) {
-      const want = habitIds.includes(h.id);
-      if (want && h.goalId !== goalId) { batch.update(userDoc(userId!, HABITS_COL, h.id), { goalId }); changed = true; }
-      if (!want && h.goalId === goalId) { batch.update(userDoc(userId!, HABITS_COL, h.id), { goalId: deleteField() }); changed = true; }
-    }
-    if (changed) await batch.commit();
-  }, [userId, habits]);
-
-  /** Links one habit to a goal, or unlinks it with null. */
-  const setHabitGoal = useCallback(async (habitId: string, goalId: string | null) => {
-    await updateDoc(userDoc(userId!, HABITS_COL, habitId), { goalId: goalId ?? deleteField() });
-  }, [userId]);
-
-  return { habits, loaded, add, update, remove, setGoalHabits, setHabitGoal };
+  return { habits, loaded, add, update, remove };
 }
 
 // ── Log entries ───────────────────────────────────────────────────────────────

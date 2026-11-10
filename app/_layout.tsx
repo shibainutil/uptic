@@ -30,7 +30,10 @@ function RootNavigator() {
       <Stack.Screen name="habits/habit/[id]" options={{ presentation: 'card' }} />
       <Stack.Screen name="habits/entries/[habitId]" options={{ presentation: 'card' }} />
       <Stack.Screen name="pillars/[id]" options={{ presentation: 'card' }} />
-      <Stack.Screen name="goals/[id]" options={{ presentation: 'card' }} />
+      <Stack.Screen name="pillars/edit/[id]" options={{ presentation: 'card' }} />
+      <Stack.Screen name="projects/[id]" options={{ presentation: 'card' }} />
+      <Stack.Screen name="projects/edit/[id]" options={{ presentation: 'card' }} />
+      <Stack.Screen name="projects/milestone/[id]" options={{ presentation: 'card' }} />
     </Stack>
   );
 }

@@ -3,14 +3,14 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 
 interface Props {
-  /** Tap: usually opens the item's edit screen. */
+  /** Tap: opens the item's options menu. */
   onPress: () => void;
   /** Hold: starts dragging (pass the `drag` from react-native-draggable-flatlist). */
   onDrag?: () => void;
   active?: boolean;
 }
 
-/** ☰ handle on the right of a reorderable row: tap to edit, hold to drag. */
+/** ☰ handle on the right of a row: tap for options, hold to drag (when reorderable). */
 export function DragHandle({ onPress, onDrag, active }: Props) {
   return (
     <Pressable

@@ -3,34 +3,36 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
-import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
+import DraggableFlatList from 'react-native-draggable-flatlist';
 import { useAuth } from '../../src/context/AuthContext';
 import { usePillars } from '../../src/store/pillarStore';
-import { useGoals } from '../../src/store/goalStore';
+import { useProjects } from '../../src/store/projectStore';
 import { SUGGESTED_PILLARS, type Pillar } from '../../src/types/pillars';
-import type { Goal } from '../../src/types/goals';
+import type { Project } from '../../src/types/projects';
 import { Button } from '../../src/components/ui/Button';
 import { DragHandle } from '../../src/components/ui/DragHandle';
+import { PillarOptionsSheet } from '../../src/components/pillars/PillarOptionsSheet';
 import { colors, spacing, font, radius } from '../../src/theme';
 
-function goalSummary(goals: Goal[]): string {
-  if (goals.length === 0) return 'No goals';
-  const open = goals.filter((g) => !g.achievedAt).length;
-  const total = `${goals.length} goal${goals.length !== 1 ? 's' : ''}`;
-  if (open === goals.length) return total;
-  return open === 0 ? `${total} · all achieved` : `${total} · ${open} open`;
+function projectSummary(projects: Project[]): string {
+  if (projects.length === 0) return 'No projects';
+  const open = projects.filter((p) => !p.completedAt).length;
+  const total = `${projects.length} project${projects.length !== 1 ? 's' : ''}`;
+  if (open === projects.length) return total;
+  return open === 0 ? `${total} · all done` : `${total} · ${open} open`;
 }
 
 export default function PillarsScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const { pillars, loaded, addMany, reorder } = usePillars(user?.uid);
-  const { goals } = useGoals(user?.uid);
+  const { projects } = useProjects(user?.uid);
   const [showArchived, setShowArchived] = useState(false);
+  const [menuPillar, setMenuPillar] = useState<Pillar | null>(null);
 
   const active = pillars.filter((p) => !p.archivedAt);
   const archived = pillars.filter((p) => p.archivedAt);
-  const goalsOf = (pillarId: string) => goals.filter((g) => g.pillarId === pillarId);
+  const projectsOf = (pillarId: string) => projects.filter((p) => p.pillarId === pillarId);
 
   // Show the dropped order immediately; Firestore's snapshot catches up a moment later.
   const [dragOrder, setDragOrder] = useState<Pillar[] | null>(null);
@@ -46,7 +48,7 @@ export default function PillarsScreen() {
           <MaterialIcons name="account-balance" size={48} color={colors.textDim} />
           <Text style={styles.emptyTitle}>No pillars yet</Text>
           <Text style={styles.emptyText}>
-            Pillars are the big areas of your life.{'\n'}Every goal will belong to one.
+            Pillars are the big areas of your life.{'\n'}Every project will belong to one.
           </Text>
           <View style={styles.suggestions}>
             {SUGGESTED_PILLARS.map((p) => (
@@ -57,7 +59,7 @@ export default function PillarsScreen() {
             ))}
           </View>
           <Button label="Start with these five" variant="primary" onPress={() => addMany(SUGGESTED_PILLARS)} />
-          <Pressable onPress={() => router.push('/pillars/new')} hitSlop={8}>
+          <Pressable onPress={() => router.push('/pillars/edit/new')} hitSlop={8}>
             <Text style={styles.link}>or create your own</Text>
           </Pressable>
         </View>
@@ -69,7 +71,7 @@ export default function PillarsScreen() {
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <View style={styles.header}>
         <Text style={styles.count}>{active.length} pillar{active.length !== 1 ? 's' : ''}</Text>
-        <Pressable onPress={() => router.push('/pillars/new')} style={styles.addBtn}>
+        <Pressable onPress={() => router.push('/pillars/edit/new')} style={styles.addBtn}>
           <Text style={styles.addBtnText}>+ Add</Text>
         </Pressable>
       </View>
@@ -85,15 +87,14 @@ export default function PillarsScreen() {
           reorder([...data.map((p) => p.id), ...archived.map((p) => p.id)]);
         }}
         renderItem={({ item, drag, isActive }) => (
-          <ScaleDecorator activeScale={1.03}>
-            <PillarCard
-              pillar={item}
-              summary={goalSummary(goalsOf(item.id))}
-              onPress={() => open(item.id)}
-              onDrag={drag}
-              dragging={isActive}
-            />
-          </ScaleDecorator>
+          <PillarCard
+            pillar={item}
+            summary={projectSummary(projectsOf(item.id))}
+            onPress={() => open(item.id)}
+            onMenu={() => setMenuPillar(item)}
+            onDrag={list.length > 1 ? drag : undefined}
+            dragging={isActive}
+          />
         )}
         ListFooterComponent={archived.length ? (
           <View style={styles.archived}>
@@ -102,21 +103,31 @@ export default function PillarsScreen() {
               <Text style={styles.archivedTitle}>Archived ({archived.length})</Text>
             </Pressable>
             {showArchived && archived.map((p) => (
-              <PillarCard key={p.id} pillar={p} summary={goalSummary(goalsOf(p.id))} onPress={() => open(p.id)} dimmed />
+              <PillarCard
+                key={p.id}
+                pillar={p}
+                summary={projectSummary(projectsOf(p.id))}
+                onPress={() => open(p.id)}
+                onMenu={() => setMenuPillar(p)}
+                dimmed
+              />
             ))}
           </View>
         ) : null}
       />
+
+      <PillarOptionsSheet pillar={menuPillar} onClose={() => setMenuPillar(null)} />
     </SafeAreaView>
   );
 }
 
 function PillarCard({
-  pillar, summary, onPress, onDrag, dragging, dimmed,
+  pillar, summary, onPress, onMenu, onDrag, dragging, dimmed,
 }: {
   pillar: Pillar;
   summary: string;
   onPress: () => void;
+  onMenu: () => void;
   onDrag?: () => void;
   dragging?: boolean;
   dimmed?: boolean;
@@ -137,7 +148,7 @@ function PillarCard({
         {pillar.description ? <Text style={styles.cardDesc} numberOfLines={2}>{pillar.description}</Text> : null}
         <Text style={styles.cardGoals}>{summary}</Text>
       </View>
-      {onDrag && <DragHandle onPress={onPress} onDrag={onDrag} active={dragging} />}
+      <DragHandle onPress={onMenu} onDrag={onDrag} active={dragging} />
     </Pressable>
   );
 }
@@ -182,7 +193,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     marginBottom: 8,
   },
-  cardDragging: { borderColor: colors.accent, elevation: 8 },
+  cardDragging: { borderColor: colors.accent, backgroundColor: colors.surface2 },
   cardDimmed: { opacity: 0.6 },
   iconWrap: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   cardMain: { flex: 1, gap: 2 },

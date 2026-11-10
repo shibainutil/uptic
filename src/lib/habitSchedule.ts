@@ -1,8 +1,5 @@
 import { toISO, fromISO, addDays, diffDays } from './schedule';
 import { totalSessions, type Habit, type HabitLogEntry, type HabitSchedule } from '../types/habits';
-import {
-  DEFAULT_TARGET_RATE, DEFAULT_WINDOW_WEEKS, type Goal, type MaintenanceProgress,
-} from '../types/goals';
 
 // ── Due-date logic ───────────────────────────────────────────────────────────
 
@@ -166,10 +163,10 @@ export function computeRing(habit: Habit, entries: HabitLogEntry[], period: Ring
   return { rate, completed, expected };
 }
 
-// ── Goal success rate ────────────────────────────────────────────────────────
+// ── Rolling-window counts (used by project habit targets) ───────────────────
 
 /** Sessions completed vs. scheduled for one habit in [from, until], clamped to its start date and today. */
-function habitWindowCounts(habit: Habit, entries: HabitLogEntry[], fromISO_: string, untilISO: string) {
+export function habitWindowCounts(habit: Habit, entries: HabitLogEntry[], fromISO_: string, untilISO: string) {
   const start = fromISO_ < habit.startDate ? habit.startDate : fromISO_;
   if (diffDays(untilISO, start) < 0) return { completed: 0, expected: 0 };
   const expected = countScheduledSlots(habit.schedule, habit.startDate, start, untilISO);
@@ -177,30 +174,6 @@ function habitWindowCounts(habit: Habit, entries: HabitLogEntry[], fromISO_: str
   const logged = totalSessions(entries.filter(
     (e) => e.habitId === habit.id && e.loggedAt >= start && e.loggedAt < endExclusive,
   ));
-  // Extra sessions on one habit can't make up for another habit being skipped.
+  // Logging extra sessions can't push the rate past 100 %.
   return { completed: Math.min(logged, expected), expected };
-}
-
-/**
- * Rolling-window success rate of a maintenance goal: successful ÷ scheduled
- * occurrences across every habit linked to it, over the last `windowWeeks`
- * weeks up to and including today. Uses the same counting as the habit rings.
- */
-export function computeMaintenanceProgress(
-  goal: Goal, habits: Habit[], entries: HabitLogEntry[], todayISO: string,
-): MaintenanceProgress {
-  const weeks = goal.windowWeeks ?? DEFAULT_WINDOW_WEEKS;
-  const target = (goal.targetRate ?? DEFAULT_TARGET_RATE) / 100;
-  const windowStart = addDays(todayISO, -(weeks * 7 - 1));
-  let completed = 0;
-  let expected = 0;
-  for (const habit of habits) {
-    if (habit.goalId !== goal.id) continue;
-    const c = habitWindowCounts(habit, entries, windowStart, todayISO);
-    completed += c.completed;
-    expected += c.expected;
-  }
-  if (expected === 0) return { health: 'noData', rate: 0, completed, expected, windowStart };
-  const rate = completed / expected;
-  return { health: rate >= target ? 'onTrack' : 'slipping', rate, completed, expected, windowStart };
 }
