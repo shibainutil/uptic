@@ -21,7 +21,7 @@ export function DragHandle({ onPress, onDrag, active }: Props) {
       hitSlop={10}
       style={styles.handle}
     >
-      <MaterialIcons name="menu" size={24} color={active ? colors.accent : colors.textMuted} />
+      <MaterialIcons name="menu" size={24} color={colors.textMuted} />
     </Pressable>
   );
 }

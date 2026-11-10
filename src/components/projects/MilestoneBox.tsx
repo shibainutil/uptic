@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { Keyboard } from 'react-native';
 import { View, Text, Pressable, TextInput, StyleSheet, Alert } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { NestableDraggableFlatList } from 'react-native-draggable-flatlist';
-import { DragHandle } from '../ui/DragHandle';
 import { ActionSheet } from '../ui/ActionSheet';
 import { HabitTargetRow } from './HabitTargetRow';
 import { formatShortDate } from './ProjectCard';
@@ -17,6 +17,16 @@ import { colors, spacing, font, radius } from '../../theme';
 const ROW = 18;
 const ICON = 24;
 const ICON_INSET = (ICON - ROW) / 2;
+// Title text sized so its ink (ascender top to descender bottom) spans the same 18px
+// as the tickbox; measured on device: Roboto ink ≈ 0.87 em. TITLE_SHIFT pulls the
+// first line up so the ink top meets the tickbox top.
+const TITLE_SIZE = 20.5;
+const TITLE_LINE = 24;
+const TITLE_SHIFT = -3.4; // measured: ink top sits ~0.165 em below the line top
+// The 'menu' glyph's three bars span y 6–18 and x 3–21 of its 24-unit box, so a 36px
+// icon draws bars exactly 18px tall (27px wide); negative margins trim the empty box.
+const HANDLE_ICON = 36;
+const HANDLE_W = 27;
 
 type TaskActions = Pick<ReturnType<typeof useProjects>,
   'setTaskDone' | 'addTask' | 'renameTask' | 'removeTask' | 'reorderTasks'>;
@@ -66,6 +76,16 @@ export function MilestoneBox({
   const draftRef = useRef<TextInput>(null);
   const renameRef = useRef<TextInput>(null);
 
+  // Android's back button only hides the keyboard; the field would stay focused. Blur
+  // it so a rename is committed (via onBlur) and nothing is left half-edited.
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidHide', () => {
+      renameRef.current?.blur();
+      draftRef.current?.blur();
+    });
+    return () => sub.remove();
+  }, []);
+
   function submitDraft() {
     const t = draft.trim();
     if (!t) return;
@@ -87,7 +107,7 @@ export function MilestoneBox({
   }
 
   const renderTask = (t: TaskCriterion, drag?: () => void, isActive?: boolean) => (
-    <View style={styles.task}>
+    <View style={[styles.task, isActive && styles.taskDragging]}>
       <Pressable
         onPress={() => setTaskDone(projectId, m.id, t.id, !t.doneAt).catch(errorAlert)}
         hitSlop={8}
@@ -118,10 +138,16 @@ export function MilestoneBox({
           <Text style={[styles.taskText, t.doneAt && styles.taskDone]}>{t.title}</Text>
         </Pressable>
       )}
-      {/* The handle is taller than the 18px line; centre it on the line instead of growing the row. */}
-      <View style={styles.handleSlot}>
-        <DragHandle onPress={() => setMenuTask(t)} onDrag={tasks.length > 1 ? drag : undefined} active={isActive} />
-      </View>
+      <Pressable
+        onPress={() => setMenuTask(t)}
+        onLongPress={tasks.length > 1 ? drag : undefined}
+        delayLongPress={250}
+        disabled={isActive}
+        hitSlop={10}
+        style={styles.handle}
+      >
+        <MaterialIcons name="menu" size={HANDLE_ICON} color={colors.textMuted} style={styles.handleIcon} />
+      </Pressable>
     </View>
   );
 
@@ -235,21 +261,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md,
     paddingVertical: spacing.sm, backgroundColor: colors.surface,
   },
+  // While dragged: a box with the same padding on all sides (the row already has
+  // spacing.sm top/bottom); the negative margin keeps the content where it was.
+  taskDragging: {
+    backgroundColor: colors.surface2, borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm, marginHorizontal: -spacing.sm,
+  },
+  handle: { width: HANDLE_W, height: ROW, alignItems: 'center', justifyContent: 'center', overflow: 'visible' },
+  handleIcon: { marginVertical: -(HANDLE_ICON - ROW) / 2, marginHorizontal: -(HANDLE_ICON - HANDLE_W) / 2 },
   // Fixed ROW×ROW slot for the tickbox / "+" so titles and the add field start at the same x.
   slot: { width: ROW, height: ROW, alignItems: 'center', justifyContent: 'center', overflow: 'visible' },
   slotIcon: { margin: -ICON_INSET },
   taskName: { flex: 1 },
-  handleSlot: { height: ROW, justifyContent: 'center', overflow: 'visible' },
   // Line box exactly ROW tall with no Android font padding, so its top meets the tickbox's top.
   taskText: {
-    flex: 1, color: colors.text, fontSize: 15, lineHeight: ROW,
+    flex: 1, color: colors.text, fontSize: TITLE_SIZE, lineHeight: TITLE_LINE, marginTop: TITLE_SHIFT,
     includeFontPadding: false, textAlignVertical: 'top',
   },
-  taskEdit: { padding: 0, margin: 0, borderBottomWidth: 1, borderBottomColor: colors.accent },
+  taskEdit: { padding: 0, margin: 0 },
   taskDone: { color: colors.textMuted, textDecorationLine: 'line-through' },
   addRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md, paddingVertical: spacing.sm },
   addInput: {
-    flex: 1, color: colors.text, fontSize: 15, lineHeight: ROW, minHeight: ROW,
+    flex: 1, color: colors.text, fontSize: TITLE_SIZE, lineHeight: TITLE_LINE, marginTop: TITLE_SHIFT,
     padding: 0, margin: 0, includeFontPadding: false, textAlignVertical: 'top',
   },
   addBtn: { fontSize: font.sm, fontWeight: '600' },
