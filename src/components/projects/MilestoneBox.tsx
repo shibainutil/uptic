@@ -22,7 +22,7 @@ const ICON_INSET = (ICON - ROW) / 2;
 // first line up so the ink top meets the tickbox top.
 const TITLE_SIZE = 20.5;
 const TITLE_LINE = 24;
-const TITLE_SHIFT = -3.4; // measured: ink top sits ~0.165 em below the line top
+const TITLE_SHIFT = -2.7; // measured on device: puts the ink top exactly on the tickbox top
 // The 'menu' glyph's three bars span y 6–18 and x 3–21 of its 24-unit box, so a 36px
 // icon draws bars exactly 18px tall (27px wide); negative margins trim the empty box.
 const HANDLE_ICON = 36;
