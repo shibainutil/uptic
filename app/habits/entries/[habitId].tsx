@@ -15,6 +15,10 @@ import { fromISO, todayISO } from '../../../src/lib/schedule';
 import { habitSlotActions } from '../../../src/lib/habitSlotActions';
 import { colors, spacing, font, radius } from '../../../src/theme';
 
+const PAUSE_COLOR = '#EAB308';
+const PAUSE_BG = 'rgba(234,179,8,0.10)';
+const PAUSE_BORDER = 'rgba(234,179,8,0.35)';
+
 function formatSlotDate(iso: string): string {
   return fromISO(iso).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 }
@@ -34,6 +38,7 @@ export default function HabitEntriesScreen() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [pauseOpen, setPauseOpen] = useState(false);
+  const [editingPause, setEditingPause] = useState<HabitPause | undefined>();
   const [futureOpen, setFutureOpen] = useState(false);
   const autoSkippedRef = useRef(false);
 
@@ -51,7 +56,7 @@ export default function HabitEntriesScreen() {
 
   const dueSlots = slots.filter((s) => s.status === 'today');
   const pastSlots = slots
-    .filter((s) => s.status === 'done' || s.status === 'skipped' || s.status === 'missed')
+    .filter((s) => s.status === 'done' || s.status === 'skipped' || s.status === 'missed' || s.status === 'paused')
     .sort((a, b) => b.date.localeCompare(a.date));
   const futureSlots = slots
     .filter((s) => s.status === 'upcoming')
@@ -60,10 +65,19 @@ export default function HabitEntriesScreen() {
   const pause = habit ? pauseCovering(habit, today) : undefined;
   const nextPause = habit?.pauses?.find((p) => p.from > today);
   const day = (iso: string) => fromISO(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+
   const savePause = (from: string, until?: string) => {
     setPauses(habitId!, withPause(habit?.pauses ?? [], from, until)).catch(errorAlert);
     setPauseOpen(false);
   };
+
+  const saveEditedPause = (from: string, until?: string) => {
+    if (!habit || !editingPause) return;
+    const remaining = (habit.pauses ?? []).filter((p) => p !== editingPause);
+    setPauses(habit.id, withPause(remaining, from, until)).catch(errorAlert);
+    setEditingPause(undefined);
+  };
+
   const resume = () => { if (habit) setPauses(habit.id, withoutCurrentPause(habit, today)).catch(errorAlert); };
   const cancelPause = (p: HabitPause) => {
     if (habit) setPauses(habit.id, (habit.pauses ?? []).filter((x) => x !== p)).catch(errorAlert);
@@ -100,10 +114,11 @@ export default function HabitEntriesScreen() {
           </View>
         )}
 
+        {/* Active pause banner (yellow) */}
         {pause && (
-          <View style={styles.banner}>
-            <MaterialIcons name="pause-circle-outline" size={22} color={colors.textMuted} />
-            <Text style={styles.bannerText}>
+          <View style={styles.pauseBanner}>
+            <MaterialIcons name="pause-circle-outline" size={22} color={PAUSE_COLOR} />
+            <Text style={styles.pauseBannerText}>
               {pause.until ? `Paused until ${day(pause.until)}` : `Paused since ${day(pause.from)} until you resume`}
             </Text>
             <Pressable onPress={resume} hitSlop={8} style={[styles.slotBtn, styles.slotDone]}>
@@ -111,14 +126,19 @@ export default function HabitEntriesScreen() {
             </Pressable>
           </View>
         )}
+
+        {/* Scheduled future pause banner (yellow) */}
         {!pause && nextPause && (
-          <View style={styles.banner}>
-            <MaterialIcons name="pause-circle-outline" size={22} color={colors.textMuted} />
-            <Text style={styles.bannerText}>
+          <View style={styles.pauseBanner}>
+            <MaterialIcons name="pause-circle-outline" size={22} color={PAUSE_COLOR} />
+            <Text style={styles.pauseBannerText}>
               Pause {day(nextPause.from)}{nextPause.until ? ` – ${day(nextPause.until)}` : ' until you resume'}
             </Text>
-            <Pressable onPress={() => cancelPause(nextPause)} hitSlop={8} style={styles.slotBtn}>
-              <Text style={styles.slotBtnText}>Cancel</Text>
+            <Pressable onPress={() => setEditingPause(nextPause)} hitSlop={8} style={styles.slotBtn}>
+              <Text style={styles.slotBtnText}>Edit</Text>
+            </Pressable>
+            <Pressable onPress={() => cancelPause(nextPause)} hitSlop={8} style={[styles.slotBtn, styles.dangerBtn]}>
+              <Text style={[styles.slotBtnText, { color: colors.danger }]}>Cancel</Text>
             </Pressable>
           </View>
         )}
@@ -126,7 +146,7 @@ export default function HabitEntriesScreen() {
         {/* Due */}
         {dueSlots.length > 0 && (
           <>
-            <Text style={styles.sectionLabel}>Due</Text>
+            <Text style={[styles.sectionLabel, styles.sectionLabelDue]}>Due</Text>
             {dueSlots.map((slot) => (
               <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} />
             ))}
@@ -172,6 +192,17 @@ export default function HabitEntriesScreen() {
         <PauseHabitModal visible today={today} onSave={savePause} onClose={() => setPauseOpen(false)} />
       )}
 
+      {editingPause && (
+        <PauseHabitModal
+          visible
+          today={today}
+          initialFrom={editingPause.from}
+          initialUntil={editingPause.until}
+          onSave={saveEditedPause}
+          onClose={() => setEditingPause(undefined)}
+        />
+      )}
+
       <LogEntryModal
         visible={modalOpen}
         onSave={save}
@@ -181,6 +212,34 @@ export default function HabitEntriesScreen() {
   );
 }
 
+function slotTint(status: SessionSlot['status'], future?: boolean): string {
+  if (future) return colors.textDim;
+  switch (status) {
+    case 'done': return colors.success;
+    case 'skipped': return colors.danger;
+    case 'missed': return colors.danger;
+    case 'paused': return PAUSE_COLOR;
+    default: return colors.textMuted;
+  }
+}
+
+function slotIcon(status: SessionSlot['status']): React.ComponentProps<typeof MaterialIcons>['name'] {
+  switch (status) {
+    case 'done': return 'check-circle';
+    case 'skipped': return 'redo';
+    case 'missed': return 'cancel';
+    case 'paused': return 'pause-circle-outline';
+    default: return 'radio-button-unchecked';
+  }
+}
+
+const SLOT_STATUS_LABEL: Partial<Record<SessionSlot['status'], string>> = {
+  done: 'Done',
+  skipped: 'Skipped',
+  missed: 'Missed',
+  paused: 'Paused',
+};
+
 function SlotRow({ slot, onDone, onSkip, onUndo, future }: {
   slot: SessionSlot;
   onDone: (slot: SessionSlot) => void;
@@ -189,32 +248,22 @@ function SlotRow({ slot, onDone, onSkip, onUndo, future }: {
   future?: boolean;
 }) {
   const { status } = slot;
-  const tint = future
-    ? colors.textDim
-    : status === 'done' ? colors.success
-    : status === 'missed' ? colors.danger
-    : colors.textMuted;
-
-  const dateColor = future ? colors.textDim : (status === 'done' || status === 'skipped') ? colors.textDim : colors.text;
+  const tint = slotTint(status, future);
+  const dateColor = future || status === 'done' || status === 'skipped' || status === 'paused'
+    ? colors.textDim : colors.text;
+  const label = SLOT_STATUS_LABEL[status];
+  const readOnly = future || status === 'paused';
 
   return (
     <View style={styles.slot}>
-      <MaterialIcons
-        name={status === 'done' ? 'check-circle' : status === 'skipped' ? 'redo' : 'radio-button-unchecked'}
-        size={22}
-        color={tint}
-      />
+      <MaterialIcons name={slotIcon(status)} size={22} color={tint} />
       <View style={styles.rowMain}>
         <Text style={[styles.rowDate, { color: dateColor }]}>
           {formatSlotDate(slot.date)} · {slot.time}
         </Text>
-        {status !== 'today' && status !== 'upcoming' && (
-          <Text style={[styles.rowStatus, { color: tint }]}>
-            {status === 'done' ? 'Done' : status === 'skipped' ? 'Skipped' : 'Missed'}
-          </Text>
-        )}
+        {label ? <Text style={[styles.rowStatus, { color: tint }]}>{label}</Text> : null}
       </View>
-      {!future && (
+      {!readOnly && (
         status === 'skipped' ? (
           <Pressable onPress={() => onSkip(slot, false)} hitSlop={8} style={styles.slotBtn}>
             <Text style={styles.slotBtnText}>Undo skip</Text>
@@ -256,17 +305,18 @@ const styles = StyleSheet.create({
   list: { padding: spacing.lg, gap: spacing.sm },
   scheduleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
   scheduleText: { color: colors.textMuted, fontSize: font.sm, flexShrink: 1 },
-  banner: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
-    backgroundColor: colors.surface, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border,
+  pauseBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: PAUSE_BG, borderRadius: radius.sm, borderWidth: 1, borderColor: PAUSE_BORDER,
     paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
   },
-  bannerText: { flex: 1, color: colors.text, fontSize: font.sm },
+  pauseBannerText: { flex: 1, color: colors.text, fontSize: font.sm },
   sectionLabel: {
     color: colors.textMuted, fontSize: 11, fontWeight: '700',
     textTransform: 'uppercase', letterSpacing: 0.6,
     paddingTop: spacing.sm,
   },
+  sectionLabelDue: { color: colors.accent },
   sectionLabelRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingTop: spacing.sm,
@@ -285,6 +335,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 2, borderRadius: radius.sm,
     borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface2,
   },
+  dangerBtn: { borderColor: colors.dangerDim, backgroundColor: colors.dangerDim },
   slotDone: { backgroundColor: colors.accent, borderColor: colors.accent },
   slotBtnText: { color: colors.text, fontSize: font.sm, fontWeight: '600' },
   emptyText: { color: colors.textDim, fontSize: font.md, textAlign: 'center', paddingTop: spacing.xl },

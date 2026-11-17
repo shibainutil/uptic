@@ -13,10 +13,11 @@ const MONTH_NAMES = [
 /** Dot colour per session status. */
 const DOT_COLOR: Record<SlotStatus, string> = {
   done: colors.success,
-  skipped: colors.textDim,
+  skipped: colors.danger,
   missed: colors.danger,
   today: colors.accent,
   upcoming: colors.accent,
+  paused: '#EAB308',
 };
 
 interface Cell { date: Date; inMonth: boolean }

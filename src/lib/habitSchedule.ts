@@ -262,7 +262,7 @@ export function habitWindowCounts(habit: Habit, entries: HabitLogEntry[], fromIS
 // reshuffles them. Marking a slot done logs an ordinary entry; skipping adds the
 // date to `skippedDates`.
 
-export type SlotStatus = 'done' | 'skipped' | 'missed' | 'today' | 'upcoming';
+export type SlotStatus = 'done' | 'skipped' | 'missed' | 'today' | 'upcoming' | 'paused';
 
 export interface SessionSlot {
   key: string;
@@ -296,13 +296,17 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
 
   const pastStart = habit.startDate > addDays(todayISO_, -PAST_SLOT_DAYS) ? habit.startDate : addDays(todayISO_, -PAST_SLOT_DAYS);
   let pendingToday = 0;
+  const coveredDates = new Set<string>();
   for (let d = pastStart; d <= todayISO_; d = addDays(d, 1)) {
-    if (!isDue(habit.schedule, fromISO(d), habit.startDate) || isPaused(habit, d)) continue;
+    if (!isDue(habit.schedule, fromISO(d), habit.startDate)) continue;
+    coveredDates.add(d);
+    const paused_ = isPaused(habit, d);
     const logged = loggedByDate.get(d) ?? 0;
     times.forEach((time, i) => {
       let status: SlotStatus;
-      if (skipped.has(d)) status = 'skipped';
-      else if (i < logged) status = 'done';
+      if (i < logged) status = 'done';
+      else if (paused_) status = 'paused';
+      else if (skipped.has(d)) status = 'skipped';
       else if (d === todayISO_) { status = 'today'; pendingToday++; }
       else status = 'missed';
       out.push({ key: `${d}|${time}`, date: d, time, status });
@@ -317,8 +321,8 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
   const seenExtra = new Set<string>();
   for (const e of mine) {
     const d = entryDate(e);
-    if (d < pastStart || d > todayISO_ || seenExtra.has(d)
-      || (isDue(habit.schedule, fromISO(d), habit.startDate) && !isPaused(habit, d))) continue;
+    if (d < pastStart || d > todayISO_ || seenExtra.has(d) || coveredDates.has(d)
+      || !isDue(habit.schedule, fromISO(d), habit.startDate)) continue;
     seenExtra.add(d);
     out.push({ key: `${d}|${hh(e.loggedAt)}|logged`, date: d, time: hh(e.loggedAt), status: 'done', extra: true });
   }

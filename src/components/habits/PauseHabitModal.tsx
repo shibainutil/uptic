@@ -17,20 +17,31 @@ const MODES: { value: Mode; label: string }[] = [
 interface Props {
   visible: boolean;
   today: string;
+  /** Pre-fill when editing an existing pause. */
+  initialFrom?: string;
+  initialUntil?: string;
   /** `until` is the last paused day; omitted = paused until resumed. */
   onSave: (from: string, until?: string) => void;
   onClose: () => void;
 }
 
 /** Pause a habit from a date, for a set period or until the user turns it back on. */
-export function PauseHabitModal({ visible, today, onSave, onClose }: Props) {
-  const [from, setFrom] = useState(today);
-  const [mode, setMode] = useState<Mode>('until');
-  const [until, setUntil] = useState(addDays(today, 14));
+export function PauseHabitModal({ visible, today, initialFrom, initialUntil, onSave, onClose }: Props) {
+  const defaultFrom = initialFrom ?? today;
+  const defaultUntil = initialUntil ?? addDays(defaultFrom, 14);
+  const [from, setFrom] = useState(defaultFrom);
+  const [mode, setMode] = useState<Mode>(initialUntil != null ? 'until' : initialFrom != null ? 'resume' : 'until');
+  const [until, setUntil] = useState(defaultUntil);
+
+  function handleFromChange(newFrom: string) {
+    setFrom(newFrom);
+    // Keep until at least one day after from
+    if (until <= newFrom) setUntil(addDays(newFrom, 1));
+  }
 
   function save() {
-    if (mode === 'until' && until < from) {
-      Alert.alert('Check the dates', 'The pause can’t end before it starts.');
+    if (mode === 'until' && until <= from) {
+      Alert.alert('Check the dates', 'The end date must come after the start date.');
       return;
     }
     onSave(from, mode === 'until' ? until : undefined);
@@ -39,7 +50,7 @@ export function PauseHabitModal({ visible, today, onSave, onClose }: Props) {
   return (
     <Modal title="Pause habit" visible={visible} onClose={onClose}>
       <View style={styles.body}>
-        <DatePicker label="Pause from" value={from} onChange={setFrom} />
+        <DatePicker label="Pause from" value={from} onChange={handleFromChange} />
         <View style={styles.field}>
           <Text style={styles.label}>Until</Text>
           <Segmented options={MODES} value={mode} onChange={setMode} />
@@ -52,7 +63,7 @@ export function PauseHabitModal({ visible, today, onSave, onClose }: Props) {
             ? 'Sessions in this period are moved to after it, so a session goal just finishes later. Nothing counts against the habit while it is paused.'
             : 'Sessions scheduled from the start date on are removed. Resume the habit when you are ready and it picks up from that day.'}
         </Text>
-        <Button label="Pause" variant="primary" onPress={save} />
+        <Button label="Save" variant="primary" onPress={save} />
       </View>
     </Modal>
   );
