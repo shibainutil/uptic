@@ -4,8 +4,8 @@ import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { useHabits, useHabitLogEntries } from '../../store/habitStore';
-import { todayISO, fromISO, diffDays } from '../../lib/schedule';
-import { computeRing, describeSchedule } from '../../lib/habitSchedule';
+import { todayISO, fromISO, addDays } from '../../lib/schedule';
+import { computeRing, describeSchedule, withoutCurrentPause } from '../../lib/habitSchedule';
 import { isHabitComplete, totalSessions, type Habit, type HabitLogEntry } from '../../types/habits';
 import { Badge } from '../ui/Badge';
 import { LogEntryModal } from './LogEntryModal';
@@ -13,9 +13,8 @@ import { colors, spacing, font, radius } from '../../theme';
 
 const LIMITED_COLOR = '#A855F7';
 const TARGET_COLOR = '#EAB308';
-const PREVIEW_COUNT = 5;
 
-type SectionKey = 'ongoing' | 'paused' | 'completed' | 'archived';
+type SectionKey = 'future' | 'ongoing' | 'paused' | 'completed' | 'archived';
 
 function barColor(rate: number): string {
   if (rate >= 0.9) return colors.success;
@@ -26,14 +25,7 @@ function barColor(rate: number): string {
 function isHabitPaused(habit: Habit, today: string): boolean {
   if (!habit.pauses?.length) return false;
   const last = habit.pauses[habit.pauses.length - 1];
-  return !last.until || last.until >= today;
-}
-
-function formatEntry(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    weekday: 'short', day: 'numeric', month: 'short',
-    hour: '2-digit', minute: '2-digit',
-  });
+  return !last.until || last.until > today;
 }
 
 // ── Options menu ──────────────────────────────────────────────────────────────
@@ -92,12 +84,11 @@ function ProgressBar({ rate }: { rate: number }) {
 
 // ── Habit card ────────────────────────────────────────────────────────────────
 
-function HabitCard({ habit, completedCount, sessionRate, habitEntries, onAdd, onEdit,
+function HabitCard({ habit, completedCount, sessionRate, onAdd, onEdit,
   onViewEntries, onPauseToggle, onArchiveToggle, onReset, onDelete }: {
   habit: Habit;
   completedCount: number;
   sessionRate: number;
-  habitEntries: HabitLogEntry[];
   onAdd: (d: Omit<HabitLogEntry, 'id' | 'createdAt'>) => void;
   onEdit: () => void;
   onViewEntries: () => void;
@@ -106,16 +97,10 @@ function HabitCard({ habit, completedCount, sessionRate, habitEntries, onAdd, on
   onReset: () => void;
   onDelete: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [logVisible, setLogVisible] = useState(false);
   const today = todayISO();
   const paused = isHabitPaused(habit, today);
-
-  const sortedEntries = habitEntries
-    .slice()
-    .sort((a, b) => b.loggedAt.localeCompare(a.loggedAt));
-  const preview = sortedEntries.slice(0, PREVIEW_COUNT);
 
   const menuOptions: MenuOption[] = [
     { label: 'Edit', icon: 'edit', onPress: onEdit },
@@ -126,7 +111,7 @@ function HabitCard({ habit, completedCount, sessionRate, habitEntries, onAdd, on
   ];
 
   return (
-    <Pressable style={cardSt.card} onPress={() => setExpanded(v => !v)}>
+    <Pressable style={cardSt.card} onPress={onViewEntries}>
       {/* Header row */}
       <View style={cardSt.headerRow}>
         <View style={cardSt.headerMain}>
@@ -165,32 +150,6 @@ function HabitCard({ habit, completedCount, sessionRate, habitEntries, onAdd, on
 
       {/* Progress bar */}
       <ProgressBar rate={sessionRate} />
-
-      {/* Expanded: recent sessions */}
-      {expanded && (
-        <View style={cardSt.expanded}>
-          <Text style={cardSt.expandedTitle}>Recent sessions</Text>
-          {preview.length === 0 ? (
-            <Text style={cardSt.noSessions}>No sessions logged yet.</Text>
-          ) : (
-            preview.map(e => (
-              <View key={e.id} style={cardSt.sessionRow}>
-                <MaterialIcons name="check-circle" size={13} color={colors.success} />
-                <Text style={cardSt.sessionText}>
-                  {formatEntry(e.loggedAt)}
-                  {e.count && e.count > 1 ? ` · ×${e.count}` : ''}
-                </Text>
-              </View>
-            ))
-          )}
-          {sortedEntries.length > PREVIEW_COUNT && (
-            <Pressable style={cardSt.viewAllRow} onPress={onViewEntries}>
-              <Text style={cardSt.viewAllText}>View all {sortedEntries.length} sessions</Text>
-              <MaterialIcons name="chevron-right" size={15} color={colors.accent} />
-            </Pressable>
-          )}
-        </View>
-      )}
 
       <OptionsMenu
         visible={menuVisible}
@@ -240,7 +199,7 @@ export function HabitsScreen() {
   const today = todayISO();
 
   const [openSections, setOpenSections] = useState<Set<SectionKey>>(
-    new Set(['ongoing', 'paused']),
+    new Set(['future', 'ongoing', 'paused']),
   );
 
   function toggleSection(key: SectionKey) {
@@ -254,7 +213,6 @@ export function HabitsScreen() {
   type HabitItem = {
     habit: Habit;
     completedCount: number;
-    habitEntries: HabitLogEntry[];
     sessionRate: number;
     section: SectionKey;
   };
@@ -271,22 +229,21 @@ export function HabitsScreen() {
       : allTimeRate;
 
     let section: SectionKey;
-    if (habit.archived)   section = 'archived';
-    else if (complete)    section = 'completed';
-    else if (paused)      section = 'paused';
-    else                  section = 'ongoing';
+    if (habit.archived)               section = 'archived';
+    else if (complete)                section = 'completed';
+    else if (paused)                  section = 'paused';
+    else if (habit.startDate > today) section = 'future';
+    else                              section = 'ongoing';
 
-    return { habit, completedCount, habitEntries, sessionRate, section };
+    return { habit, completedCount, sessionRate, section };
   });
 
   async function handlePauseToggle(habit: Habit) {
     const paused = isHabitPaused(habit, today);
-    const existing = habit.pauses ?? [];
     if (paused) {
-      const last = existing[existing.length - 1];
-      await setPauses(habit.id, [...existing.slice(0, -1), { ...last, until: today }]);
+      await setPauses(habit.id, withoutCurrentPause(habit, today));
     } else {
-      await setPauses(habit.id, [...existing, { from: today }]);
+      await setPauses(habit.id, [...(habit.pauses ?? []), { from: today }]);
     }
   }
 
@@ -297,10 +254,17 @@ export function HabitsScreen() {
   function handleReset(habit: Habit) {
     Alert.alert(
       'Reset sessions?',
-      `This permanently deletes all logged sessions for "${habit.name}".`,
+      `This permanently deletes all logged sessions for "${habit.name}" and sets the start date to tomorrow.`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Reset', style: 'destructive', onPress: () => resetEntries(habit.id) },
+        {
+          text: 'Reset', style: 'destructive', onPress: async () => {
+            await Promise.all([
+              resetEntries(habit.id),
+              updateHabit(habit.id, { startDate: addDays(today, 1), skippedDates: [] }),
+            ]);
+          },
+        },
       ],
     );
   }
@@ -319,6 +283,7 @@ export function HabitsScreen() {
   const SECTIONS: { key: SectionKey; label: string }[] = [
     { key: 'ongoing',   label: 'Ongoing' },
     { key: 'paused',    label: 'Paused' },
+    { key: 'future',    label: 'Future' },
     { key: 'completed', label: 'Completed' },
     { key: 'archived',  label: 'Archived' },
   ];
@@ -420,13 +385,6 @@ const cardSt = StyleSheet.create({
   iconBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
   addBtn: { backgroundColor: colors.accent },
   menuBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
-  expanded: { borderTopWidth: 1, borderTopColor: colors.surface2, paddingTop: spacing.sm, gap: 6 },
-  expandedTitle: { color: colors.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  noSessions: { color: colors.textDim, fontSize: font.sm },
-  sessionRow: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 2 },
-  sessionText: { color: colors.text, fontSize: font.sm, flex: 1 },
-  viewAllRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 2, paddingTop: 2 },
-  viewAllText: { color: colors.accent, fontSize: font.sm, fontWeight: '600' },
 });
 
 const barSt = StyleSheet.create({

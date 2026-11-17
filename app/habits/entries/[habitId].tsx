@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet, Alert } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -6,13 +6,12 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../../src/context/AuthContext';
 import { useHabits, useHabitLogEntries } from '../../../src/store/habitStore';
 import { LogEntryModal } from '../../../src/components/habits/LogEntryModal';
-import { HabitCalendar } from '../../../src/components/habits/HabitCalendar';
 import { PauseHabitModal } from '../../../src/components/habits/PauseHabitModal';
 import {
   describeSchedule, isPaused, pauseCovering, sessionSlots, withPause, withoutCurrentPause, type SessionSlot,
 } from '../../../src/lib/habitSchedule';
 import type { HabitPause } from '../../../src/types/habits';
-import { fromISO, toISO, todayISO } from '../../../src/lib/schedule';
+import { fromISO, todayISO } from '../../../src/lib/schedule';
 import { habitSlotActions } from '../../../src/lib/habitSlotActions';
 import { colors, spacing, font, radius } from '../../../src/theme';
 
@@ -35,18 +34,29 @@ export default function HabitEntriesScreen() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [pauseOpen, setPauseOpen] = useState(false);
-  const now = new Date();
-  const [view, setView] = useState({ year: now.getFullYear(), month: now.getMonth() });
+  const [futureOpen, setFutureOpen] = useState(false);
+  const autoSkippedRef = useRef(false);
 
-  // The schedule, derived from the habit's rule, its log and its skipped dates.
   const today = todayISO();
   const slots = habit ? sessionSlots(habit, entries, today) : [];
-  const monthStart = toISO(new Date(view.year, view.month, 1));
-  const monthEnd = toISO(new Date(view.year, view.month + 1, 0));
-  const monthSlots = slots.filter((x) => x.date >= monthStart && x.date <= monthEnd);
 
-  // Pausing: a pause hides its days from the schedule, so a session goal's last
-  // session slides to after it; an open-ended pause leaves nothing scheduled.
+  // Auto-skip missed slots once per mount after data loads
+  useEffect(() => {
+    if (!habit || !slots.length || autoSkippedRef.current) return;
+    const missed = slots.filter((s) => s.status === 'missed');
+    if (missed.length === 0) { autoSkippedRef.current = true; return; }
+    autoSkippedRef.current = true;
+    Promise.all(missed.map((s) => setSkipped(habit.id, s.date, true))).catch(errorAlert);
+  }, [habit?.id, slots.length]);
+
+  const dueSlots = slots.filter((s) => s.status === 'today');
+  const pastSlots = slots
+    .filter((s) => s.status === 'done' || s.status === 'skipped' || s.status === 'missed')
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const futureSlots = slots
+    .filter((s) => s.status === 'upcoming')
+    .sort((a, b) => a.date.localeCompare(b.date));
+
   const pause = habit ? pauseCovering(habit, today) : undefined;
   const nextPause = habit?.pauses?.find((p) => p.from > today);
   const day = (iso: string) => fromISO(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
@@ -113,22 +123,49 @@ export default function HabitEntriesScreen() {
           </View>
         )}
 
-        <HabitCalendar
-          year={view.year}
-          month={view.month}
-          onChange={(year, month) => setView({ year, month })}
-          slots={slots}
-          today={today}
-          pausedOn={(iso) => !!habit && isPaused(habit, iso)}
-        />
+        {/* Due */}
+        {dueSlots.length > 0 && (
+          <>
+            <Text style={styles.sectionLabel}>Due</Text>
+            {dueSlots.map((slot) => (
+              <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} />
+            ))}
+          </>
+        )}
 
-        {monthSlots.length === 0 ? (
-          <Text style={styles.emptyText}>
-          {habit && isPaused(habit, monthStart) && isPaused(habit, monthEnd) ? 'Paused this month.' : 'Nothing scheduled this month.'}
-        </Text>
-        ) : monthSlots.map((slot) => (
-          <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} />
-        ))}
+        {/* Past */}
+        {pastSlots.length > 0 && (
+          <>
+            <Text style={styles.sectionLabel}>Past</Text>
+            {pastSlots.map((slot) => (
+              <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} />
+            ))}
+          </>
+        )}
+
+        {/* Future (collapsed by default) */}
+        {futureSlots.length > 0 && (
+          <>
+            <Pressable style={styles.sectionLabelRow} onPress={() => setFutureOpen((v) => !v)}>
+              <Text style={styles.sectionLabel}>Future</Text>
+              <View style={styles.sectionRight}>
+                <Text style={styles.sectionCount}>{futureSlots.length}</Text>
+                <MaterialIcons
+                  name={futureOpen ? 'keyboard-arrow-up' : 'keyboard-arrow-down'}
+                  size={18}
+                  color={colors.textMuted}
+                />
+              </View>
+            </Pressable>
+            {futureOpen && futureSlots.map((slot) => (
+              <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} future />
+            ))}
+          </>
+        )}
+
+        {dueSlots.length === 0 && pastSlots.length === 0 && futureSlots.length === 0 && (
+          <Text style={styles.emptyText}>Nothing scheduled yet.</Text>
+        )}
       </ScrollView>
 
       {pauseOpen && (
@@ -144,19 +181,22 @@ export default function HabitEntriesScreen() {
   );
 }
 
-const SLOT_LABEL: Record<SessionSlot['status'], string> = {
-  done: 'Done', skipped: 'Skipped', missed: 'Missed', today: 'Today', upcoming: '',
-};
-
-/** One scheduled session: tick it off or skip it (a skip can be undone). */
-function SlotRow({ slot, onDone, onSkip, onUndo }: {
+function SlotRow({ slot, onDone, onSkip, onUndo, future }: {
   slot: SessionSlot;
   onDone: (slot: SessionSlot) => void;
   onSkip: (slot: SessionSlot, value: boolean) => void;
   onUndo: (slot: SessionSlot) => void;
+  future?: boolean;
 }) {
   const { status } = slot;
-  const tint = status === 'done' ? colors.success : status === 'missed' ? colors.danger : colors.textMuted;
+  const tint = future
+    ? colors.textDim
+    : status === 'done' ? colors.success
+    : status === 'missed' ? colors.danger
+    : colors.textMuted;
+
+  const dateColor = future ? colors.textDim : (status === 'done' || status === 'skipped') ? colors.textDim : colors.text;
+
   return (
     <View style={styles.slot}>
       <MaterialIcons
@@ -165,34 +205,55 @@ function SlotRow({ slot, onDone, onSkip, onUndo }: {
         color={tint}
       />
       <View style={styles.rowMain}>
-        <Text style={[styles.rowDate, (status === 'done' || status === 'skipped') && styles.slotDim]}>
+        <Text style={[styles.rowDate, { color: dateColor }]}>
           {formatSlotDate(slot.date)} · {slot.time}
         </Text>
-        {SLOT_LABEL[status] ? <Text style={[styles.rowNotes, { color: tint }]}>{SLOT_LABEL[status]}</Text> : null}
+        {status !== 'today' && status !== 'upcoming' && (
+          <Text style={[styles.rowStatus, { color: tint }]}>
+            {status === 'done' ? 'Done' : status === 'skipped' ? 'Skipped' : 'Missed'}
+          </Text>
+        )}
       </View>
-      {status === 'skipped' ? (
-        <Pressable onPress={() => onSkip(slot, false)} hitSlop={8} style={styles.slotBtn}>
-          <Text style={styles.slotBtnText}>Undo skip</Text>
-        </Pressable>
-      ) : status === 'done' ? (
-        <Pressable onPress={() => onUndo(slot)} hitSlop={8} style={styles.slotBtn}>
-          <Text style={styles.slotBtnText}>Undo</Text>
-        </Pressable>
-      ) : (
-        <>
-          <Pressable onPress={() => onSkip(slot, true)} hitSlop={8} style={styles.slotBtn}>
-            <Text style={styles.slotBtnText}>Skip</Text>
+      {!future && (
+        status === 'skipped' ? (
+          <Pressable onPress={() => onSkip(slot, false)} hitSlop={8} style={styles.slotBtn}>
+            <Text style={styles.slotBtnText}>Undo skip</Text>
           </Pressable>
-          <Pressable onPress={() => onDone(slot)} hitSlop={8} style={[styles.slotBtn, styles.slotDone]}>
-            <Text style={[styles.slotBtnText, { color: '#fff' }]}>Done</Text>
+        ) : status === 'done' ? (
+          <Pressable onPress={() => onUndo(slot)} hitSlop={8} style={styles.slotBtn}>
+            <Text style={styles.slotBtnText}>Undo</Text>
           </Pressable>
-        </>
+        ) : (
+          <>
+            <Pressable onPress={() => onSkip(slot, true)} hitSlop={8} style={styles.slotBtn}>
+              <Text style={styles.slotBtnText}>Skip</Text>
+            </Pressable>
+            <Pressable onPress={() => onDone(slot)} hitSlop={8} style={[styles.slotBtn, styles.slotDone]}>
+              <Text style={[styles.slotBtnText, { color: '#fff' }]}>Done</Text>
+            </Pressable>
+          </>
+        )
       )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.bg },
+  header: {
+    flexDirection: 'row', alignItems: 'center',
+    padding: spacing.lg, borderBottomWidth: 1, borderBottomColor: colors.border,
+    backgroundColor: colors.surface, gap: spacing.sm,
+  },
+  back: { minWidth: 48 },
+  backText: { color: colors.accent, fontSize: font.md },
+  headerTitle: { flex: 1, color: colors.text, fontSize: font.lg, fontWeight: '600', textAlign: 'center' },
+  addBtn: {
+    backgroundColor: colors.accent, paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2, borderRadius: radius.sm,
+  },
+  addBtnText: { color: '#fff', fontSize: font.sm, fontWeight: '600' },
+  list: { padding: spacing.lg, gap: spacing.sm },
   scheduleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
   scheduleText: { color: colors.textMuted, fontSize: font.sm, flexShrink: 1 },
   banner: {
@@ -201,53 +262,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
   },
   bannerText: { flex: 1, color: colors.text, fontSize: font.sm },
+  sectionLabel: {
+    color: colors.textMuted, fontSize: 11, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.6,
+    paddingTop: spacing.sm,
+  },
+  sectionLabelRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingTop: spacing.sm,
+  },
+  sectionRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  sectionCount: { color: colors.textDim, fontSize: 11, fontWeight: '600' },
   slot: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
     backgroundColor: colors.surface, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.surface2,
     paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
   },
-  slotDim: { color: colors.textDim },
+  rowMain: { flex: 1, gap: 2 },
+  rowDate: { fontSize: font.md, fontWeight: '500' },
+  rowStatus: { fontSize: font.sm },
   slotBtn: {
     paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 2, borderRadius: radius.sm,
     borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface2,
   },
   slotDone: { backgroundColor: colors.accent, borderColor: colors.accent },
   slotBtnText: { color: colors.text, fontSize: font.sm, fontWeight: '600' },
-  container: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.surface,
-    gap: spacing.sm,
-  },
-  back: { minWidth: 48 },
-  backText: { color: colors.accent, fontSize: font.md },
-  headerTitle: { flex: 1, color: colors.text, fontSize: font.lg, fontWeight: '600', textAlign: 'center' },
-  addBtn: {
-    backgroundColor: colors.accent,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderRadius: radius.sm,
-  },
-  addBtnText: { color: '#fff', fontSize: font.sm, fontWeight: '600' },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
-  emptyText: { color: colors.textDim, fontSize: font.md },
-  list: { padding: spacing.lg, gap: spacing.sm },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.surface2,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    gap: spacing.md,
-  },
-  rowMain: { flex: 1, gap: 4 },
-  rowDate: { color: colors.text, fontSize: font.md, fontWeight: '500' },
-  rowNotes: { color: colors.textDim, fontSize: font.sm },
+  emptyText: { color: colors.textDim, fontSize: font.md, textAlign: 'center', paddingTop: spacing.xl },
 });
