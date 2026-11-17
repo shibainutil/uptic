@@ -43,6 +43,9 @@ export interface Habit {
   /** Pauses, past (kept as history), current and scheduled; never overlapping. */
   pauses?: HabitPause[];
 
+  /** When true the habit is hidden in the archived group. */
+  archived?: boolean;
+
   createdAt: string;
 }
 

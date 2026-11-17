@@ -133,7 +133,17 @@ export function useHabitLogEntries(userId: string | null | undefined) {
     await deleteDoc(userDoc(userId!, ENTRIES_COL, id));
   }, [userId]);
 
-  return { entries, loaded, add, update, remove };
+  /** Hard-delete every log entry for a given habit (reset). */
+  const resetEntries = useCallback(async (habitId: string) => {
+    const snap = await getDocs(
+      query(userCol(userId!, ENTRIES_COL), where('habitId', '==', habitId)),
+    );
+    const batch = writeBatch(db);
+    snap.docs.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+  }, [userId]);
+
+  return { entries, loaded, add, update, remove, resetEntries };
 }
 
 // ── One-time migration ───────────────────────────────────────────────────────
