@@ -262,7 +262,7 @@ export function habitWindowCounts(habit: Habit, entries: HabitLogEntry[], fromIS
 // reshuffles them. Marking a slot done logs an ordinary entry; skipping adds the
 // date to `skippedDates`.
 
-export type SlotStatus = 'done' | 'skipped' | 'missed' | 'today' | 'upcoming' | 'paused';
+export type SlotStatus = 'done' | 'skipped' | 'today' | 'upcoming' | 'paused';
 
 export interface SessionSlot {
   key: string;
@@ -308,7 +308,7 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
       else if (paused_) status = 'paused';
       else if (skipped.has(d)) status = 'skipped';
       else if (d === todayISO_) { status = 'today'; pendingToday++; }
-      else status = 'missed';
+      else status = 'skipped';
       out.push({ key: `${d}|${time}`, date: d, time, status });
     });
   }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet, Alert } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -41,25 +41,16 @@ export default function HabitEntriesScreen() {
   const [pauseOpen, setPauseOpen] = useState(false);
   const [editingPause, setEditingPause] = useState<HabitPause | undefined>();
   const [futureOpen, setFutureOpen] = useState(false);
-  const autoSkippedRef = useRef(false);
   const now = new Date();
   const [view, setView] = useState({ year: now.getFullYear(), month: now.getMonth() });
 
   const today = todayISO();
   const slots = habit ? sessionSlots(habit, entries, today) : [];
 
-  // Auto-skip missed slots once per mount after data loads
-  useEffect(() => {
-    if (!habit || !slots.length || autoSkippedRef.current) return;
-    const missed = slots.filter((s) => s.status === 'missed');
-    if (missed.length === 0) { autoSkippedRef.current = true; return; }
-    autoSkippedRef.current = true;
-    Promise.all(missed.map((s) => setSkipped(habit.id, s.date, true))).catch(errorAlert);
-  }, [habit?.id, slots.length]);
 
   const dueSlots = slots.filter((s) => s.status === 'today');
   const pastSlots = slots
-    .filter((s) => s.status === 'done' || s.status === 'skipped' || s.status === 'missed' || s.status === 'paused')
+    .filter((s) => s.status === 'done' || s.status === 'skipped' || s.status === 'paused')
     .sort((a, b) => b.date.localeCompare(a.date));
   const futureSlots = slots
     .filter((s) => s.status === 'upcoming')
@@ -158,7 +149,7 @@ export default function HabitEntriesScreen() {
         {/* Due */}
         {dueSlots.length > 0 && (
           <>
-            <Text style={[styles.sectionLabel, styles.sectionLabelDue]}>Due</Text>
+            <Text style={styles.sectionLabel}>Due</Text>
             {dueSlots.map((slot) => (
               <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} />
             ))}
@@ -227,29 +218,27 @@ export default function HabitEntriesScreen() {
 function slotTint(status: SessionSlot['status'], future?: boolean): string {
   if (future) return colors.textDim;
   switch (status) {
-    case 'done': return colors.success;
+    case 'done':    return colors.success;
     case 'skipped': return colors.danger;
-    case 'missed': return colors.danger;
-    case 'paused': return PAUSE_COLOR;
-    default: return colors.textMuted;
+    case 'paused':  return PAUSE_COLOR;
+    case 'today':   return colors.accent;
+    default:        return colors.textMuted;
   }
 }
 
 function slotIcon(status: SessionSlot['status']): React.ComponentProps<typeof MaterialIcons>['name'] {
   switch (status) {
-    case 'done': return 'check-circle';
-    case 'skipped': return 'redo';
-    case 'missed': return 'cancel';
-    case 'paused': return 'pause-circle-outline';
-    default: return 'radio-button-unchecked';
+    case 'done':    return 'check-circle';
+    case 'skipped': return 'cancel';
+    case 'paused':  return 'pause-circle-outline';
+    default:        return 'radio-button-unchecked';
   }
 }
 
 const SLOT_STATUS_LABEL: Partial<Record<SessionSlot['status'], string>> = {
-  done: 'Done',
+  done:    'Done',
   skipped: 'Skipped',
-  missed: 'Missed',
-  paused: 'Paused',
+  paused:  'Paused',
 };
 
 function SlotRow({ slot, onDone, onSkip, onUndo, future }: {
@@ -278,7 +267,7 @@ function SlotRow({ slot, onDone, onSkip, onUndo, future }: {
       {!readOnly && (
         status === 'skipped' ? (
           <Pressable onPress={() => onSkip(slot, false)} hitSlop={8} style={styles.slotBtn}>
-            <Text style={styles.slotBtnText}>Undo skip</Text>
+            <Text style={styles.slotBtnText}>Undo</Text>
           </Pressable>
         ) : status === 'done' ? (
           <Pressable onPress={() => onUndo(slot)} hitSlop={8} style={styles.slotBtn}>
@@ -328,7 +317,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase', letterSpacing: 0.6,
     paddingTop: spacing.sm,
   },
-  sectionLabelDue: { color: colors.accent },
   sectionLabelRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingTop: spacing.sm,

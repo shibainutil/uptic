@@ -14,9 +14,8 @@ const MONTH_NAMES = [
 const DOT_COLOR: Record<SlotStatus, string> = {
   done: colors.success,
   skipped: colors.danger,
-  missed: colors.danger,
   today: colors.accent,
-  upcoming: colors.accent,
+  upcoming: colors.textDim,
   paused: '#EAB308',
 };
 
