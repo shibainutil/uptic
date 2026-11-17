@@ -6,12 +6,13 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../../src/context/AuthContext';
 import { useHabits, useHabitLogEntries } from '../../../src/store/habitStore';
 import { LogEntryModal } from '../../../src/components/habits/LogEntryModal';
+import { HabitCalendar } from '../../../src/components/habits/HabitCalendar';
 import { PauseHabitModal } from '../../../src/components/habits/PauseHabitModal';
 import {
   describeSchedule, isPaused, pauseCovering, sessionSlots, withPause, withoutCurrentPause, type SessionSlot,
 } from '../../../src/lib/habitSchedule';
 import type { HabitPause } from '../../../src/types/habits';
-import { fromISO, todayISO } from '../../../src/lib/schedule';
+import { fromISO, todayISO, toISO } from '../../../src/lib/schedule';
 import { habitSlotActions } from '../../../src/lib/habitSlotActions';
 import { colors, spacing, font, radius } from '../../../src/theme';
 
@@ -41,6 +42,8 @@ export default function HabitEntriesScreen() {
   const [editingPause, setEditingPause] = useState<HabitPause | undefined>();
   const [futureOpen, setFutureOpen] = useState(false);
   const autoSkippedRef = useRef(false);
+  const now = new Date();
+  const [view, setView] = useState({ year: now.getFullYear(), month: now.getMonth() });
 
   const today = todayISO();
   const slots = habit ? sessionSlots(habit, entries, today) : [];
@@ -142,6 +145,15 @@ export default function HabitEntriesScreen() {
             </Pressable>
           </View>
         )}
+
+        <HabitCalendar
+          year={view.year}
+          month={view.month}
+          onChange={(year, month) => setView({ year, month })}
+          slots={slots}
+          today={today}
+          pausedOn={(iso) => !!habit && isPaused(habit, iso)}
+        />
 
         {/* Due */}
         {dueSlots.length > 0 && (
