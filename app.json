@@ -30,7 +30,18 @@
       "expo-router",
       "expo-status-bar",
       "expo-font",
-      "expo-splash-screen",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#121212",
+          "image": "./assets/splash-empty.png",
+          "imageWidth": 1,
+          "dark": {
+            "backgroundColor": "#121212",
+            "image": "./assets/splash-empty.png"
+          }
+        }
+      ],
       "expo-updates",
       "expo-notifications",
       "@react-native-google-signin/google-signin",
