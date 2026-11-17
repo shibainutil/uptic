@@ -1,5 +1,5 @@
 import { toISO, fromISO, addDays, diffDays } from './schedule';
-import { totalSessions, type Habit, type HabitLogEntry, type HabitPause, type HabitSchedule } from '../types/habits';
+import { isHabitComplete, totalSessions, type Habit, type HabitLogEntry, type HabitPause, type HabitSchedule } from '../types/habits';
 
 // ── Due-date logic ───────────────────────────────────────────────────────────
 
@@ -328,20 +328,25 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
     out.push({ key: `${d}|${hh(e.loggedAt)}|logged`, date: d, time: hh(e.loggedAt), status: 'done', extra: true });
   }
 
-  const remaining = habit.kind === 'limited' && habit.targetSessions != null
-    ? Math.max(0, habit.targetSessions - totalSessions(mine)) - pendingToday
-    : ONGOING_UPCOMING;
-  let pending = 0;
-  let cursor = addDays(todayISO_, 1);
-  const goalLimited = habit.kind === 'limited' && habit.targetSessions != null;
-  const forced = (d: string) => !goalLimited && through != null && d <= through;
-  for (let i = 0; i < 800 && (pending < remaining || forced(cursor)); i++, cursor = addDays(cursor, 1)) {
-    if (!isDue(habit.schedule, fromISO(cursor), habit.startDate) || isPaused(habit, cursor)) continue;
-    for (const time of times) {
-      if (skipped.has(cursor)) { out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'skipped' }); continue; }
-      if (pending >= remaining && !forced(cursor)) break;
-      out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'upcoming' });
-      pending++;
+  const completedCount = totalSessions(mine);
+  const done = habit.archived || isHabitComplete(habit, completedCount, todayISO_);
+
+  if (!done) {
+    const remaining = habit.kind === 'limited' && habit.targetSessions != null
+      ? Math.max(0, habit.targetSessions - completedCount) - pendingToday
+      : ONGOING_UPCOMING;
+    let pending = 0;
+    let cursor = addDays(todayISO_, 1);
+    const goalLimited = habit.kind === 'limited' && habit.targetSessions != null;
+    const forced = (d: string) => !goalLimited && through != null && d <= through;
+    for (let i = 0; i < 800 && (pending < remaining || forced(cursor)); i++, cursor = addDays(cursor, 1)) {
+      if (!isDue(habit.schedule, fromISO(cursor), habit.startDate) || isPaused(habit, cursor)) continue;
+      for (const time of times) {
+        if (skipped.has(cursor)) { out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'skipped' }); continue; }
+        if (pending >= remaining && !forced(cursor)) break;
+        out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'upcoming' });
+        pending++;
+      }
     }
   }
   return out.sort((a, b) => a.key.localeCompare(b.key));
