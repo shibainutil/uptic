@@ -6,10 +6,10 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../../src/context/AuthContext';
 import { useHabits, useHabitLogEntries } from '../../../src/store/habitStore';
 import { LogEntryModal } from '../../../src/components/habits/LogEntryModal';
+import { HabitCalendar } from '../../../src/components/habits/HabitCalendar';
 import { describeSchedule, sessionSlots, type SessionSlot } from '../../../src/lib/habitSchedule';
-import { fromISO, todayISO } from '../../../src/lib/schedule';
+import { fromISO, toISO, todayISO } from '../../../src/lib/schedule';
 import { colors, spacing, font, radius } from '../../../src/theme';
-import type { HabitLogEntry } from '../../../src/types/habits';
 
 function formatSlotDate(iso: string): string {
   return fromISO(iso).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
@@ -17,12 +17,6 @@ function formatSlotDate(iso: string): string {
 
 function errorAlert(e: unknown) {
   Alert.alert('Error', e instanceof Error ? e.message : 'Something went wrong.');
-}
-
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-  });
 }
 
 export default function HabitEntriesScreen() {
@@ -35,17 +29,15 @@ export default function HabitEntriesScreen() {
   const habit = habits.find((h) => h.id === habitId);
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<HabitLogEntry | undefined>(undefined);
-
-  const habitEntries = entries
-    .filter((e) => e.habitId === habitId)
-    .sort((a, b) => b.loggedAt.localeCompare(a.loggedAt));
+  const now = new Date();
+  const [view, setView] = useState({ year: now.getFullYear(), month: now.getMonth() });
 
   // The schedule, derived from the habit's rule, its log and its skipped dates.
   const today = todayISO();
   const slots = habit ? sessionSlots(habit, entries, today) : [];
-  const upcoming = slots.filter((x) => x.date >= today);
-  const earlier = slots.filter((x) => x.date < today).reverse();
+  const monthStart = toISO(new Date(view.year, view.month, 1));
+  const monthEnd = toISO(new Date(view.year, view.month + 1, 0));
+  const monthSlots = slots.filter((x) => x.date >= monthStart && x.date <= monthEnd);
 
   /** Log the slot as done: on its own date and time, or right now for today's. */
   function markDone(slot: SessionSlot) {
@@ -55,28 +47,18 @@ export default function HabitEntriesScreen() {
   }
   const skip = (slot: SessionSlot, value: boolean) => { setSkipped(habitId!, slot.date, value).catch(errorAlert); };
 
-  function openNew() {
-    setEditing(undefined);
-    setModalOpen(true);
-  }
-  function openEdit(entry: HabitLogEntry) {
-    setEditing(entry);
-    setModalOpen(true);
+  /** Take back a Done: remove the latest session logged that day (or one off its count). */
+  function undoDone(slot: SessionSlot) {
+    const latest = entries
+      .filter((e) => e.habitId === habitId && toISO(new Date(e.loggedAt)) === slot.date)
+      .sort((x, y) => y.loggedAt.localeCompare(x.loggedAt))[0];
+    if (!latest) return;
+    const task = (latest.count ?? 1) > 1 ? update(latest.id, { count: (latest.count ?? 1) - 1 }) : remove(latest.id);
+    Promise.resolve(task).catch(errorAlert);
   }
   function save(loggedAt: string, notes: string, count: number) {
-    if (editing) {
-      update(editing.id, { loggedAt, notes: notes || undefined, count });
-    } else {
-      add({ habitId: habitId!, loggedAt, notes: notes || undefined, count });
-    }
+    Promise.resolve(add({ habitId: habitId!, loggedAt, notes: notes || undefined, count })).catch(errorAlert);
     setModalOpen(false);
-  }
-  function confirmDelete() {
-    if (!editing) return;
-    Alert.alert('Delete Session', 'Remove this logged session?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => { remove(editing.id); setModalOpen(false); } },
-    ]);
   }
 
   return (
@@ -84,7 +66,7 @@ export default function HabitEntriesScreen() {
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} style={styles.back}><Text style={styles.backText}>‹ Back</Text></Pressable>
         <Text style={styles.headerTitle} numberOfLines={1}>{habit?.name ?? 'Sessions'}</Text>
-        <Pressable onPress={openNew} style={styles.addBtn}>
+        <Pressable onPress={() => setModalOpen(true)} style={styles.addBtn}>
           <Text style={styles.addBtnText}>+ Log</Text>
         </Pressable>
       </View>
@@ -92,35 +74,24 @@ export default function HabitEntriesScreen() {
       <ScrollView contentContainerStyle={styles.list}>
         {habit && <Text style={styles.scheduleText}>{describeSchedule(habit.schedule)}</Text>}
 
-        <Text style={styles.sectionHeader}>Upcoming</Text>
-        {upcoming.length === 0 ? (
-          <Text style={styles.emptyText}>Nothing scheduled.</Text>
-        ) : upcoming.map((slot) => <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} />)}
+        <HabitCalendar
+          year={view.year}
+          month={view.month}
+          onChange={(year, month) => setView({ year, month })}
+          slots={slots}
+          today={today}
+        />
 
-        {earlier.length > 0 && <Text style={styles.sectionHeader}>Earlier</Text>}
-        {earlier.map((slot) => <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} />)}
-
-        <Text style={styles.sectionHeader}>Logged sessions</Text>
-        {habitEntries.length === 0 ? (
-          <Text style={styles.emptyText}>No sessions logged yet.</Text>
-        ) : habitEntries.map((item) => (
-          <Pressable key={item.id} style={styles.row} onPress={() => openEdit(item)}>
-            <View style={styles.rowMain}>
-              <Text style={styles.rowDate}>
-                {formatDateTime(item.loggedAt)}{item.count && item.count > 1 ? ` · ×${item.count}` : ''}
-              </Text>
-              {item.notes ? <Text style={styles.rowNotes} numberOfLines={2}>{item.notes}</Text> : null}
-            </View>
-            <MaterialIcons name="chevron-right" size={22} color={colors.textMuted} />
-          </Pressable>
+        {monthSlots.length === 0 ? (
+          <Text style={styles.emptyText}>Nothing scheduled this month.</Text>
+        ) : monthSlots.map((slot) => (
+          <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} />
         ))}
       </ScrollView>
 
       <LogEntryModal
         visible={modalOpen}
-        entry={editing}
         onSave={save}
-        onDelete={editing ? confirmDelete : undefined}
         onClose={() => setModalOpen(false)}
       />
     </SafeAreaView>
@@ -132,10 +103,11 @@ const SLOT_LABEL: Record<SessionSlot['status'], string> = {
 };
 
 /** One scheduled session: tick it off or skip it (a skip can be undone). */
-function SlotRow({ slot, onDone, onSkip }: {
+function SlotRow({ slot, onDone, onSkip, onUndo }: {
   slot: SessionSlot;
   onDone: (slot: SessionSlot) => void;
   onSkip: (slot: SessionSlot, value: boolean) => void;
+  onUndo: (slot: SessionSlot) => void;
 }) {
   const { status } = slot;
   const tint = status === 'done' ? colors.success : status === 'missed' ? colors.danger : colors.textMuted;
@@ -156,7 +128,11 @@ function SlotRow({ slot, onDone, onSkip }: {
         <Pressable onPress={() => onSkip(slot, false)} hitSlop={8} style={styles.slotBtn}>
           <Text style={styles.slotBtnText}>Undo skip</Text>
         </Pressable>
-      ) : status !== 'done' ? (
+      ) : status === 'done' ? (
+        <Pressable onPress={() => onUndo(slot)} hitSlop={8} style={styles.slotBtn}>
+          <Text style={styles.slotBtnText}>Undo</Text>
+        </Pressable>
+      ) : (
         <>
           <Pressable onPress={() => onSkip(slot, true)} hitSlop={8} style={styles.slotBtn}>
             <Text style={styles.slotBtnText}>Skip</Text>
@@ -165,17 +141,13 @@ function SlotRow({ slot, onDone, onSkip }: {
             <Text style={[styles.slotBtnText, { color: '#fff' }]}>Done</Text>
           </Pressable>
         </>
-      ) : null}
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   scheduleText: { color: colors.textMuted, fontSize: font.sm },
-  sectionHeader: {
-    fontSize: 11, fontWeight: '600', color: colors.textMuted,
-    textTransform: 'uppercase', letterSpacing: 0.8, marginTop: spacing.sm,
-  },
   slot: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
     backgroundColor: colors.surface, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.surface2,

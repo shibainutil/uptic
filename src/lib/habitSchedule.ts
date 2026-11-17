@@ -234,6 +234,8 @@ export interface SessionSlot {
   date: string;     // ISO yyyy-mm-dd
   time: string;     // "HH:MM"
   status: SlotStatus;
+  /** Logged on a day the schedule doesn't list (still counts toward totals). */
+  extra?: boolean;
 }
 
 const PAST_SLOT_DAYS = 90;     // how far back unlogged / done slots are listed
@@ -268,6 +270,19 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
     });
   }
 
+  // Sessions logged on days the schedule doesn't list would otherwise be invisible.
+  const hh = (iso: string) => {
+    const d = new Date(iso);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+  const seenExtra = new Set<string>();
+  for (const e of mine) {
+    const d = entryDate(e);
+    if (d < pastStart || d > todayISO_ || seenExtra.has(d) || isDue(habit.schedule, fromISO(d), habit.startDate)) continue;
+    seenExtra.add(d);
+    out.push({ key: `${d}|${hh(e.loggedAt)}|logged`, date: d, time: hh(e.loggedAt), status: 'done', extra: true });
+  }
+
   const remaining = habit.kind === 'limited' && habit.targetSessions != null
     ? Math.max(0, habit.targetSessions - totalSessions(mine)) - pendingToday
     : ONGOING_UPCOMING;
@@ -282,5 +297,5 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
       pending++;
     }
   }
-  return out;
+  return out.sort((a, b) => a.key.localeCompare(b.key));
 }
