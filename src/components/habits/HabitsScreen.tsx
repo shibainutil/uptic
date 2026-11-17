@@ -5,7 +5,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { useHabits, useHabitLogEntries } from '../../store/habitStore';
 import { todayISO, fromISO, addDays } from '../../lib/schedule';
-import { computeRing, describeSchedule, withoutCurrentPause } from '../../lib/habitSchedule';
+import { computeRing, describeSchedule, isPaused, withoutCurrentPause } from '../../lib/habitSchedule';
 import { isHabitComplete, totalSessions, type Habit, type HabitLogEntry } from '../../types/habits';
 import { Badge } from '../ui/Badge';
 import { LogEntryModal } from './LogEntryModal';
@@ -23,9 +23,7 @@ function barColor(rate: number): string {
 }
 
 function isHabitPaused(habit: Habit, today: string): boolean {
-  if (!habit.pauses?.length) return false;
-  const last = habit.pauses[habit.pauses.length - 1];
-  return !last.until || last.until > today;
+  return isPaused(habit, today);
 }
 
 // ── Options menu ──────────────────────────────────────────────────────────────

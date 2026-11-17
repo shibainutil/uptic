@@ -101,7 +101,7 @@ export default function HabitEntriesScreen() {
           <View style={styles.freqBanner}>
             <MaterialIcons name="event-repeat" size={20} color={colors.accent} />
             <Text style={styles.freqText}>{describeSchedule(habit.schedule)}</Text>
-            {!pause
+            {!pause && !nextPause
               ? (
                 <Pressable onPress={() => setPauseOpen(true)} hitSlop={8} style={styles.pauseBtn}>
                   <MaterialIcons name="pause" size={14} color={PAUSE_COLOR} />

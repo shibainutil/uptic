@@ -87,12 +87,13 @@ export function withPause(pauses: HabitPause[], from: string, until?: string): H
   return [...rest, merged].sort((a, b) => a.from.localeCompare(b.from));
 }
 
-/** Resume today: the pause covering today ends yesterday (or disappears if it starts today). */
+/** Resume: the pause covering today ends today (inclusive) so already-paused sessions
+ *  are not resurrected as pending. The habit resumes from tomorrow. If the pause
+ *  started today, it is removed entirely. */
 export function withoutCurrentPause(habit: Habit, todayISO_: string): HabitPause[] {
-  const yesterday = addDays(todayISO_, -1);
   return (habit.pauses ?? []).flatMap((p) => {
     if (!(todayISO_ >= p.from && (p.until == null || todayISO_ <= p.until))) return [p];
-    return p.from > yesterday ? [] : [{ from: p.from, until: yesterday }];
+    return p.from >= todayISO_ ? [] : [{ from: p.from, until: todayISO_ }];
   });
 }
 
