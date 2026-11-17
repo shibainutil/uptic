@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { toISO } from '../../lib/schedule';
@@ -45,6 +46,7 @@ interface Props {
 
 /** Month grid like the fitness routine calendar: day numbers with a dot per scheduled session. */
 export function HabitCalendar({ year, month, onChange, slots, today, pausedOn }: Props) {
+  const [cellWidth, setCellWidth] = useState(0);
   const byDate = new Map<string, SessionSlot[]>();
   for (const s of slots) byDate.set(s.date, [...(byDate.get(s.date) ?? []), s]);
 
@@ -57,8 +59,10 @@ export function HabitCalendar({ year, month, onChange, slots, today, pausedOn }:
     onChange(d.getFullYear(), d.getMonth());
   };
 
+  const cell = cellWidth > 0 ? { width: cellWidth } : { flex: 1 };
+
   return (
-    <View style={styles.card}>
+    <View style={styles.card} onLayout={(e) => setCellWidth(Math.floor(e.nativeEvent.layout.width / 7))}>
       <View style={styles.nav}>
         <Pressable onPress={() => shift(-1)} style={styles.navBtn} hitSlop={8}>
           <MaterialIcons name="chevron-left" size={24} color={colors.accent} />
@@ -70,7 +74,7 @@ export function HabitCalendar({ year, month, onChange, slots, today, pausedOn }:
       </View>
 
       <View style={styles.weekRow}>
-        {DAY_LABELS.map((d) => <Text key={d} style={styles.dayHeader}>{d}</Text>)}
+        {DAY_LABELS.map((d) => <Text key={d} style={[styles.dayHeader, cell]}>{d}</Text>)}
       </View>
 
       {weeks.map((week, wi) => (
@@ -83,6 +87,7 @@ export function HabitCalendar({ year, month, onChange, slots, today, pausedOn }:
             return (
               <View key={di} style={[
                 styles.dayCell,
+                cell,
                 paused && (inMonth ? styles.dayCellPaused : styles.dayCellPausedOut),
                 isToday && styles.dayCellToday,
               ]}>
@@ -117,10 +122,10 @@ const styles = StyleSheet.create({
   monthLabel: { color: colors.text, fontSize: font.md, fontWeight: '600' },
   weekRow: { flexDirection: 'row' },
   dayHeader: {
-    width: '14.2857%', textAlign: 'center', color: colors.textMuted,
+    textAlign: 'center', color: colors.textMuted,
     fontSize: font.sm, fontWeight: '500', paddingVertical: spacing.sm,
   },
-  dayCell: { width: '14.2857%', alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.xs, height: 48 },
+  dayCell: { alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.xs, height: 48 },
   dayCellPaused: { backgroundColor: 'rgba(234,179,8,0.18)' },
   dayCellPausedOut: { backgroundColor: 'rgba(234,179,8,0.09)' },
   dayCellToday: { backgroundColor: `${colors.accent}18` },
