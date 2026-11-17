@@ -160,7 +160,7 @@ export default function ProjectOverviewScreen() {
         onPress: () => { setSkipped(h.id, lastSkip, false).catch(errorAlert); },
       });
     }
-    targetItems.push({ label: 'Open habit', icon: 'open-in-new', onPress: () => router.push(`/habits/habit/${h.id}`) });
+    targetItems.push({ label: 'Sessions, calendar & pause', icon: 'event', onPress: () => router.push(`/habits/entries/${h.id}`) });
   }
 
   const milestoneItems: ActionSheetItem[] = [];
