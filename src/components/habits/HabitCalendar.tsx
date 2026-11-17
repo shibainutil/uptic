@@ -79,9 +79,13 @@ export function HabitCalendar({ year, month, onChange, slots, today, pausedOn }:
             const iso = toISO(date);
             const isToday = iso === today;
             const dots = inMonth ? byDate.get(iso) ?? [] : [];
-            const paused = inMonth && !!pausedOn?.(iso);
+            const paused = !!pausedOn?.(iso);
             return (
-              <View key={di} style={[styles.dayCell, paused && styles.dayCellPaused, isToday && styles.dayCellToday]}>
+              <View key={di} style={[
+                styles.dayCell,
+                paused && (inMonth ? styles.dayCellPaused : styles.dayCellPausedOut),
+                isToday && styles.dayCellToday,
+              ]}>
                 <Text style={[styles.dayNumber, isToday && styles.dayNumberToday, !inMonth && styles.dayNumberOut]}>
                   {date.getDate()}
                 </Text>
@@ -113,11 +117,12 @@ const styles = StyleSheet.create({
   monthLabel: { color: colors.text, fontSize: font.md, fontWeight: '600' },
   weekRow: { flexDirection: 'row' },
   dayHeader: {
-    flex: 1, textAlign: 'center', color: colors.textMuted,
+    width: '14.2857%', textAlign: 'center', color: colors.textMuted,
     fontSize: font.sm, fontWeight: '500', paddingVertical: spacing.sm,
   },
-  dayCell: { flex: 1, alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.xs, height: 48 },
-  dayCellPaused: { backgroundColor: `${colors.textDim}2A` },
+  dayCell: { width: '14.2857%', alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.xs, height: 48 },
+  dayCellPaused: { backgroundColor: 'rgba(234,179,8,0.18)' },
+  dayCellPausedOut: { backgroundColor: 'rgba(234,179,8,0.09)' },
   dayCellToday: { backgroundColor: `${colors.accent}18` },
   dayNumber: { color: colors.text, fontSize: font.md },
   dayNumberToday: { color: colors.accent, fontWeight: '700' },
