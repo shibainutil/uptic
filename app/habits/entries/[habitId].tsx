@@ -21,7 +21,7 @@ const PAUSE_BG = 'rgba(234,179,8,0.10)';
 const PAUSE_BORDER = 'rgba(234,179,8,0.35)';
 
 function formatSlotDate(iso: string): string {
-  return fromISO(iso).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  return fromISO(iso).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function errorAlert(e: unknown) {
@@ -98,11 +98,13 @@ export default function HabitEntriesScreen() {
 
       <ScrollView contentContainerStyle={styles.list}>
         {habit && (
-          <View style={styles.scheduleRow}>
-            <Text style={styles.scheduleText}>{describeSchedule(habit.schedule)}</Text>
+          <View style={styles.freqBanner}>
+            <MaterialIcons name="event-repeat" size={18} color={colors.accent} />
+            <Text style={styles.freqText}>{describeSchedule(habit.schedule)}</Text>
             {!pause && (
-              <Pressable onPress={() => setPauseOpen(true)} hitSlop={8} style={styles.slotBtn}>
-                <Text style={styles.slotBtnText}>Pause</Text>
+              <Pressable onPress={() => setPauseOpen(true)} hitSlop={8} style={styles.pauseBtn}>
+                <MaterialIcons name="pause" size={14} color={PAUSE_COLOR} />
+                <Text style={[styles.slotBtnText, { color: PAUSE_COLOR }]}>Pause</Text>
               </Pressable>
             )}
           </View>
@@ -304,8 +306,18 @@ const styles = StyleSheet.create({
   },
   addBtnText: { color: '#fff', fontSize: font.sm, fontWeight: '600' },
   list: { padding: spacing.lg, gap: spacing.sm },
-  scheduleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
-  scheduleText: { color: colors.textMuted, fontSize: font.sm, flexShrink: 1 },
+  freqBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: 'rgba(59,130,246,0.10)', borderRadius: radius.sm,
+    borderWidth: 1, borderColor: 'rgba(59,130,246,0.30)',
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
+  },
+  freqText: { flex: 1, color: colors.text, fontSize: font.sm },
+  pauseBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 2, borderRadius: radius.sm,
+    borderWidth: 1, borderColor: PAUSE_BORDER, backgroundColor: PAUSE_BG,
+  },
   pauseBanner: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     backgroundColor: PAUSE_BG, borderRadius: radius.sm, borderWidth: 1, borderColor: PAUSE_BORDER,
