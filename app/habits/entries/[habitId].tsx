@@ -117,8 +117,13 @@ export default function HabitEntriesScreen() {
           <View style={styles.pauseBanner}>
             <MaterialIcons name="pause-circle-outline" size={20} color={PAUSE_COLOR} />
             <Text style={styles.pauseBannerText}>
-              {pause.until ? `Paused until ${day(pause.until)}` : `Paused since ${day(pause.from)} until you resume`}
+              {pause.until
+                ? `${day(pause.from)} – ${day(pause.until)}`
+                : `Since ${day(pause.from)}`}
             </Text>
+            <Pressable onPress={() => setEditingPause(pause)} hitSlop={8} style={styles.slotBtn}>
+              <Text style={styles.slotBtnText}>Edit</Text>
+            </Pressable>
             <Pressable onPress={resume} hitSlop={8} style={[styles.slotBtn, styles.slotDone]}>
               <Text style={[styles.slotBtnText, { color: '#fff' }]}>Resume</Text>
             </Pressable>
@@ -130,7 +135,9 @@ export default function HabitEntriesScreen() {
           <View style={styles.pauseBanner}>
             <MaterialIcons name="pause-circle-outline" size={20} color={PAUSE_COLOR} />
             <Text style={styles.pauseBannerText}>
-              Pause {day(nextPause.from)}{nextPause.until ? ` – ${day(nextPause.until)}` : ' until you resume'}
+              {nextPause.until
+                ? `${day(nextPause.from)} – ${day(nextPause.until)}`
+                : `From ${day(nextPause.from)}`}
             </Text>
             <Pressable onPress={() => setEditingPause(nextPause)} hitSlop={8} style={styles.slotBtn}>
               <Text style={styles.slotBtnText}>Edit</Text>
