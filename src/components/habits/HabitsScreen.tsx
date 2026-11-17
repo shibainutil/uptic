@@ -5,8 +5,9 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { useHabits, useHabitLogEntries } from '../../store/habitStore';
 import { todayISO, fromISO, addDays } from '../../lib/schedule';
-import { computeRing, describeSchedule, isPaused, withoutCurrentPause } from '../../lib/habitSchedule';
+import { computeRing, describeSchedule, isPaused, sessionSlots, withoutCurrentPause, type SessionSlot } from '../../lib/habitSchedule';
 import { isHabitComplete, totalSessions, type Habit, type HabitLogEntry } from '../../types/habits';
+import { habitSlotActions } from '../../lib/habitSlotActions';
 import { Badge } from '../ui/Badge';
 import { LogEntryModal } from './LogEntryModal';
 import { colors, spacing, font, radius } from '../../theme';
@@ -14,7 +15,7 @@ import { colors, spacing, font, radius } from '../../theme';
 const LIMITED_COLOR = '#A855F7';
 const TARGET_COLOR = '#EAB308';
 
-type SectionKey = 'future' | 'ongoing' | 'paused' | 'completed' | 'archived';
+type SectionKey = 'overdue' | 'future' | 'ongoing' | 'paused' | 'completed' | 'archived';
 
 function barColor(rate: number): string {
   if (rate >= 0.9) return colors.success;
@@ -82,11 +83,15 @@ function ProgressBar({ rate }: { rate: number }) {
 
 // ── Habit card ────────────────────────────────────────────────────────────────
 
-function HabitCard({ habit, completedCount, sessionRate, onAdd, onEdit,
-  onViewEntries, onPauseToggle, onArchiveToggle, onReset, onDelete }: {
+const OVERDUE_COLOR = '#F97316';
+
+function HabitCard({ habit, completedCount, sessionRate, section, firstSlot, onAdd, onEdit,
+  onViewEntries, onPauseToggle, onArchiveToggle, onReset, onDelete, onMarkDone, onSkip, onUndoDone }: {
   habit: Habit;
   completedCount: number;
   sessionRate: number;
+  section: SectionKey;
+  firstSlot?: SessionSlot;
   onAdd: (d: Omit<HabitLogEntry, 'id' | 'createdAt'>) => void;
   onEdit: () => void;
   onViewEntries: () => void;
@@ -94,6 +99,9 @@ function HabitCard({ habit, completedCount, sessionRate, onAdd, onEdit,
   onArchiveToggle: () => void;
   onReset: () => void;
   onDelete: () => void;
+  onMarkDone: (slot: SessionSlot) => void;
+  onSkip: (slot: SessionSlot, value: boolean) => void;
+  onUndoDone: (slot: SessionSlot) => void;
 }) {
   const [menuVisible, setMenuVisible] = useState(false);
   const [logVisible, setLogVisible] = useState(false);
@@ -107,6 +115,12 @@ function HabitCard({ habit, completedCount, sessionRate, onAdd, onEdit,
     { label: 'Reset sessions', icon: 'refresh', color: colors.danger, onPress: onReset },
     { label: 'Delete habit', icon: 'delete', color: colors.danger, onPress: onDelete },
   ];
+
+  const slotTint = firstSlot?.status === 'overdue' ? OVERDUE_COLOR
+    : firstSlot?.status === 'today' ? colors.accent
+    : firstSlot?.status === 'done' ? colors.success
+    : firstSlot?.status === 'skipped' ? colors.danger
+    : colors.textMuted;
 
   return (
     <Pressable style={cardSt.card} onPress={onViewEntries}>
@@ -146,8 +160,43 @@ function HabitCard({ habit, completedCount, sessionRate, onAdd, onEdit,
         </View>
       </View>
 
-      {/* Progress bar */}
-      <ProgressBar rate={sessionRate} />
+      {/* Progress bar — hidden for future habits (always 0%) */}
+      {section !== 'future' && <ProgressBar rate={sessionRate} />}
+
+      {/* First actionable slot */}
+      {firstSlot && (
+        <View style={cardSt.slotRow}>
+          <MaterialIcons
+            name={firstSlot.status === 'done' ? 'check-circle'
+              : firstSlot.status === 'skipped' ? 'cancel'
+              : 'radio-button-unchecked'}
+            size={18}
+            color={slotTint}
+          />
+          <Text style={[cardSt.slotDate, { color: slotTint }]}>
+            {firstSlot.status === 'overdue' ? 'Yesterday' : firstSlot.status === 'today' ? 'Today' : fromISO(firstSlot.date).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
+            {' · '}{firstSlot.time}
+          </Text>
+          {firstSlot.status === 'done' || firstSlot.status === 'skipped' ? (
+            <Pressable
+              hitSlop={8}
+              style={cardSt.slotBtn}
+              onPress={() => firstSlot.status === 'done' ? onUndoDone(firstSlot) : onSkip(firstSlot, false)}
+            >
+              <Text style={cardSt.slotBtnText}>Undo</Text>
+            </Pressable>
+          ) : (
+            <>
+              <Pressable hitSlop={8} style={cardSt.slotBtn} onPress={() => onSkip(firstSlot, true)}>
+                <Text style={cardSt.slotBtnText}>Skip</Text>
+              </Pressable>
+              <Pressable hitSlop={8} style={[cardSt.slotBtn, cardSt.slotBtnDone]} onPress={() => onMarkDone(firstSlot)}>
+                <Text style={[cardSt.slotBtnText, { color: '#fff' }]}>Done</Text>
+              </Pressable>
+            </>
+          )}
+        </View>
+      )}
 
       <OptionsMenu
         visible={menuVisible}
@@ -192,12 +241,12 @@ function SectionHeader({ label, count, open, onToggle }: {
 export function HabitsScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const { habits, update: updateHabit, remove: removeHabit, setPauses } = useHabits(user?.uid);
-  const { entries, add: addEntry, resetEntries } = useHabitLogEntries(user?.uid);
+  const { habits, update: updateHabit, remove: removeHabit, setPauses, setSkipped } = useHabits(user?.uid);
+  const { entries, add: addEntry, update: updateEntry, remove: removeEntry, resetEntries } = useHabitLogEntries(user?.uid);
   const today = todayISO();
 
   const [openSections, setOpenSections] = useState<Set<SectionKey>>(
-    new Set(['future', 'ongoing', 'paused']),
+    new Set(['overdue', 'future', 'ongoing', 'paused']),
   );
 
   function toggleSection(key: SectionKey) {
@@ -208,11 +257,17 @@ export function HabitsScreen() {
     });
   }
 
+  const slotActions = habitSlotActions({
+    today, entries, add: addEntry, update: updateEntry, remove: removeEntry, setSkipped,
+    onError: (e) => Alert.alert('Error', e instanceof Error ? e.message : 'Something went wrong.'),
+  });
+
   type HabitItem = {
     habit: Habit;
     completedCount: number;
     sessionRate: number;
     section: SectionKey;
+    firstSlot?: SessionSlot;
   };
 
   const items: HabitItem[] = habits.map(habit => {
@@ -233,7 +288,21 @@ export function HabitsScreen() {
     else if (habit.startDate > today) section = 'future';
     else                              section = 'ongoing';
 
-    return { habit, completedCount, sessionRate, section };
+    // Find the most relevant slot to show on the card:
+    // overdue (yesterday unlogged) > today (due) > done/skipped (most recent, for undo).
+    let firstSlot: SessionSlot | undefined;
+    if (section === 'ongoing') {
+      const slots = sessionSlots(habit, entries, today);
+      const overdue = slots.find(s => s.status === 'overdue');
+      const todaySlot = slots.find(s => s.status === 'today');
+      const recentDoneSkipped = slots
+        .filter(s => (s.status === 'done' || s.status === 'skipped') && s.date >= addDays(today, -1))
+        .sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time))[0];
+      firstSlot = overdue ?? todaySlot ?? recentDoneSkipped;
+      if (overdue) section = 'overdue';
+    }
+
+    return { habit, completedCount, sessionRate, section, firstSlot };
   });
 
   async function handlePauseToggle(habit: Habit) {
@@ -279,6 +348,7 @@ export function HabitsScreen() {
   }
 
   const SECTIONS: { key: SectionKey; label: string }[] = [
+    { key: 'overdue',   label: 'Overdue' },
     { key: 'ongoing',   label: 'Ongoing' },
     { key: 'paused',    label: 'Paused' },
     { key: 'future',    label: 'Future' },
@@ -328,6 +398,9 @@ export function HabitsScreen() {
                 onArchiveToggle={() => handleArchiveToggle(item.habit)}
                 onReset={() => handleReset(item.habit)}
                 onDelete={() => handleDelete(item.habit)}
+                onMarkDone={(slot) => slotActions.markDone(item.habit.id, slot)}
+                onSkip={(slot, value) => slotActions.skip(item.habit.id, slot, value)}
+                onUndoDone={(slot) => slotActions.undoDone(item.habit.id, slot)}
               />
             ))}
           </View>
@@ -383,6 +456,17 @@ const cardSt = StyleSheet.create({
   iconBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
   addBtn: { backgroundColor: colors.accent },
   menuBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
+  slotRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    paddingTop: spacing.xs, borderTopWidth: 1, borderTopColor: colors.surface2,
+  },
+  slotDate: { flex: 1, fontSize: font.sm },
+  slotBtn: {
+    paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.sm,
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface2,
+  },
+  slotBtnDone: { backgroundColor: colors.accent, borderColor: colors.accent },
+  slotBtnText: { color: colors.text, fontSize: font.sm, fontWeight: '600' },
 });
 
 const barSt = StyleSheet.create({

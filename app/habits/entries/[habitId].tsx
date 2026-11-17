@@ -50,7 +50,7 @@ export default function HabitEntriesScreen() {
 
   const dueSlots = slots.filter((s) => s.status === 'today');
   const pastSlots = slots
-    .filter((s) => s.status === 'done' || s.status === 'skipped' || s.status === 'paused')
+    .filter((s) => s.status === 'done' || s.status === 'skipped' || s.status === 'overdue' || s.status === 'paused')
     .sort((a, b) => b.date.localeCompare(a.date));
   const futureSlots = slots
     .filter((s) => s.status === 'upcoming')
@@ -226,11 +226,14 @@ export default function HabitEntriesScreen() {
   );
 }
 
+const OVERDUE_COLOR = '#F97316';
+
 function slotTint(status: SessionSlot['status'], future?: boolean): string {
   if (future) return colors.textDim;
   switch (status) {
     case 'done':    return colors.success;
     case 'skipped': return colors.danger;
+    case 'overdue': return OVERDUE_COLOR;
     case 'paused':  return PAUSE_COLOR;
     case 'today':   return colors.accent;
     default:        return colors.textMuted;
@@ -241,6 +244,7 @@ function slotIcon(status: SessionSlot['status']): React.ComponentProps<typeof Ma
   switch (status) {
     case 'done':    return 'check-circle';
     case 'skipped': return 'cancel';
+    case 'overdue': return 'error-outline';
     case 'paused':  return 'pause-circle-outline';
     default:        return 'radio-button-unchecked';
   }
@@ -249,6 +253,7 @@ function slotIcon(status: SessionSlot['status']): React.ComponentProps<typeof Ma
 const SLOT_STATUS_LABEL: Partial<Record<SessionSlot['status'], string>> = {
   done:    'Done',
   skipped: 'Skipped',
+  overdue: 'Overdue',
   paused:  'Paused',
 };
 

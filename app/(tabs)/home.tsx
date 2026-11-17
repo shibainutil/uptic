@@ -214,8 +214,8 @@ function Row({ item, actions }: { item: HomeItem; actions: RowActions }) {
   }
 
   const { slot } = item;
-  const tint = slot.status === 'done' ? SUCCESS : slot.status === 'skipped' ? colors.danger : colors.textMuted;
-  const statusText = { done: 'Done', skipped: 'Skipped', today: 'Due', upcoming: '', paused: 'Paused' }[slot.status];
+  const tint = slot.status === 'done' ? SUCCESS : slot.status === 'skipped' ? colors.danger : slot.status === 'overdue' ? OVERDUE : colors.textMuted;
+  const statusText = { done: 'Done', skipped: 'Skipped', overdue: 'Overdue', today: 'Due', upcoming: '', paused: 'Paused' }[slot.status];
   return (
     <View style={styles.row}>
       <MaterialIcons
