@@ -99,21 +99,23 @@ export default function HabitEntriesScreen() {
       <ScrollView contentContainerStyle={styles.list}>
         {habit && (
           <View style={styles.freqBanner}>
-            <MaterialIcons name="event-repeat" size={18} color={colors.accent} />
+            <MaterialIcons name="event-repeat" size={20} color={colors.accent} />
             <Text style={styles.freqText}>{describeSchedule(habit.schedule)}</Text>
-            {!pause && (
-              <Pressable onPress={() => setPauseOpen(true)} hitSlop={8} style={styles.pauseBtn}>
-                <MaterialIcons name="pause" size={14} color={PAUSE_COLOR} />
-                <Text style={[styles.slotBtnText, { color: PAUSE_COLOR }]}>Pause</Text>
-              </Pressable>
-            )}
+            {!pause
+              ? (
+                <Pressable onPress={() => setPauseOpen(true)} hitSlop={8} style={styles.pauseBtn}>
+                  <MaterialIcons name="pause" size={14} color={PAUSE_COLOR} />
+                  <Text style={[styles.slotBtnText, { color: PAUSE_COLOR }]}>Pause</Text>
+                </Pressable>
+              )
+              : <View style={styles.pauseBtnPlaceholder} />}
           </View>
         )}
 
         {/* Active pause banner (yellow) */}
         {pause && (
           <View style={styles.pauseBanner}>
-            <MaterialIcons name="pause-circle-outline" size={22} color={PAUSE_COLOR} />
+            <MaterialIcons name="pause-circle-outline" size={20} color={PAUSE_COLOR} />
             <Text style={styles.pauseBannerText}>
               {pause.until ? `Paused until ${day(pause.until)}` : `Paused since ${day(pause.from)} until you resume`}
             </Text>
@@ -126,7 +128,7 @@ export default function HabitEntriesScreen() {
         {/* Scheduled future pause banner (yellow) */}
         {!pause && nextPause && (
           <View style={styles.pauseBanner}>
-            <MaterialIcons name="pause-circle-outline" size={22} color={PAUSE_COLOR} />
+            <MaterialIcons name="pause-circle-outline" size={20} color={PAUSE_COLOR} />
             <Text style={styles.pauseBannerText}>
               Pause {day(nextPause.from)}{nextPause.until ? ` – ${day(nextPause.until)}` : ' until you resume'}
             </Text>
@@ -310,7 +312,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     backgroundColor: 'rgba(59,130,246,0.10)', borderRadius: radius.sm,
     borderWidth: 1, borderColor: 'rgba(59,130,246,0.30)',
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg, minHeight: 48,
   },
   freqText: { flex: 1, color: colors.text, fontSize: font.sm },
   pauseBtn: {
@@ -318,10 +320,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 2, borderRadius: radius.sm,
     borderWidth: 1, borderColor: PAUSE_BORDER, backgroundColor: PAUSE_BG,
   },
+  pauseBtnPlaceholder: { width: 1 },
   pauseBanner: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     backgroundColor: PAUSE_BG, borderRadius: radius.sm, borderWidth: 1, borderColor: PAUSE_BORDER,
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg, minHeight: 48,
   },
   pauseBannerText: { flex: 1, color: colors.text, fontSize: font.sm },
   sectionLabel: {

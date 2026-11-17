@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet, PixelRatio } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { toISO } from '../../lib/schedule';
 import type { SessionSlot, SlotStatus } from '../../lib/habitSchedule';
@@ -36,31 +36,32 @@ function buildMonthGrid(year: number, month: number): Cell[] {
 
 interface Props {
   year: number;
-  month: number;                       // 0-based
+  month: number;
   onChange: (year: number, month: number) => void;
   slots: SessionSlot[];
-  today: string;                       // ISO yyyy-mm-dd
-  /** Days the habit is paused; shaded. */
+  today: string;
   pausedOn?: (iso: string) => boolean;
 }
 
-/** Month grid like the fitness routine calendar: day numbers with a dot per scheduled session. */
 export function HabitCalendar({ year, month, onChange, slots, today, pausedOn }: Props) {
-  const [gridWidth, setGridWidth] = useState(0);
+  const [rowWidth, setRowWidth] = useState(0);
   const byDate = new Map<string, SessionSlot[]>();
   for (const s of slots) byDate.set(s.date, [...(byDate.get(s.date) ?? []), s]);
 
   const cells = buildMonthGrid(year, month);
+  const weeks: Cell[][] = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
 
   const shift = (delta: number) => {
     const d = new Date(year, month + delta, 1);
     onChange(d.getFullYear(), d.getMonth());
   };
 
-  // Exact integer cell width from measured container; tiles perfectly with no remainders.
-  const cw = gridWidth > 0 ? Math.floor(gridWidth / 7) : 0;
-  // Grid container is exactly 7×cw wide so there is no leftover pixel to distribute.
-  const gridStyle = cw > 0 ? { width: cw * 7 } : { alignSelf: 'stretch' as const };
+  // Round to the nearest physical pixel so all 6 sized columns land on exact pixel
+  // boundaries. The 7th column (Sunday) uses flex:1 to absorb any sub-pixel remainder
+  // — this avoids both inter-column gaps and dead space on the right edge.
+  const cw = rowWidth > 0 ? PixelRatio.roundToNearestPixel(rowWidth / 7) : 0;
+  const colWidth = (col: number) => col < 6 ? (cw > 0 ? { width: cw } : { flex: 1 }) : { flex: 1 };
 
   return (
     <View style={styles.card}>
@@ -74,42 +75,45 @@ export function HabitCalendar({ year, month, onChange, slots, today, pausedOn }:
         </Pressable>
       </View>
 
-      {/* Single flat flex-wrap container — no row-wrapper Views — eliminates phantom column gaps */}
       <View
-        style={[styles.grid, gridStyle]}
-        onLayout={(e) => setGridWidth(e.nativeEvent.layout.width)}
+        style={styles.headerRow}
+        onLayout={(e) => setRowWidth(e.nativeEvent.layout.width)}
       >
-        {DAY_LABELS.map((d) => (
-          <Text key={d} style={[styles.dayHeader, cw > 0 && { width: cw }]}>{d}</Text>
+        {DAY_LABELS.map((d, i) => (
+          <Text key={d} style={[styles.dayHeader, colWidth(i)]}>{d}</Text>
         ))}
-
-        {cells.map(({ date, inMonth }, i) => {
-          const iso = toISO(date);
-          const isToday = iso === today;
-          const dots = inMonth ? byDate.get(iso) ?? [] : [];
-          const paused = !!pausedOn?.(iso);
-          return (
-            <View
-              key={i}
-              style={[
-                styles.dayCell,
-                cw > 0 && { width: cw },
-                paused && (inMonth ? styles.dayCellPaused : styles.dayCellPausedOut),
-                isToday && styles.dayCellToday,
-              ]}
-            >
-              <Text style={[styles.dayNumber, isToday && styles.dayNumberToday, !inMonth && styles.dayNumberOut]}>
-                {date.getDate()}
-              </Text>
-              <View style={styles.dotRow}>
-                {dots.length > 0
-                  ? dots.map((s) => <View key={s.key} style={[styles.dot, { backgroundColor: DOT_COLOR[s.status] }]} />)
-                  : <View style={[styles.dot, styles.dotHidden]} />}
-              </View>
-            </View>
-          );
-        })}
       </View>
+
+      {weeks.map((week, wi) => (
+        <View key={wi} style={styles.weekRow}>
+          {week.map(({ date, inMonth }, di) => {
+            const iso = toISO(date);
+            const isToday = iso === today;
+            const dots = inMonth ? byDate.get(iso) ?? [] : [];
+            const paused = !!pausedOn?.(iso);
+            return (
+              <View
+                key={di}
+                style={[
+                  styles.dayCell,
+                  colWidth(di),
+                  paused && (inMonth ? styles.dayCellPaused : styles.dayCellPausedOut),
+                  isToday && styles.dayCellToday,
+                ]}
+              >
+                <Text style={[styles.dayNumber, isToday && styles.dayNumberToday, !inMonth && styles.dayNumberOut]}>
+                  {date.getDate()}
+                </Text>
+                <View style={styles.dotRow}>
+                  {dots.length > 0
+                    ? dots.map((s) => <View key={s.key} style={[styles.dot, { backgroundColor: DOT_COLOR[s.status] }]} />)
+                    : <View style={[styles.dot, styles.dotHidden]} />}
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      ))}
     </View>
   );
 }
@@ -126,7 +130,8 @@ const styles = StyleSheet.create({
   },
   navBtn: { padding: spacing.xs },
   monthLabel: { color: colors.text, fontSize: font.md, fontWeight: '600' },
-  grid: { flexDirection: 'row', flexWrap: 'wrap' },
+  headerRow: { flexDirection: 'row' },
+  weekRow: { flexDirection: 'row' },
   dayHeader: {
     textAlign: 'center', color: colors.textMuted,
     fontSize: font.sm, fontWeight: '500', paddingVertical: spacing.sm,
