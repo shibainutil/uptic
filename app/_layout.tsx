@@ -40,7 +40,7 @@ function RootNavigator() {
     if (!user && !inAuthGroup) {
       router.replace('/(auth)/login');
     } else if (user && inAuthGroup) {
-      router.replace('/(tabs)/fitness');
+      router.replace('/(tabs)/home');
     }
   }, [user, loading, segments]);
 

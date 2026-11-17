@@ -282,7 +282,11 @@ const ONGOING_UPCOMING = 10;   // upcoming slots listed for habits without a ses
  * many as are left to reach it (skipped dates excluded, so they push the end
  * later); otherwise the next 10.
  */
-export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: string): SessionSlot[] {
+/**
+ * `through`: for habits without a session goal, keep listing upcoming slots at least up to
+ * this date (the next 10 may not reach the end of the week for a busy habit).
+ */
+export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: string, through?: string): SessionSlot[] {
   const mine = entries.filter((e) => e.habitId === habit.id);
   const loggedByDate = new Map<string, number>();
   for (const e of mine) loggedByDate.set(entryDate(e), (loggedByDate.get(entryDate(e)) ?? 0) + (e.count ?? 1));
@@ -324,11 +328,13 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
     : ONGOING_UPCOMING;
   let pending = 0;
   let cursor = addDays(todayISO_, 1);
-  for (let i = 0; i < 800 && pending < remaining; i++, cursor = addDays(cursor, 1)) {
+  const goalLimited = habit.kind === 'limited' && habit.targetSessions != null;
+  const forced = (d: string) => !goalLimited && through != null && d <= through;
+  for (let i = 0; i < 800 && (pending < remaining || forced(cursor)); i++, cursor = addDays(cursor, 1)) {
     if (!isDue(habit.schedule, fromISO(cursor), habit.startDate) || isPaused(habit, cursor)) continue;
     for (const time of times) {
       if (skipped.has(cursor)) { out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'skipped' }); continue; }
-      if (pending >= remaining) break;
+      if (pending >= remaining && !forced(cursor)) break;
       out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'upcoming' });
       pending++;
     }

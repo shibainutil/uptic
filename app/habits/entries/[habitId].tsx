@@ -13,6 +13,7 @@ import {
 } from '../../../src/lib/habitSchedule';
 import type { HabitPause } from '../../../src/types/habits';
 import { fromISO, toISO, todayISO } from '../../../src/lib/schedule';
+import { habitSlotActions } from '../../../src/lib/habitSlotActions';
 import { colors, spacing, font, radius } from '../../../src/theme';
 
 function formatSlotDate(iso: string): string {
@@ -58,23 +59,10 @@ export default function HabitEntriesScreen() {
     if (habit) setPauses(habit.id, (habit.pauses ?? []).filter((x) => x !== p)).catch(errorAlert);
   };
 
-  /** Log the slot as done: on its own date and time, or right now for today's. */
-  function markDone(slot: SessionSlot) {
-    const [h, m] = slot.time.split(':').map(Number);
-    const at = slot.date === today ? new Date() : (() => { const d = fromISO(slot.date); d.setHours(h, m, 0, 0); return d; })();
-    Promise.resolve(add({ habitId: habitId!, loggedAt: at.toISOString(), count: 1 })).catch(errorAlert);
-  }
-  const skip = (slot: SessionSlot, value: boolean) => { setSkipped(habitId!, slot.date, value).catch(errorAlert); };
-
-  /** Take back a Done: remove the latest session logged that day (or one off its count). */
-  function undoDone(slot: SessionSlot) {
-    const latest = entries
-      .filter((e) => e.habitId === habitId && toISO(new Date(e.loggedAt)) === slot.date)
-      .sort((x, y) => y.loggedAt.localeCompare(x.loggedAt))[0];
-    if (!latest) return;
-    const task = (latest.count ?? 1) > 1 ? update(latest.id, { count: (latest.count ?? 1) - 1 }) : remove(latest.id);
-    Promise.resolve(task).catch(errorAlert);
-  }
+  const slotActions = habitSlotActions({ today, entries, add, update, remove, setSkipped, onError: errorAlert });
+  const markDone = (slot: SessionSlot) => slotActions.markDone(habitId!, slot);
+  const skip = (slot: SessionSlot, value: boolean) => slotActions.skip(habitId!, slot, value);
+  const undoDone = (slot: SessionSlot) => slotActions.undoDone(habitId!, slot);
   function save(loggedAt: string, notes: string, count: number) {
     Promise.resolve(add({ habitId: habitId!, loggedAt, notes: notes || undefined, count })).catch(errorAlert);
     setModalOpen(false);
