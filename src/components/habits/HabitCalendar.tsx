@@ -46,23 +46,24 @@ interface Props {
 
 /** Month grid like the fitness routine calendar: day numbers with a dot per scheduled session. */
 export function HabitCalendar({ year, month, onChange, slots, today, pausedOn }: Props) {
-  const [cellWidth, setCellWidth] = useState(0);
+  const [gridWidth, setGridWidth] = useState(0);
   const byDate = new Map<string, SessionSlot[]>();
   for (const s of slots) byDate.set(s.date, [...(byDate.get(s.date) ?? []), s]);
 
   const cells = buildMonthGrid(year, month);
-  const weeks: Cell[][] = [];
-  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
 
   const shift = (delta: number) => {
     const d = new Date(year, month + delta, 1);
     onChange(d.getFullYear(), d.getMonth());
   };
 
-  const cell = cellWidth > 0 ? { width: cellWidth } : { flex: 1 };
+  // Exact integer cell width from measured container; tiles perfectly with no remainders.
+  const cw = gridWidth > 0 ? Math.floor(gridWidth / 7) : 0;
+  // Grid container is exactly 7×cw wide so there is no leftover pixel to distribute.
+  const gridStyle = cw > 0 ? { width: cw * 7 } : { alignSelf: 'stretch' as const };
 
   return (
-    <View style={styles.card} onLayout={(e) => setCellWidth(Math.floor(e.nativeEvent.layout.width / 7))}>
+    <View style={styles.card}>
       <View style={styles.nav}>
         <Pressable onPress={() => shift(-1)} style={styles.navBtn} hitSlop={8}>
           <MaterialIcons name="chevron-left" size={24} color={colors.accent} />
@@ -73,37 +74,42 @@ export function HabitCalendar({ year, month, onChange, slots, today, pausedOn }:
         </Pressable>
       </View>
 
-      <View style={styles.weekRow}>
-        {DAY_LABELS.map((d) => <Text key={d} style={[styles.dayHeader, cell]}>{d}</Text>)}
-      </View>
+      {/* Single flat flex-wrap container — no row-wrapper Views — eliminates phantom column gaps */}
+      <View
+        style={[styles.grid, gridStyle]}
+        onLayout={(e) => setGridWidth(e.nativeEvent.layout.width)}
+      >
+        {DAY_LABELS.map((d) => (
+          <Text key={d} style={[styles.dayHeader, cw > 0 && { width: cw }]}>{d}</Text>
+        ))}
 
-      {weeks.map((week, wi) => (
-        <View key={wi} style={styles.weekRow}>
-          {week.map(({ date, inMonth }, di) => {
-            const iso = toISO(date);
-            const isToday = iso === today;
-            const dots = inMonth ? byDate.get(iso) ?? [] : [];
-            const paused = !!pausedOn?.(iso);
-            return (
-              <View key={di} style={[
+        {cells.map(({ date, inMonth }, i) => {
+          const iso = toISO(date);
+          const isToday = iso === today;
+          const dots = inMonth ? byDate.get(iso) ?? [] : [];
+          const paused = !!pausedOn?.(iso);
+          return (
+            <View
+              key={i}
+              style={[
                 styles.dayCell,
-                cell,
+                cw > 0 && { width: cw },
                 paused && (inMonth ? styles.dayCellPaused : styles.dayCellPausedOut),
                 isToday && styles.dayCellToday,
-              ]}>
-                <Text style={[styles.dayNumber, isToday && styles.dayNumberToday, !inMonth && styles.dayNumberOut]}>
-                  {date.getDate()}
-                </Text>
-                <View style={styles.dotRow}>
-                  {dots.length > 0
-                    ? dots.map((s) => <View key={s.key} style={[styles.dot, { backgroundColor: DOT_COLOR[s.status] }]} />)
-                    : <View style={[styles.dot, styles.dotHidden]} />}
-                </View>
+              ]}
+            >
+              <Text style={[styles.dayNumber, isToday && styles.dayNumberToday, !inMonth && styles.dayNumberOut]}>
+                {date.getDate()}
+              </Text>
+              <View style={styles.dotRow}>
+                {dots.length > 0
+                  ? dots.map((s) => <View key={s.key} style={[styles.dot, { backgroundColor: DOT_COLOR[s.status] }]} />)
+                  : <View style={[styles.dot, styles.dotHidden]} />}
               </View>
-            );
-          })}
-        </View>
-      ))}
+            </View>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -120,7 +126,7 @@ const styles = StyleSheet.create({
   },
   navBtn: { padding: spacing.xs },
   monthLabel: { color: colors.text, fontSize: font.md, fontWeight: '600' },
-  weekRow: { flexDirection: 'row' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap' },
   dayHeader: {
     textAlign: 'center', color: colors.textMuted,
     fontSize: font.sm, fontWeight: '500', paddingVertical: spacing.sm,
