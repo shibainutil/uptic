@@ -220,3 +220,67 @@ export function habitWindowCounts(habit: Habit, entries: HabitLogEntry[], fromIS
   // Logging extra sessions can't push the rate past 100 %.
   return { completed: Math.min(logged, expected), expected };
 }
+
+// ── Scheduled sessions (what the habit's sessions screen lists) ─────────────
+// Nothing is stored per slot: slots are derived from the schedule, the logged
+// entries and the skipped dates, so editing the schedule or skipping a day just
+// reshuffles them. Marking a slot done logs an ordinary entry; skipping adds the
+// date to `skippedDates`.
+
+export type SlotStatus = 'done' | 'skipped' | 'missed' | 'today' | 'upcoming';
+
+export interface SessionSlot {
+  key: string;
+  date: string;     // ISO yyyy-mm-dd
+  time: string;     // "HH:MM"
+  status: SlotStatus;
+}
+
+const PAST_SLOT_DAYS = 90;     // how far back unlogged / done slots are listed
+const ONGOING_UPCOMING = 10;   // upcoming slots listed for habits without a session goal
+
+/**
+ * Past slots (done / skipped / missed) from the last ~90 days, today's slots, and
+ * the upcoming slots still needed: for a habit with a session goal, exactly as
+ * many as are left to reach it (skipped dates excluded, so they push the end
+ * later); otherwise the next 10.
+ */
+export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: string): SessionSlot[] {
+  const mine = entries.filter((e) => e.habitId === habit.id);
+  const loggedByDate = new Map<string, number>();
+  for (const e of mine) loggedByDate.set(entryDate(e), (loggedByDate.get(entryDate(e)) ?? 0) + (e.count ?? 1));
+  const skipped = new Set(habit.skippedDates ?? []);
+  const times = (habit.schedule.timesOfDay ?? []).length ? habit.schedule.timesOfDay.slice().sort() : ['09:00'];
+  const out: SessionSlot[] = [];
+
+  const pastStart = habit.startDate > addDays(todayISO_, -PAST_SLOT_DAYS) ? habit.startDate : addDays(todayISO_, -PAST_SLOT_DAYS);
+  let pendingToday = 0;
+  for (let d = pastStart; d <= todayISO_; d = addDays(d, 1)) {
+    if (!isDue(habit.schedule, fromISO(d), habit.startDate)) continue;
+    const logged = loggedByDate.get(d) ?? 0;
+    times.forEach((time, i) => {
+      let status: SlotStatus;
+      if (skipped.has(d)) status = 'skipped';
+      else if (i < logged) status = 'done';
+      else if (d === todayISO_) { status = 'today'; pendingToday++; }
+      else status = 'missed';
+      out.push({ key: `${d}|${time}`, date: d, time, status });
+    });
+  }
+
+  const remaining = habit.kind === 'limited' && habit.targetSessions != null
+    ? Math.max(0, habit.targetSessions - totalSessions(mine)) - pendingToday
+    : ONGOING_UPCOMING;
+  let pending = 0;
+  let cursor = addDays(todayISO_, 1);
+  for (let i = 0; i < 800 && pending < remaining; i++, cursor = addDays(cursor, 1)) {
+    if (!isDue(habit.schedule, fromISO(cursor), habit.startDate)) continue;
+    for (const time of times) {
+      if (skipped.has(cursor)) { out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'skipped' }); continue; }
+      if (pending >= remaining) break;
+      out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'upcoming' });
+      pending++;
+    }
+  }
+  return out;
+}

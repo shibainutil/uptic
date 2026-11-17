@@ -6,7 +6,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { useAuth } from '../../context/AuthContext';
 import { useHabits, useHabitLogEntries } from '../../store/habitStore';
 import { todayISO, fromISO, diffDays } from '../../lib/schedule';
-import { computeRing, describeSchedule } from '../../lib/habitSchedule';
+import { computeRing, describeSchedule, upcomingDates } from '../../lib/habitSchedule';
 import { isHabitComplete, totalSessions, type Habit, type HabitLogEntry } from '../../types/habits';
 import { ringColor, describeArc } from '../ui/ProgressRing';
 import { Badge } from '../ui/Badge';
@@ -117,6 +117,7 @@ function HabitCard({ habit, completedCount, sessionRate, timeRate, entries, onAd
   const today = todayISO();
   const sortedEntries = entries.slice().sort((a, b) => b.loggedAt.localeCompare(a.loggedAt));
   const shown = sortedEntries.slice(0, EXPANDED_ENTRY_LIMIT);
+  const nextDue = upcomingDates(habit, entries, today, 1)[0];
   const daysLeft = habit.targetDate ? Math.max(0, diffDays(habit.targetDate, today)) : null;
 
   let paceStatus: { label: string; color: string } | null = null;
@@ -188,7 +189,9 @@ function HabitCard({ habit, completedCount, sessionRate, timeRate, entries, onAd
       {expanded && (
         <View style={styles.entriesList}>
           {shown.length === 0 ? (
-            <Text style={styles.noEntriesText}>No sessions logged yet.</Text>
+            <Text style={styles.noEntriesText}>
+              Nothing logged yet.{nextDue ? ` Next: ${fromISO(nextDue).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}.` : ''}
+            </Text>
           ) : (
             shown.map((e) => (
               <View key={e.id} style={styles.entryRow}>
