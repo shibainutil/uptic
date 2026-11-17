@@ -11,6 +11,24 @@ import { AuthProvider, useAuth } from '../src/context/AuthContext';
 // only silences the dev-only red toast.
 LogBox.ignoreLogs(['ref.measureLayout must be called with a ref to a native component']);
 
+// LogBox only hides the on-screen toast; Metro's terminal still prints every console
+// error/warning. Drop the two known library-originated dev messages there too
+// (the measureLayout one above, and "InteractionManager has been deprecated", which
+// comes from expo-router's stack Card and react-native-draggable-flatlist, not our code).
+if (__DEV__) {
+  const NOISE = [
+    'ref.measureLayout must be called with a ref to a native component',
+    'InteractionManager has been deprecated',
+  ];
+  for (const level of ['error', 'warn'] as const) {
+    const original = console[level];
+    console[level] = (...args: unknown[]) => {
+      if (typeof args[0] === 'string' && NOISE.some((m) => (args[0] as string).includes(m))) return;
+      original(...args);
+    };
+  }
+}
+
 function RootNavigator() {
   const { user, loading } = useAuth();
   const router = useRouter();
