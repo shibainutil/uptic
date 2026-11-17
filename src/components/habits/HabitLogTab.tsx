@@ -6,7 +6,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { useAuth } from '../../context/AuthContext';
 import { useHabits, useHabitLogEntries } from '../../store/habitStore';
 import { todayISO, fromISO, diffDays } from '../../lib/schedule';
-import { computeRing, describeSchedule, upcomingDates } from '../../lib/habitSchedule';
+import { computeRing, describeSchedule, pauseCovering, upcomingDates } from '../../lib/habitSchedule';
 import { isHabitComplete, totalSessions, type Habit, type HabitLogEntry } from '../../types/habits';
 import { ringColor, describeArc } from '../ui/ProgressRing';
 import { Badge } from '../ui/Badge';
@@ -142,6 +142,9 @@ function HabitCard({ habit, completedCount, sessionRate, timeRate, entries, onAd
               label={describeSchedule(habit.schedule)}
               icon={<MaterialIcons name="event-repeat" size={10} color={colors.accent} />}
             />
+            {pauseCovering(habit, today) && (
+              <Badge color={colors.textMuted} label="Paused" icon={<MaterialIcons name="pause" size={10} color={colors.textMuted} />} />
+            )}
             {habit.kind === 'limited' && habit.targetDate && (
               <Badge
                 color={LIMITED_COLOR}

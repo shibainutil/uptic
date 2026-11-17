@@ -7,7 +7,11 @@ import { useAuth } from '../../../src/context/AuthContext';
 import { useHabits, useHabitLogEntries } from '../../../src/store/habitStore';
 import { LogEntryModal } from '../../../src/components/habits/LogEntryModal';
 import { HabitCalendar } from '../../../src/components/habits/HabitCalendar';
-import { describeSchedule, sessionSlots, type SessionSlot } from '../../../src/lib/habitSchedule';
+import { PauseHabitModal } from '../../../src/components/habits/PauseHabitModal';
+import {
+  describeSchedule, isPaused, pauseCovering, sessionSlots, withPause, withoutCurrentPause, type SessionSlot,
+} from '../../../src/lib/habitSchedule';
+import type { HabitPause } from '../../../src/types/habits';
 import { fromISO, toISO, todayISO } from '../../../src/lib/schedule';
 import { colors, spacing, font, radius } from '../../../src/theme';
 
@@ -23,12 +27,13 @@ export default function HabitEntriesScreen() {
   const { habitId } = useLocalSearchParams<{ habitId: string }>();
   const router = useRouter();
   const { user } = useAuth();
-  const { habits, setSkipped } = useHabits(user?.uid);
+  const { habits, setSkipped, setPauses } = useHabits(user?.uid);
   const { entries, add, update, remove } = useHabitLogEntries(user?.uid);
 
   const habit = habits.find((h) => h.id === habitId);
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [pauseOpen, setPauseOpen] = useState(false);
   const now = new Date();
   const [view, setView] = useState({ year: now.getFullYear(), month: now.getMonth() });
 
@@ -38,6 +43,20 @@ export default function HabitEntriesScreen() {
   const monthStart = toISO(new Date(view.year, view.month, 1));
   const monthEnd = toISO(new Date(view.year, view.month + 1, 0));
   const monthSlots = slots.filter((x) => x.date >= monthStart && x.date <= monthEnd);
+
+  // Pausing: a pause hides its days from the schedule, so a session goal's last
+  // session slides to after it; an open-ended pause leaves nothing scheduled.
+  const pause = habit ? pauseCovering(habit, today) : undefined;
+  const nextPause = habit?.pauses?.find((p) => p.from > today);
+  const day = (iso: string) => fromISO(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  const savePause = (from: string, until?: string) => {
+    setPauses(habitId!, withPause(habit?.pauses ?? [], from, until)).catch(errorAlert);
+    setPauseOpen(false);
+  };
+  const resume = () => { if (habit) setPauses(habit.id, withoutCurrentPause(habit, today)).catch(errorAlert); };
+  const cancelPause = (p: HabitPause) => {
+    if (habit) setPauses(habit.id, (habit.pauses ?? []).filter((x) => x !== p)).catch(errorAlert);
+  };
 
   /** Log the slot as done: on its own date and time, or right now for today's. */
   function markDone(slot: SessionSlot) {
@@ -72,7 +91,39 @@ export default function HabitEntriesScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.list}>
-        {habit && <Text style={styles.scheduleText}>{describeSchedule(habit.schedule)}</Text>}
+        {habit && (
+          <View style={styles.scheduleRow}>
+            <Text style={styles.scheduleText}>{describeSchedule(habit.schedule)}</Text>
+            {!pause && (
+              <Pressable onPress={() => setPauseOpen(true)} hitSlop={8} style={styles.slotBtn}>
+                <Text style={styles.slotBtnText}>Pause</Text>
+              </Pressable>
+            )}
+          </View>
+        )}
+
+        {pause && (
+          <View style={styles.banner}>
+            <MaterialIcons name="pause-circle-outline" size={22} color={colors.textMuted} />
+            <Text style={styles.bannerText}>
+              {pause.until ? `Paused until ${day(pause.until)}` : `Paused since ${day(pause.from)} until you resume`}
+            </Text>
+            <Pressable onPress={resume} hitSlop={8} style={[styles.slotBtn, styles.slotDone]}>
+              <Text style={[styles.slotBtnText, { color: '#fff' }]}>Resume</Text>
+            </Pressable>
+          </View>
+        )}
+        {!pause && nextPause && (
+          <View style={styles.banner}>
+            <MaterialIcons name="pause-circle-outline" size={22} color={colors.textMuted} />
+            <Text style={styles.bannerText}>
+              Pause {day(nextPause.from)}{nextPause.until ? ` – ${day(nextPause.until)}` : ' until you resume'}
+            </Text>
+            <Pressable onPress={() => cancelPause(nextPause)} hitSlop={8} style={styles.slotBtn}>
+              <Text style={styles.slotBtnText}>Cancel</Text>
+            </Pressable>
+          </View>
+        )}
 
         <HabitCalendar
           year={view.year}
@@ -80,14 +131,21 @@ export default function HabitEntriesScreen() {
           onChange={(year, month) => setView({ year, month })}
           slots={slots}
           today={today}
+          pausedOn={(iso) => !!habit && isPaused(habit, iso)}
         />
 
         {monthSlots.length === 0 ? (
-          <Text style={styles.emptyText}>Nothing scheduled this month.</Text>
+          <Text style={styles.emptyText}>
+          {habit && isPaused(habit, monthStart) && isPaused(habit, monthEnd) ? 'Paused this month.' : 'Nothing scheduled this month.'}
+        </Text>
         ) : monthSlots.map((slot) => (
           <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} />
         ))}
       </ScrollView>
+
+      {pauseOpen && (
+        <PauseHabitModal visible today={today} onSave={savePause} onClose={() => setPauseOpen(false)} />
+      )}
 
       <LogEntryModal
         visible={modalOpen}
@@ -147,7 +205,14 @@ function SlotRow({ slot, onDone, onSkip, onUndo }: {
 }
 
 const styles = StyleSheet.create({
-  scheduleText: { color: colors.textMuted, fontSize: font.sm },
+  scheduleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
+  scheduleText: { color: colors.textMuted, fontSize: font.sm, flexShrink: 1 },
+  banner: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    backgroundColor: colors.surface, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border,
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
+  },
+  bannerText: { flex: 1, color: colors.text, fontSize: font.sm },
   slot: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
     backgroundColor: colors.surface, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.surface2,

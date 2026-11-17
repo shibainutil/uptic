@@ -14,7 +14,7 @@ import {
 } from 'firebase/firestore';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { db } from '../firebase';
-import type { Habit, HabitLogEntry } from '../types/habits';
+import type { Habit, HabitLogEntry, HabitPause } from '../types/habits';
 
 // Firestore collection names predate the Cleaning -> Habits rename and were kept
 // as-is to avoid a risky data migration; they're an internal implementation
@@ -87,7 +87,12 @@ export function useHabits(userId: string | null | undefined) {
     });
   }, [userId]);
 
-  return { habits, loaded, add, update, remove, setSkipped };
+  /** Replace the habit's pauses (add, end or cancel one). */
+  const setPauses = useCallback(async (id: string, pauses: HabitPause[]) => {
+    await updateDoc(userDoc(userId!, HABITS_COL, id), { pauses });
+  }, [userId]);
+
+  return { habits, loaded, add, update, remove, setSkipped, setPauses };
 }
 
 // ── Log entries ───────────────────────────────────────────────────────────────

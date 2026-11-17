@@ -1,5 +1,5 @@
 import { toISO, fromISO, addDays, diffDays } from './schedule';
-import { totalSessions, type Habit, type HabitLogEntry, type HabitSchedule } from '../types/habits';
+import { totalSessions, type Habit, type HabitLogEntry, type HabitPause, type HabitSchedule } from '../types/habits';
 
 // ── Due-date logic ───────────────────────────────────────────────────────────
 
@@ -59,13 +59,49 @@ export function enumerateDueDates(schedule: HabitSchedule, startISO: string, fro
   return out;
 }
 
-/** How many (date × time-of-day) occurrences a schedule produces in [from, until], minus skipped dates. */
+// ── Pauses and skips ────────────────────────────────────────────────────────
+
+/** The pause covering this date, if any. */
+export function pauseCovering(habit: Habit, iso: string): HabitPause | undefined {
+  return (habit.pauses ?? []).find((p) => iso >= p.from && (p.until == null || iso <= p.until));
+}
+
+export const isPaused = (habit: Habit, iso: string): boolean => pauseCovering(habit, iso) !== undefined;
+
+/** Not scheduled: paused, or skipped by the user. */
+export const isOff = (habit: Habit, iso: string): boolean =>
+  isPaused(habit, iso) || (habit.skippedDates ?? []).includes(iso);
+
+/** Add a pause, merging it with any pause it overlaps or touches. */
+export function withPause(pauses: HabitPause[], from: string, until?: string): HabitPause[] {
+  let lo = from;
+  let hi: string | undefined = until;
+  const rest: HabitPause[] = [];
+  for (const p of pauses) {
+    const overlaps = (hi == null || p.from <= addDays(hi, 1)) && (p.until == null || p.until >= addDays(lo, -1));
+    if (!overlaps) { rest.push(p); continue; }
+    if (p.from < lo) lo = p.from;
+    hi = hi == null || p.until == null ? undefined : (p.until > hi ? p.until : hi);
+  }
+  const merged: HabitPause = hi == null ? { from: lo } : { from: lo, until: hi };
+  return [...rest, merged].sort((a, b) => a.from.localeCompare(b.from));
+}
+
+/** Resume today: the pause covering today ends yesterday (or disappears if it starts today). */
+export function withoutCurrentPause(habit: Habit, todayISO_: string): HabitPause[] {
+  const yesterday = addDays(todayISO_, -1);
+  return (habit.pauses ?? []).flatMap((p) => {
+    if (!(todayISO_ >= p.from && (p.until == null || todayISO_ <= p.until))) return [p];
+    return p.from > yesterday ? [] : [{ from: p.from, until: yesterday }];
+  });
+}
+
+/** How many (date × time-of-day) occurrences a schedule produces in [from, until], minus `off` dates. */
 export function countScheduledSlots(
-  schedule: HabitSchedule, startISO: string, fromISO_: string, untilISO: string, skippedDates: string[] = [],
+  schedule: HabitSchedule, startISO: string, fromISO_: string, untilISO: string, off?: (iso: string) => boolean,
 ): number {
   if (diffDays(untilISO, fromISO_) < 0) return 0;
-  const skipped = new Set(skippedDates);
-  const dueDates = enumerateDueDates(schedule, startISO, fromISO_, untilISO).filter((d) => !skipped.has(d));
+  const dueDates = enumerateDueDates(schedule, startISO, fromISO_, untilISO).filter((d) => !off?.(d));
   return dueDates.length * slotsPerDay(schedule);
 }
 
@@ -90,12 +126,11 @@ export function sessionsSince(habit: Habit, entries: HabitLogEntry[], sinceISO: 
  * today's sessions are all logged. Stops after `limit` dates or ~2 years.
  */
 export function upcomingDates(habit: Habit, entries: HabitLogEntry[], todayISO_: string, limit: number): string[] {
-  const skipped = new Set(habit.skippedDates ?? []);
   const loggedToday = totalSessions(entries.filter((e) => e.habitId === habit.id && entryDate(e) === todayISO_));
   const out: string[] = [];
   let cursor = habit.startDate > todayISO_ ? habit.startDate : todayISO_;
   for (let i = 0; i < 800 && out.length < limit; i++, cursor = addDays(cursor, 1)) {
-    if (skipped.has(cursor) || !isDue(habit.schedule, fromISO(cursor), habit.startDate)) continue;
+    if (isOff(habit, cursor) || !isDue(habit.schedule, fromISO(cursor), habit.startDate)) continue;
     if (cursor === todayISO_ && loggedToday >= slotsPerDay(habit.schedule)) continue;
     out.push(cursor);
   }
@@ -196,7 +231,7 @@ export function computeRing(habit: Habit, entries: HabitLogEntry[], period: Ring
   const end = periodEndRaw > todayISO ? todayISO : periodEndRaw;
   if (diffDays(end, start) < 0) return { rate: 0, completed: 0, expected: 0 };
 
-  const expected = countScheduledSlots(habit.schedule, habit.startDate, start, end, habit.skippedDates);
+  const expected = countScheduledSlots(habit.schedule, habit.startDate, start, end, (d) => isOff(habit, d));
   const rangeEndExclusive = addDays(end, 1);
   const completed = totalSessions(entries.filter(
     (e) => e.habitId === habit.id && e.loggedAt >= start && e.loggedAt < rangeEndExclusive,
@@ -212,7 +247,7 @@ export function computeRing(habit: Habit, entries: HabitLogEntry[], period: Ring
 export function habitWindowCounts(habit: Habit, entries: HabitLogEntry[], fromISO_: string, untilISO: string) {
   const start = fromISO_ < habit.startDate ? habit.startDate : fromISO_;
   if (diffDays(untilISO, start) < 0) return { completed: 0, expected: 0 };
-  const expected = countScheduledSlots(habit.schedule, habit.startDate, start, untilISO, habit.skippedDates);
+  const expected = countScheduledSlots(habit.schedule, habit.startDate, start, untilISO, (d) => isOff(habit, d));
   const endExclusive = addDays(untilISO, 1);
   const logged = totalSessions(entries.filter(
     (e) => e.habitId === habit.id && e.loggedAt >= start && e.loggedAt < endExclusive,
@@ -258,7 +293,7 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
   const pastStart = habit.startDate > addDays(todayISO_, -PAST_SLOT_DAYS) ? habit.startDate : addDays(todayISO_, -PAST_SLOT_DAYS);
   let pendingToday = 0;
   for (let d = pastStart; d <= todayISO_; d = addDays(d, 1)) {
-    if (!isDue(habit.schedule, fromISO(d), habit.startDate)) continue;
+    if (!isDue(habit.schedule, fromISO(d), habit.startDate) || isPaused(habit, d)) continue;
     const logged = loggedByDate.get(d) ?? 0;
     times.forEach((time, i) => {
       let status: SlotStatus;
@@ -278,7 +313,8 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
   const seenExtra = new Set<string>();
   for (const e of mine) {
     const d = entryDate(e);
-    if (d < pastStart || d > todayISO_ || seenExtra.has(d) || isDue(habit.schedule, fromISO(d), habit.startDate)) continue;
+    if (d < pastStart || d > todayISO_ || seenExtra.has(d)
+      || (isDue(habit.schedule, fromISO(d), habit.startDate) && !isPaused(habit, d))) continue;
     seenExtra.add(d);
     out.push({ key: `${d}|${hh(e.loggedAt)}|logged`, date: d, time: hh(e.loggedAt), status: 'done', extra: true });
   }
@@ -289,7 +325,7 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
   let pending = 0;
   let cursor = addDays(todayISO_, 1);
   for (let i = 0; i < 800 && pending < remaining; i++, cursor = addDays(cursor, 1)) {
-    if (!isDue(habit.schedule, fromISO(cursor), habit.startDate)) continue;
+    if (!isDue(habit.schedule, fromISO(cursor), habit.startDate) || isPaused(habit, cursor)) continue;
     for (const time of times) {
       if (skipped.has(cursor)) { out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'skipped' }); continue; }
       if (pending >= remaining) break;

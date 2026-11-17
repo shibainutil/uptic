@@ -8,6 +8,17 @@ export interface HabitSchedule {
   timesOfDay: string[];     // "HH:MM" 24h, one entry per occurrence per due date (e.g. morning + evening)
 }
 
+/**
+ * A stretch where the habit is on hold (holiday, illness…). `from`..`until` are
+ * inclusive ISO dates; no `until` means paused until the user resumes it.
+ * Paused days aren't scheduled and aren't expected, so nothing counts against
+ * the habit; a session goal simply finishes later.
+ */
+export interface HabitPause {
+  from: string;
+  until?: string;
+}
+
 export type HabitKind = 'continuous' | 'limited';
 
 export interface Habit {
@@ -28,6 +39,9 @@ export interface Habit {
    * their projected finish to later occurrences instead.
    */
   skippedDates?: string[];
+
+  /** Pauses, past (kept as history), current and scheduled; never overlapping. */
+  pauses?: HabitPause[];
 
   createdAt: string;
 }

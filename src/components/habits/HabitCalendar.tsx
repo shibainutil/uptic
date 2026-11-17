@@ -39,10 +39,12 @@ interface Props {
   onChange: (year: number, month: number) => void;
   slots: SessionSlot[];
   today: string;                       // ISO yyyy-mm-dd
+  /** Days the habit is paused; shaded. */
+  pausedOn?: (iso: string) => boolean;
 }
 
 /** Month grid like the fitness routine calendar: day numbers with a dot per scheduled session. */
-export function HabitCalendar({ year, month, onChange, slots, today }: Props) {
+export function HabitCalendar({ year, month, onChange, slots, today, pausedOn }: Props) {
   const byDate = new Map<string, SessionSlot[]>();
   for (const s of slots) byDate.set(s.date, [...(byDate.get(s.date) ?? []), s]);
 
@@ -77,8 +79,9 @@ export function HabitCalendar({ year, month, onChange, slots, today }: Props) {
             const iso = toISO(date);
             const isToday = iso === today;
             const dots = inMonth ? byDate.get(iso) ?? [] : [];
+            const paused = inMonth && !!pausedOn?.(iso);
             return (
-              <View key={di} style={[styles.dayCell, isToday && styles.dayCellToday]}>
+              <View key={di} style={[styles.dayCell, paused && styles.dayCellPaused, isToday && styles.dayCellToday]}>
                 <Text style={[styles.dayNumber, isToday && styles.dayNumberToday, !inMonth && styles.dayNumberOut]}>
                   {date.getDate()}
                 </Text>
@@ -114,6 +117,7 @@ const styles = StyleSheet.create({
     fontSize: font.sm, fontWeight: '500', paddingVertical: spacing.sm,
   },
   dayCell: { flex: 1, alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.xs, height: 48 },
+  dayCellPaused: { backgroundColor: `${colors.textDim}2A` },
   dayCellToday: { backgroundColor: `${colors.accent}18` },
   dayNumber: { color: colors.text, fontSize: font.md },
   dayNumberToday: { color: colors.accent, fontWeight: '700' },

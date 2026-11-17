@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { useHabits, useHabitLogEntries } from '../../store/habitStore';
-import { describeSchedule } from '../../lib/habitSchedule';
+import { describeSchedule, pauseCovering } from '../../lib/habitSchedule';
 import { fromISO, todayISO } from '../../lib/schedule';
 import { isHabitComplete, totalSessions } from '../../types/habits';
 import { Badge } from '../ui/Badge';
@@ -59,6 +59,9 @@ export function HabitsListTab() {
                       label={describeSchedule(item.schedule)}
                       icon={<MaterialIcons name="event-repeat" size={11} color={colors.accent} />}
                     />
+                    {pauseCovering(item, today) && (
+                      <Badge color={colors.textMuted} label="Paused" icon={<MaterialIcons name="pause" size={11} color={colors.textMuted} />} />
+                    )}
                     {item.kind === 'limited' && item.targetDate && (
                       <Badge
                         color={LIMITED_COLOR}

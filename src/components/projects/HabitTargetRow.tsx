@@ -26,6 +26,7 @@ export function HabitTargetRow({ criterion, habits, entries, today, onPress }: P
   const count = isCountTarget(criterion);
   const weeks = `${criterion.windowWeeks} week${criterion.windowWeeks !== 1 ? 's' : ''}`;
   const day = (iso: string) => (iso === today ? 'today' : formatShortDate(iso));
+  const paused = p.pause ? (p.pause.until ? `paused until ${formatShortDate(p.pause.until)}` : 'paused') : null;
 
   let title: string;
   let status: string;
@@ -35,6 +36,7 @@ export function HabitTargetRow({ criterion, habits, entries, today, onPress }: P
     else if (!p.habit) status = 'Habit no longer exists';
     else {
       const parts = [`${p.completed} of ${p.expected} done`];
+      if (paused) parts.push(paused);
       if (p.nextDate) parts.push(`next ${day(p.nextDate)}`);
       if (p.finishDate) parts.push(`last ${day(p.finishDate)}`);
       status = parts.join(' · ');
@@ -44,7 +46,7 @@ export function HabitTargetRow({ criterion, habits, entries, today, onPress }: P
     if (criterion.metAt) status = 'Reached';
     else if (!p.habit) status = 'Habit no longer exists';
     else if (!p.covered) status = `Counts in ${p.daysUntilCovered} day${p.daysUntilCovered !== 1 ? 's' : ''} (habit is newer than the window)`;
-    else status = `${p.completed} of ${p.expected} sessions in the last ${weeks}`;
+    else status = `${p.completed} of ${p.expected} sessions in the last ${weeks}${paused ? ` · ${paused}` : ''}`;
   }
 
   const showValue = !criterion.metAt && !!p.habit && p.expected > 0;
