@@ -59,11 +59,54 @@ export function enumerateDueDates(schedule: HabitSchedule, startISO: string, fro
   return out;
 }
 
-/** How many (date × time-of-day) occurrences a schedule produces in [from, until]. */
-export function countScheduledSlots(schedule: HabitSchedule, startISO: string, fromISO_: string, untilISO: string): number {
+/** How many (date × time-of-day) occurrences a schedule produces in [from, until], minus skipped dates. */
+export function countScheduledSlots(
+  schedule: HabitSchedule, startISO: string, fromISO_: string, untilISO: string, skippedDates: string[] = [],
+): number {
   if (diffDays(untilISO, fromISO_) < 0) return 0;
-  const dueDates = enumerateDueDates(schedule, startISO, fromISO_, untilISO);
-  return dueDates.length * Math.max(1, (schedule.timesOfDay ?? []).length);
+  const skipped = new Set(skippedDates);
+  const dueDates = enumerateDueDates(schedule, startISO, fromISO_, untilISO).filter((d) => !skipped.has(d));
+  return dueDates.length * slotsPerDay(schedule);
+}
+
+export function slotsPerDay(schedule: HabitSchedule): number {
+  return Math.max(1, (schedule.timesOfDay ?? []).length);
+}
+
+// ── Occurrences ahead (skips, session-count projections) ───────────────────
+
+/** Local calendar date (yyyy-mm-dd) of a log entry. */
+export function entryDate(e: HabitLogEntry): string {
+  return toISO(new Date(e.loggedAt));
+}
+
+/** Sessions logged for a habit on or after `sinceISO` (local dates). */
+export function sessionsSince(habit: Habit, entries: HabitLogEntry[], sinceISO: string): number {
+  return totalSessions(entries.filter((e) => e.habitId === habit.id && entryDate(e) >= sinceISO));
+}
+
+/**
+ * Upcoming scheduled dates from today on, skipping skipped dates and today once
+ * today's sessions are all logged. Stops after `limit` dates or ~2 years.
+ */
+export function upcomingDates(habit: Habit, entries: HabitLogEntry[], todayISO_: string, limit: number): string[] {
+  const skipped = new Set(habit.skippedDates ?? []);
+  const loggedToday = totalSessions(entries.filter((e) => e.habitId === habit.id && entryDate(e) === todayISO_));
+  const out: string[] = [];
+  let cursor = habit.startDate > todayISO_ ? habit.startDate : todayISO_;
+  for (let i = 0; i < 800 && out.length < limit; i++, cursor = addDays(cursor, 1)) {
+    if (skipped.has(cursor) || !isDue(habit.schedule, fromISO(cursor), habit.startDate)) continue;
+    if (cursor === todayISO_ && loggedToday >= slotsPerDay(habit.schedule)) continue;
+    out.push(cursor);
+  }
+  return out;
+}
+
+/** The date the `remaining`-th upcoming session falls on, if the schedule reaches it within ~2 years. */
+export function projectedFinish(habit: Habit, entries: HabitLogEntry[], todayISO_: string, remaining: number): string | undefined {
+  if (remaining <= 0) return undefined;
+  const dates = upcomingDates(habit, entries, todayISO_, Math.ceil(remaining / slotsPerDay(habit.schedule)));
+  return dates.length * slotsPerDay(habit.schedule) >= remaining ? dates[dates.length - 1] : undefined;
 }
 
 // ── Human-readable description ───────────────────────────────────────────────
@@ -153,7 +196,7 @@ export function computeRing(habit: Habit, entries: HabitLogEntry[], period: Ring
   const end = periodEndRaw > todayISO ? todayISO : periodEndRaw;
   if (diffDays(end, start) < 0) return { rate: 0, completed: 0, expected: 0 };
 
-  const expected = countScheduledSlots(habit.schedule, habit.startDate, start, end);
+  const expected = countScheduledSlots(habit.schedule, habit.startDate, start, end, habit.skippedDates);
   const rangeEndExclusive = addDays(end, 1);
   const completed = totalSessions(entries.filter(
     (e) => e.habitId === habit.id && e.loggedAt >= start && e.loggedAt < rangeEndExclusive,
@@ -169,7 +212,7 @@ export function computeRing(habit: Habit, entries: HabitLogEntry[], period: Ring
 export function habitWindowCounts(habit: Habit, entries: HabitLogEntry[], fromISO_: string, untilISO: string) {
   const start = fromISO_ < habit.startDate ? habit.startDate : fromISO_;
   if (diffDays(untilISO, start) < 0) return { completed: 0, expected: 0 };
-  const expected = countScheduledSlots(habit.schedule, habit.startDate, start, untilISO);
+  const expected = countScheduledSlots(habit.schedule, habit.startDate, start, untilISO, habit.skippedDates);
   const endExclusive = addDays(untilISO, 1);
   const logged = totalSessions(entries.filter(
     (e) => e.habitId === habit.id && e.loggedAt >= start && e.loggedAt < endExclusive,

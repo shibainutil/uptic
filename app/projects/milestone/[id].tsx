@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet, Alert, TextInput } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../../src/context/AuthContext';
@@ -10,11 +10,14 @@ import { Input } from '../../../src/components/ui/Input';
 import { Button } from '../../../src/components/ui/Button';
 import { DatePicker } from '../../../src/components/ui/DatePicker';
 import { Toggle } from '../../../src/components/ui/Toggle';
+import { Segmented } from '../../../src/components/ui/Segmented';
+import { formatShortDate } from '../../../src/components/projects/ProjectCard';
+import { takePendingHabitLink } from '../../../src/lib/pendingHabitLink';
 import { habitTargetProgress } from '../../../src/lib/projectProgress';
 import { describeSchedule } from '../../../src/lib/habitSchedule';
 import { addDays, todayISO } from '../../../src/lib/schedule';
 import {
-  DEFAULT_TARGET_RATE, DEFAULT_WINDOW_WEEKS, newId,
+  DEFAULT_TARGET_COUNT, DEFAULT_TARGET_RATE, DEFAULT_WINDOW_WEEKS, newId,
   type Criterion, type HabitCriterion, type Milestone, type TaskCriterion,
 } from '../../../src/types/projects';
 import type { Habit, HabitLogEntry } from '../../../src/types/habits';
@@ -66,8 +69,23 @@ function Header({ title, onBack }: { title: string; onBack: () => void }) {
   );
 }
 
-/** Editable copy of a habit target; rate/weeks are strings while typing. */
-interface HabitDraft { id: string; habitId: string; rate: string; weeks: string; original?: HabitCriterion }
+/** Editable copy of a habit target; numbers are strings while typing. */
+interface HabitDraft {
+  id: string;
+  habitId: string;
+  mode: 'count' | 'rate';
+  count: string;
+  since: string;
+  rate: string;
+  weeks: string;
+  original?: HabitCriterion;
+}
+
+type TargetMode = HabitDraft['mode'];
+const MODE_OPTIONS: { value: TargetMode; label: string }[] = [
+  { value: 'count', label: 'Sessions' },
+  { value: 'rate', label: 'Success rate' },
+];
 
 function MilestoneForm({
   projectId, projectName, existing, habits, entries, save,
@@ -91,7 +109,14 @@ function MilestoneForm({
   );
   const [targets, setTargets] = useState<HabitDraft[]>(
     (existing?.criteria.filter((c): c is HabitCriterion => c.kind === 'habit') ?? []).map((c) => ({
-      id: c.id, habitId: c.habitId, rate: String(c.targetRate), weeks: String(c.windowWeeks), original: c,
+      id: c.id,
+      habitId: c.habitId,
+      mode: c.targetCount != null ? 'count' as const : 'rate' as const,
+      count: String(c.targetCount ?? DEFAULT_TARGET_COUNT),
+      since: c.since ?? today,
+      rate: String(c.targetRate),
+      weeks: String(c.windowWeeks),
+      original: c,
     })),
   );
   const [newTask, setNewTask] = useState('');
@@ -105,11 +130,37 @@ function MilestoneForm({
     setNewTask('');
   }
 
-  function addTarget(habitId: string) {
-    setTargets((cur) => [...cur, {
-      id: newId(), habitId, rate: String(DEFAULT_TARGET_RATE), weeks: String(DEFAULT_WINDOW_WEEKS),
-    }]);
+  /**
+   * Link a habit. A habit with a session goal (limited) starts as a session-count
+   * target counted from its start date; others start as a success-rate target.
+   */
+  function addTarget(habitId: string, startDate?: string, targetSessions?: number) {
+    const habit = habits.find((h) => h.id === habitId);
+    const sessions = targetSessions ?? habit?.targetSessions;
+    const start = startDate ?? habit?.startDate ?? today;
+    setTargets((cur) => (cur.some((t) => t.habitId === habitId) ? cur : [...cur, {
+      id: newId(),
+      habitId,
+      mode: sessions != null ? 'count' : 'rate',
+      count: String(sessions ?? DEFAULT_TARGET_COUNT),
+      // A habit with a session goal counts from its start; others from today.
+      since: sessions != null || start > today ? start : today,
+      rate: String(DEFAULT_TARGET_RATE),
+      weeks: String(DEFAULT_WINDOW_WEEKS),
+    }]));
     setPickingHabit(false);
+  }
+
+  // Coming back from "Create new habit": link the habit that was just created.
+  useFocusEffect(useCallback(() => {
+    const link = takePendingHabitLink();
+    if (link) addTarget(link.habitId, link.startDate, link.targetSessions);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []));
+
+  function createHabit() {
+    setPickingHabit(false);
+    router.push({ pathname: '/habits/habit/[id]', params: { id: 'new', link: '1' } });
   }
 
   const patchTarget = (tid: string, patch: Partial<HabitDraft>) =>
@@ -118,13 +169,25 @@ function MilestoneForm({
   function buildTargets(): HabitCriterion[] | string {
     const out: HabitCriterion[] = [];
     for (const t of targets) {
+      const o = t.original;
+      if (t.mode === 'count') {
+        const count = parseInt(t.count, 10);
+        if (!count || count < 1 || count > 1000) return 'Each session target needs 1–1000 sessions.';
+        // Raising the bar (or switching habit) means it has to be reached again.
+        const unchanged = o && o.habitId === t.habitId && o.targetCount === count && o.since === t.since;
+        out.push({
+          kind: 'habit', id: t.id, habitId: t.habitId, targetCount: count, since: t.since,
+          targetRate: o?.targetRate ?? DEFAULT_TARGET_RATE, windowWeeks: o?.windowWeeks ?? DEFAULT_WINDOW_WEEKS,
+          metAt: unchanged ? o.metAt : undefined,
+        });
+        continue;
+      }
       const rate = parseInt(t.rate, 10);
       const weeks = parseInt(t.weeks, 10);
       if (!rate || rate < 1 || rate > 100) return 'Each habit target needs a rate between 1 and 100 %.';
       if (!weeks || weeks < 1 || weeks > 52) return 'Each habit target needs a window of 1–52 weeks.';
-      const o = t.original;
-      // Raising the bar (or switching habit) means it has to be reached again.
-      const unchanged = o && o.habitId === t.habitId && o.targetRate === rate && o.windowWeeks === weeks;
+      const unchanged = o && o.targetCount == null && o.habitId === t.habitId
+        && o.targetRate === rate && o.windowWeeks === weeks;
       out.push({ kind: 'habit', id: t.id, habitId: t.habitId, targetRate: rate, windowWeeks: weeks, metAt: unchanged ? o.metAt : undefined });
     }
     return out;
@@ -216,18 +279,31 @@ function MilestoneForm({
         <View style={styles.field}>
           <Text style={styles.label}>Habit targets</Text>
           <Text style={styles.hint}>
-            Met once the habit hits its success rate over the window. It only counts once the habit has existed for the whole window.
+            Sessions: met once that many sessions are logged; skipped sessions are made up by later ones.
+            Success rate: met once the habit hits the rate over the window.
           </Text>
           {targets.map((t) => {
             const habit = habits.find((h) => h.id === t.habitId);
-            const rate = parseInt(t.rate, 10) || DEFAULT_TARGET_RATE;
-            const weeks = parseInt(t.weeks, 10) || DEFAULT_WINDOW_WEEKS;
-            const p = habitTargetProgress(
-              { kind: 'habit', id: t.id, habitId: t.habitId, targetRate: rate, windowWeeks: weeks }, habits, entries, today,
-            );
-            const preview = !habit ? 'Habit no longer exists'
-              : !p.covered ? `Counts in ${p.daysUntilCovered} days · now ${Math.round(p.rate * 100)}%`
+            const criterion: HabitCriterion = t.mode === 'count'
+              ? {
+                kind: 'habit', id: t.id, habitId: t.habitId, targetCount: parseInt(t.count, 10) || DEFAULT_TARGET_COUNT,
+                since: t.since, targetRate: DEFAULT_TARGET_RATE, windowWeeks: DEFAULT_WINDOW_WEEKS,
+              }
+              : {
+                kind: 'habit', id: t.id, habitId: t.habitId,
+                targetRate: parseInt(t.rate, 10) || DEFAULT_TARGET_RATE,
+                windowWeeks: parseInt(t.weeks, 10) || DEFAULT_WINDOW_WEEKS,
+              };
+            const p = habitTargetProgress(criterion, habits, entries, today);
+            let preview: string;
+            if (!habit) preview = 'Habit no longer exists';
+            else if (t.mode === 'count') {
+              preview = `${p.completed} of ${p.expected} done`
+                + (p.reachedNow ? ' · target reached' : p.finishDate ? ` · last session ${formatShortDate(p.finishDate)}` : '');
+            } else {
+              preview = !p.covered ? `Counts in ${p.daysUntilCovered} days · now ${Math.round(p.rate * 100)}%`
                 : `Now ${Math.round(p.rate * 100)}% (${p.completed}/${p.expected})${p.reachedNow ? ' · target reached' : ''}`;
+            }
             return (
               <View key={t.id} style={styles.targetCard}>
                 <View style={styles.targetHead}>
@@ -239,23 +315,40 @@ function MilestoneForm({
                     <MaterialIcons name="close" size={20} color={colors.textMuted} />
                   </Pressable>
                 </View>
-                <View style={styles.targetInputs}>
-                  <Text style={styles.targetWord}>≥</Text>
-                  <TextInput
-                    value={t.rate}
-                    onChangeText={(v) => patchTarget(t.id, { rate: v })}
-                    keyboardType="number-pad"
-                    style={styles.numInput}
-                  />
-                  <Text style={styles.targetWord}>% over</Text>
-                  <TextInput
-                    value={t.weeks}
-                    onChangeText={(v) => patchTarget(t.id, { weeks: v })}
-                    keyboardType="number-pad"
-                    style={styles.numInput}
-                  />
-                  <Text style={styles.targetWord}>weeks</Text>
-                </View>
+                <Segmented options={MODE_OPTIONS} value={t.mode} onChange={(mode) => patchTarget(t.id, { mode })} />
+                {t.mode === 'count' ? (
+                  <>
+                    <View style={styles.targetInputs}>
+                      <Text style={styles.targetWord}>Complete</Text>
+                      <TextInput
+                        value={t.count}
+                        onChangeText={(v) => patchTarget(t.id, { count: v })}
+                        keyboardType="number-pad"
+                        style={styles.numInput}
+                      />
+                      <Text style={styles.targetWord}>sessions, counting from</Text>
+                    </View>
+                    <DatePicker value={t.since} onChange={(since) => patchTarget(t.id, { since })} />
+                  </>
+                ) : (
+                  <View style={styles.targetInputs}>
+                    <Text style={styles.targetWord}>≥</Text>
+                    <TextInput
+                      value={t.rate}
+                      onChangeText={(v) => patchTarget(t.id, { rate: v })}
+                      keyboardType="number-pad"
+                      style={styles.numInput}
+                    />
+                    <Text style={styles.targetWord}>% over</Text>
+                    <TextInput
+                      value={t.weeks}
+                      onChangeText={(v) => patchTarget(t.id, { weeks: v })}
+                      keyboardType="number-pad"
+                      style={styles.numInput}
+                    />
+                    <Text style={styles.targetWord}>weeks</Text>
+                  </View>
+                )}
                 <Text style={[styles.targetPreview, p.reachedNow && { color: colors.success }]}>{preview}</Text>
               </View>
             );
@@ -263,11 +356,14 @@ function MilestoneForm({
 
           {pickingHabit ? (
             <View style={styles.picker}>
-              {available.length === 0 ? (
-                <Text style={styles.hint}>
-                  {habits.length === 0 ? 'No habits yet. Create one in the Habits tab first.' : 'Every habit already has a target here.'}
-                </Text>
-              ) : available.map((h) => (
+              <Pressable style={styles.pickRow} onPress={createHabit}>
+                <View style={styles.flex1}>
+                  <Text style={[styles.targetName, { color: colors.accent }]}>Create new habit</Text>
+                  <Text style={styles.targetMeta}>Pick its days and number of sessions, then it is linked here</Text>
+                </View>
+                <MaterialIcons name="add-circle-outline" size={20} color={colors.accent} />
+              </Pressable>
+              {available.map((h) => (
                 <Pressable key={h.id} style={styles.pickRow} onPress={() => addTarget(h.id)}>
                   <View style={styles.flex1}>
                     <Text style={styles.targetName}>{h.name}</Text>

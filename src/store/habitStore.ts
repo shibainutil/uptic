@@ -6,6 +6,8 @@ import {
   deleteDoc,
   updateDoc,
   getDocs,
+  arrayUnion,
+  arrayRemove,
   query,
   where,
   writeBatch,
@@ -78,7 +80,14 @@ export function useHabits(userId: string | null | undefined) {
     await batch.commit();
   }, [userId]);
 
-  return { habits, loaded, add, update, remove };
+  /** Skip (or un-skip) one scheduled date. */
+  const setSkipped = useCallback(async (id: string, date: string, skipped: boolean) => {
+    await updateDoc(userDoc(userId!, HABITS_COL, id), {
+      skippedDates: skipped ? arrayUnion(date) : arrayRemove(date),
+    });
+  }, [userId]);
+
+  return { habits, loaded, add, update, remove, setSkipped };
 }
 
 // ── Log entries ───────────────────────────────────────────────────────────────

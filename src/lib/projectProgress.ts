@@ -1,7 +1,7 @@
 import { addDays, diffDays } from './schedule';
-import { habitWindowCounts } from './habitSchedule';
+import { habitWindowCounts, projectedFinish, sessionsSince, upcomingDates } from './habitSchedule';
 import type { Habit, HabitLogEntry } from '../types/habits';
-import type { Criterion, HabitCriterion, Milestone, Project } from '../types/projects';
+import { isCountTarget, type Criterion, type HabitCriterion, type Milestone, type Project } from '../types/projects';
 
 export interface HabitTargetProgress {
   rate: number;          // 0..1 over the trailing window
@@ -16,6 +16,9 @@ export interface HabitTargetProgress {
   /** Met: latched earlier, or reached now. */
   met: boolean;
   habit?: Habit;
+  /** Count mode only: next scheduled session (skips excluded) and when the last one falls. */
+  nextDate?: string;
+  finishDate?: string;
 }
 
 /**
@@ -27,6 +30,20 @@ export function habitTargetProgress(
   c: HabitCriterion, habits: Habit[], entries: HabitLogEntry[], today: string,
 ): HabitTargetProgress {
   const habit = habits.find((h) => h.id === c.habitId);
+  if (isCountTarget(c)) {
+    if (!habit) {
+      return { rate: 0, completed: 0, expected: c.targetCount, covered: true, daysUntilCovered: 0, reachedNow: false, met: !!c.metAt };
+    }
+    const completed = sessionsSince(habit, entries, c.since ?? habit.startDate);
+    const remaining = c.targetCount - completed;
+    const reachedNow = remaining <= 0;
+    return {
+      rate: Math.min(completed / c.targetCount, 1), completed, expected: c.targetCount,
+      covered: true, daysUntilCovered: 0, reachedNow, met: !!c.metAt || reachedNow, habit,
+      nextDate: reachedNow ? undefined : upcomingDates(habit, entries, today, 1)[0],
+      finishDate: projectedFinish(habit, entries, today, remaining),
+    };
+  }
   const windowStart = addDays(today, -(c.windowWeeks * 7 - 1));
   if (!habit) {
     return { rate: 0, completed: 0, expected: 0, covered: false, daysUntilCovered: 0, reachedNow: false, met: !!c.metAt };

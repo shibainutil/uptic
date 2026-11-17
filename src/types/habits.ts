@@ -22,6 +22,13 @@ export interface Habit {
   targetSessions?: number;
   targetDate?: string;           // ISO yyyy-mm-dd
 
+  /**
+   * Scheduled dates (ISO yyyy-mm-dd) the user chose to skip. A skipped date isn't
+   * expected (it doesn't hurt the success rate), and session-count targets push
+   * their projected finish to later occurrences instead.
+   */
+  skippedDates?: string[];
+
   createdAt: string;
 }
 

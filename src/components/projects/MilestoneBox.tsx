@@ -42,7 +42,8 @@ interface Props extends TaskActions {
   entries: HabitLogEntry[];
   today: string;
   onMenu: () => void;
-  onOpenHabit: (habitId: string) => void;
+  /** A habit target was tapped (the screen offers log / skip / open habit). */
+  onTargetPress: (criterion: HabitCriterion) => void;
   /** A text field in this box got focus; the screen scrolls it above the keyboard. */
   onInputFocus?: (input: TextInput | null) => void;
 }
@@ -58,7 +59,7 @@ function errorAlert(e: unknown) {
  * Must be rendered inside a NestableScrollContainer.
  */
 export function MilestoneBox({
-  projectId, milestone: m, index, met, isNext, accent, habits, entries, today, onMenu, onOpenHabit, onInputFocus,
+  projectId, milestone: m, index, met, isNext, accent, habits, entries, today, onMenu, onTargetPress, onInputFocus,
   setTaskDone, addTask, renameTask, removeTask, reorderTasks,
 }: Props) {
   const tasks = m.criteria.filter((c): c is TaskCriterion => c.kind === 'task');
@@ -235,7 +236,7 @@ export function MilestoneBox({
                 habits={habits}
                 entries={entries}
                 today={today}
-                onPress={() => onOpenHabit(c.habitId)}
+                onPress={() => onTargetPress(c)}
               />
             ))}
           </View>

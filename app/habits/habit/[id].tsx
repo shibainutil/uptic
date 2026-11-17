@@ -13,6 +13,7 @@ import { DatePicker } from '../../../src/components/ui/DatePicker';
 import { TimePicker } from '../../../src/components/ui/TimePicker';
 import { colors, spacing, font, radius } from '../../../src/theme';
 import { todayISO, addDays } from '../../../src/lib/schedule';
+import { setPendingHabitLink } from '../../../src/lib/pendingHabitLink';
 import {
   type HabitKind, type ScheduleUnit, type HabitSchedule, type Habit,
 } from '../../../src/types/habits';
@@ -51,7 +52,7 @@ function parseSchedule(
 }
 
 export default function HabitScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, link } = useLocalSearchParams<{ id: string; link?: string }>();
   const router = useRouter();
   const { user } = useAuth();
   const { habits, loaded } = useHabits(user?.uid);
@@ -78,7 +79,7 @@ export default function HabitScreen() {
     );
   }
 
-  return <HabitForm key={existing?.id ?? 'new'} existing={existing} />;
+  return <HabitForm key={existing?.id ?? 'new'} existing={existing} forMilestone={isNew && link === '1'} />;
 }
 
 function Header({ title, onBack }: { title: string; onBack: () => void }) {
@@ -91,26 +92,31 @@ function Header({ title, onBack }: { title: string; onBack: () => void }) {
   );
 }
 
-function HabitForm({ existing }: { existing?: Habit }) {
+/**
+ * forMilestone: opened from a milestone's "Create new habit"; defaults to a
+ * limited, weekly habit with a session goal (e.g. physio Mon/Wed/Fri × 20), and
+ * hands the new habit back to the milestone editor to link.
+ */
+function HabitForm({ existing, forMilestone = false }: { existing?: Habit; forMilestone?: boolean }) {
   const router = useRouter();
   const { user } = useAuth();
   const { add, update } = useHabits(user?.uid);
 
   const isNew = !existing;
 
-  const [kind, setKind] = useState<HabitKind>(existing?.kind ?? 'continuous');
+  const [kind, setKind] = useState<HabitKind>(existing?.kind ?? (forMilestone ? 'limited' : 'continuous'));
   const [name, setName] = useState(existing?.name ?? '');
   const [description, setDescription] = useState(existing?.description ?? '');
   const [startDate, setStartDate] = useState(existing?.startDate ?? todayISO());
   const [saving, setSaving] = useState(false);
 
-  const [unit, setUnit] = useState<ScheduleUnit>(existing?.schedule?.unit ?? 'day');
+  const [unit, setUnit] = useState<ScheduleUnit>(existing?.schedule?.unit ?? (forMilestone ? 'week' : 'day'));
   const [interval, setInterval] = useState(String(existing?.schedule?.interval ?? 1));
   const [daysOfWeek, setDaysOfWeek] = useState<number[]>(existing?.schedule?.daysOfWeek ?? []);
   const [dayOfMonth, setDayOfMonth] = useState(String(existing?.schedule?.dayOfMonth ?? 1));
   const [timesOfDay, setTimesOfDay] = useState<string[]>(existing?.schedule?.timesOfDay ?? ['08:00']);
 
-  const [hasTargetSessions, setHasTargetSessions] = useState(existing?.targetSessions != null);
+  const [hasTargetSessions, setHasTargetSessions] = useState(existing ? existing.targetSessions != null : forMilestone);
   const [targetSessions, setTargetSessions] = useState(String(existing?.targetSessions ?? 30));
   const [hasTargetDate, setHasTargetDate] = useState(existing?.targetDate != null);
   const [targetDate, setTargetDate] = useState(existing?.targetDate ?? addDays(todayISO(), 30));
@@ -151,7 +157,8 @@ function HabitForm({ existing }: { existing?: Habit }) {
     setSaving(true);
     try {
       if (isNew) {
-        await add(data);
+        const newId = await add(data);
+        if (forMilestone) setPendingHabitLink({ habitId: newId, startDate, targetSessions: data.targetSessions });
       } else {
         await update(existing!.id, data);
       }

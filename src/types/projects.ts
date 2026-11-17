@@ -18,14 +18,27 @@ export interface TaskCriterion {
   doneAt?: string;        // ISO datetime
 }
 
+/**
+ * A habit target, in one of two modes:
+ * - success rate (default): ≥ targetRate % of scheduled sessions over the last
+ *   windowWeeks weeks;
+ * - session count (targetCount set): targetCount sessions logged on or after
+ *   `since`, e.g. "20 physio sessions". Skipped occurrences don't count either
+ *   way; the remaining sessions just move to later occurrences.
+ */
 export interface HabitCriterion {
   kind: 'habit';
   id: string;
   habitId: string;
-  targetRate: number;     // percent of scheduled sessions that must be logged, 1..100
-  windowWeeks: number;    // trailing window the rate is measured over
+  targetRate: number;     // rate mode: percent of scheduled sessions that must be logged, 1..100
+  windowWeeks: number;    // rate mode: trailing window the rate is measured over
+  targetCount?: number;   // count mode: sessions to complete
+  since?: string;         // count mode: ISO yyyy-mm-dd; sessions logged from this date count
   metAt?: string;         // ISO yyyy-mm-dd; set the first time the target is reached (latched)
 }
+
+export const isCountTarget = (c: HabitCriterion): c is HabitCriterion & { targetCount: number } =>
+  c.targetCount != null;
 
 export type Criterion = TaskCriterion | HabitCriterion;
 
@@ -53,6 +66,7 @@ export type ProjectInput = Omit<Project, 'id' | 'createdAt' | 'order'>;
 
 export const DEFAULT_TARGET_RATE = 90;
 export const DEFAULT_WINDOW_WEEKS = 4;
+export const DEFAULT_TARGET_COUNT = 20;
 
 export function newId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);

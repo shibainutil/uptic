@@ -17,9 +17,10 @@ import { STATUS_BADGE, formatShortDate } from '../../src/components/projects/Pro
 import { ProjectOptionsSheet } from '../../src/components/projects/ProjectOptionsSheet';
 import { MilestoneBox } from '../../src/components/projects/MilestoneBox';
 import { milestoneMet, projectProgress } from '../../src/lib/projectProgress';
+import { upcomingDates } from '../../src/lib/habitSchedule';
 import { diffDays, todayISO } from '../../src/lib/schedule';
 import { useKeyboardFrame } from '../../src/lib/useKeyboardHeight';
-import type { Milestone, Project } from '../../src/types/projects';
+import type { HabitCriterion, Milestone, Project } from '../../src/types/projects';
 import { colors, spacing, font, radius } from '../../src/theme';
 
 function plural(n: number, word: string) {
@@ -39,11 +40,12 @@ export default function ProjectOverviewScreen() {
     projects, loaded, removeMilestone, reorderMilestones, applyLatches,
     setTaskDone, addTask, renameTask, removeTask, reorderTasks,
   } = useProjects(user?.uid);
-  const { habits, loaded: habitsLoaded } = useHabits(user?.uid);
-  const { entries, loaded: entriesLoaded } = useHabitLogEntries(user?.uid);
+  const { habits, loaded: habitsLoaded, setSkipped } = useHabits(user?.uid);
+  const { entries, loaded: entriesLoaded, add: addEntry } = useHabitLogEntries(user?.uid);
   useProjectLatches(projects, habits, entries, loaded && habitsLoaded && entriesLoaded, applyLatches);
   const [menuProject, setMenuProject] = useState<Project | null>(null);
   const [menuMilestone, setMenuMilestone] = useState<Milestone | null>(null);
+  const [menuTarget, setMenuTarget] = useState<HabitCriterion | null>(null);
 
   // Keep the focused task field above the keyboard. The app is edge-to-edge, so
   // Android doesn't resize the window: pad the content by the keyboard height and
@@ -129,6 +131,36 @@ export default function ProjectOverviewScreen() {
   if (project.deadline && progress.status !== 'done') {
     const left = diffDays(project.deadline, today);
     deadlineText = left > 0 ? `${plural(left, 'day')} left` : left === 0 ? 'Due today' : `${plural(-left, 'day')} overdue`;
+  }
+
+  // Habit target menu: log a session, skip the next scheduled one (later
+  // occurrences then make up for it), undo the latest skip, or open the habit.
+  const targetHabit = menuTarget ? habits.find((h) => h.id === menuTarget.habitId) : undefined;
+  const targetItems: ActionSheetItem[] = [];
+  if (menuTarget && targetHabit) {
+    const h = targetHabit;
+    const next = upcomingDates(h, entries, today, 1)[0];
+    const lastSkip = (h.skippedDates ?? []).slice().sort().pop();
+    targetItems.push({
+      label: 'Log a session now',
+      icon: 'add-task',
+      onPress: () => { addEntry({ habitId: h.id, loggedAt: new Date().toISOString(), count: 1 }).catch(errorAlert); },
+    });
+    if (next) {
+      targetItems.push({
+        label: `Skip ${next === today ? 'today' : formatShortDate(next)}`,
+        icon: 'redo',
+        onPress: () => { setSkipped(h.id, next, true).catch(errorAlert); },
+      });
+    }
+    if (lastSkip) {
+      targetItems.push({
+        label: `Undo skip of ${formatShortDate(lastSkip)}`,
+        icon: 'undo',
+        onPress: () => { setSkipped(h.id, lastSkip, false).catch(errorAlert); },
+      });
+    }
+    targetItems.push({ label: 'Open habit', icon: 'open-in-new', onPress: () => router.push(`/habits/habit/${h.id}`) });
   }
 
   const milestoneItems: ActionSheetItem[] = [];
@@ -241,7 +273,7 @@ export default function ProjectOverviewScreen() {
                 entries={entries}
                 today={today}
                 onMenu={() => setMenuMilestone(m)}
-                onOpenHabit={(habitId) => router.push(`/habits/habit/${habitId}`)}
+                onTargetPress={setMenuTarget}
                 setTaskDone={setTaskDone}
                 addTask={addTask}
                 renameTask={renameTask}
@@ -261,6 +293,12 @@ export default function ProjectOverviewScreen() {
         title={menuMilestone?.title}
         items={milestoneItems}
         onClose={() => setMenuMilestone(null)}
+      />
+      <ActionSheet
+        visible={!!targetHabit}
+        title={targetHabit?.name}
+        items={targetItems}
+        onClose={() => setMenuTarget(null)}
       />
     </SafeAreaView>
   );
