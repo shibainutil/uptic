@@ -313,7 +313,7 @@ function SlotRow({ slot, onDone, onSkip, onUndo, onUndoPause, future }: {
   const dateColor = future || status === 'done' || status === 'skipped' || status === 'paused'
     ? colors.textDim : colors.text;
   const label = SLOT_STATUS_LABEL[status];
-  const readOnly = future;
+  const readOnly = future && status !== 'upcoming';
 
   return (
     <View style={styles.slot}>
