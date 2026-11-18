@@ -80,11 +80,13 @@ export function useHabits(userId: string | null | undefined) {
     await batch.commit();
   }, [userId]);
 
-  /** Skip (or un-skip) one scheduled date. */
-  const setSkipped = useCallback(async (id: string, date: string, skipped: boolean) => {
-    await updateDoc(userDoc(userId!, HABITS_COL, id), {
-      skippedDates: skipped ? arrayUnion(date) : arrayRemove(date),
-    });
+  /** Skip (or un-skip) one slot by its key ("yyyy-mm-dd|HH:MM") or a bare date. */
+  const setSkipped = useCallback(async (id: string, slotKey: string, skipped: boolean) => {
+    const isSlotKey = slotKey.includes('|');
+    await updateDoc(userDoc(userId!, HABITS_COL, id), isSlotKey
+      ? { skippedSlots: skipped ? arrayUnion(slotKey) : arrayRemove(slotKey) }
+      : { skippedDates: skipped ? arrayUnion(slotKey) : arrayRemove(slotKey) },
+    );
   }, [userId]);
 
   /** Replace the habit's pauses (add, end or cancel one). */

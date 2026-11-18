@@ -40,6 +40,13 @@ export interface Habit {
    */
   skippedDates?: string[];
 
+  /**
+   * Individual session slots (key = "yyyy-mm-dd|HH:MM") the user chose to skip.
+   * Used when a habit has multiple sessions per day so each can be controlled separately.
+   * Takes precedence over skippedDates for the same date.
+   */
+  skippedSlots?: string[];
+
   /** Pauses, past (kept as history), current and scheduled; never overlapping. */
   pauses?: HabitPause[];
 

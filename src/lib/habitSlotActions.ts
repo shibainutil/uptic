@@ -27,9 +27,9 @@ export function habitSlotActions({ today, entries, add, update, remove, setSkipp
       guard(add({ habitId, loggedAt: at.toISOString(), count: 1 }));
     },
 
-    /** Skip (or un-skip) the slot's date; a session goal's last session moves later. */
+    /** Skip (or un-skip) the slot by its key so multi-session days can be controlled separately. */
     skip(habitId: string, slot: SessionSlot, value: boolean) {
-      guard(setSkipped(habitId, slot.date, value));
+      guard(setSkipped(habitId, slot.key, value));
     },
 
     /** Take back a Done: remove the latest session logged that day (or one off its count). */

@@ -307,6 +307,7 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
   const loggedByDate = new Map<string, number>();
   for (const e of mine) loggedByDate.set(entryDate(e), (loggedByDate.get(entryDate(e)) ?? 0) + (e.count ?? 1));
   const skipped = new Set(habit.skippedDates ?? []);
+  const skippedSlots = new Set(habit.skippedSlots ?? []);
   const times = (habit.schedule.timesOfDay ?? []).length ? habit.schedule.timesOfDay.slice().sort() : ['09:00'];
   const out: SessionSlot[] = [];
 
@@ -323,7 +324,7 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
       let status: SlotStatus;
       let explicit: boolean | undefined;
       if (i < logged) status = 'done';
-      else if (skipped.has(d)) { status = 'skipped'; explicit = true; }
+      else if (skippedSlots.has(`${d}|${time}`) || skipped.has(d)) { status = 'skipped'; explicit = true; }
       else if (paused_) status = 'paused';
       else if (d === todayISO_) { status = 'today'; pendingToday++; }
       else status = 'overdue';
@@ -359,7 +360,7 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
     for (let i = 0; i < 800 && (pending < remaining || forced(cursor)); i++, cursor = addDays(cursor, 1)) {
       if (!isDue(habit.schedule, fromISO(cursor), habit.startDate) || isPaused(habit, cursor)) continue;
       for (const time of times) {
-        if (skipped.has(cursor)) { out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'skipped', explicit: true }); continue; }
+        if (skippedSlots.has(`${cursor}|${time}`) || skipped.has(cursor)) { out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'skipped', explicit: true }); continue; }
         if (pending >= remaining && !forced(cursor)) break;
         out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'upcoming' });
         pending++;
