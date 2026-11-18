@@ -304,16 +304,14 @@ export function HabitsScreen() {
     let firstSlot: SessionSlot | undefined;
     if (section === 'ongoing' || section === 'future') {
       const slots = sessionSlots(habit, entries, today);
-      // Only yesterday counts as "overdue" for the section — older unlogged sessions
-      // are still actionable on the entries screen but don't re-categorise the card.
       const overdue = slots.find(s => s.status === 'overdue' && s.date === addDays(today, -1));
+      const yesterdaySkipped = slots.find(s => s.status === 'skipped' && s.explicit && s.date === addDays(today, -1));
       const todaySlot = slots.find(s => s.status === 'today');
       const nextUpcoming = slots.find(s => s.status === 'upcoming');
       const recentDoneSkipped = slots
         .filter(s => (s.status === 'done' || s.status === 'skipped') && s.date >= addDays(today, -1))
         .sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time))[0];
-      // Show next upcoming before recent done/skip so the Skip button is accessible.
-      firstSlot = overdue ?? todaySlot ?? nextUpcoming ?? recentDoneSkipped;
+      firstSlot = overdue ?? yesterdaySkipped ?? todaySlot ?? recentDoneSkipped ?? nextUpcoming;
       if (overdue) section = 'overdue';
     }
 
