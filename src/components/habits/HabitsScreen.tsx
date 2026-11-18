@@ -255,6 +255,7 @@ export function HabitsScreen() {
   const { habits, update: updateHabit, remove: removeHabit, setPauses, setSkipped } = useHabits(user?.uid);
   const { entries, add: addEntry, update: updateEntry, remove: removeEntry, resetEntries } = useHabitLogEntries(user?.uid);
   const today = todayISO();
+  const nowTime = (() => { const n = new Date(); return `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}`; })();
 
   const [openSections, setOpenSections] = useState<Set<SectionKey>>(
     new Set(['overdue', 'future', 'ongoing', 'paused']),
@@ -287,7 +288,7 @@ export function HabitsScreen() {
     const complete = isHabitComplete(habit, completedCount, today);
     const paused = isHabitPaused(habit, today);
 
-    const allTimeRate = computeRing(habit, entries, 'allTime', today).rate;
+    const allTimeRate = computeRing(habit, entries, 'allTime', today, nowTime).rate;
     const sessionRate = habit.kind === 'limited' && habit.targetSessions != null
       ? Math.min(completedCount / habit.targetSessions, 1)
       : allTimeRate;

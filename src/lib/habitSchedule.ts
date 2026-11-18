@@ -236,8 +236,9 @@ export interface RingResult {
   expected: number;
 }
 
-/** Progress for one habit over one ring period, clamped to [habit.startDate, today]. */
-export function computeRing(habit: Habit, entries: HabitLogEntry[], period: RingPeriod, todayISO: string): RingResult {
+/** Progress for one habit over one ring period, clamped to [habit.startDate, today].
+ *  Pass `nowTime` as "HH:MM" (24h) so today's future time-slots are excluded from expected. */
+export function computeRing(habit: Habit, entries: HabitLogEntry[], period: RingPeriod, todayISO: string, nowTime?: string): RingResult {
   const [periodStart, periodEndRaw] = period === 'allTime'
     ? [habit.startDate, todayISO]
     : periodBounds(period, todayISO);
@@ -245,7 +246,13 @@ export function computeRing(habit: Habit, entries: HabitLogEntry[], period: Ring
   const end = periodEndRaw > todayISO ? todayISO : periodEndRaw;
   if (diffDays(end, start) < 0) return { rate: 0, completed: 0, expected: 0 };
 
-  const expected = countScheduledSlots(habit.schedule, habit.startDate, start, end, (d) => isOff(habit, d));
+  const baseExpected = countScheduledSlots(habit.schedule, habit.startDate, start, end, (d) => isOff(habit, d));
+  // Subtract today's time slots that haven't been reached yet so the ring doesn't
+  // count future sessions on the current day as already expected.
+  const futureTodaySlots = (end === todayISO && nowTime != null && !isOff(habit, todayISO) && isDue(habit.schedule, fromISO(todayISO), habit.startDate))
+    ? (habit.schedule.timesOfDay ?? ['09:00']).filter((t) => t > nowTime).length
+    : 0;
+  const expected = baseExpected - futureTodaySlots;
   const rangeEndExclusive = addDays(end, 1);
   const completed = totalSessions(entries.filter(
     (e) => e.habitId === habit.id && e.loggedAt >= start && e.loggedAt < rangeEndExclusive,
