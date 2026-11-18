@@ -325,10 +325,8 @@ function SlotRow({ slot, onDone, onSkip, onUndo, onUndoPause, future }: {
         {label ? <Text style={[styles.rowStatus, { color: tint }]}>{label}</Text> : null}
       </View>
       {!readOnly && (
-        status === 'skipped' && slot.explicit ? (
+        status === 'skipped' ? (
           <ActionBtn label="Undo" icon="refresh" scheme="grey" onPress={() => onSkip(slot, false)} />
-        ) : status === 'skipped' ? (
-          <ActionBtn label="Done" icon="check" scheme="green" onPress={() => onDone(slot)} />
         ) : status === 'done' ? (
           <ActionBtn label="Undo" icon="refresh" scheme="grey" onPress={() => onUndo(slot)} />
         ) : status === 'paused' ? (

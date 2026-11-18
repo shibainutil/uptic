@@ -326,8 +326,7 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
       else if (skipped.has(d)) { status = 'skipped'; explicit = true; }
       else if (paused_) status = 'paused';
       else if (d === todayISO_) { status = 'today'; pendingToday++; }
-      else if (d === yesterday) status = 'overdue';
-      else status = 'skipped';
+      else status = 'overdue';
       out.push({ key: `${d}|${time}`, date: d, time, status, explicit });
     });
   }
