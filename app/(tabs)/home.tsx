@@ -54,12 +54,24 @@ export default function HomeScreen() {
 
   const today = todayISO();
   const [monday, sunday] = weekRange(today);
-  const [from, to] = tab === 'day' ? [today, today] : [monday, sunday];
+  const yesterday = addDays(today, -1);
+  const [from, to] = tab === 'day' ? [yesterday, today] : [monday, sunday];
   const loaded = projectsLoaded && habitsLoaded && entriesLoaded && routinesLoaded;
 
-  const items = loaded
+  const rawItems = loaded
     ? buildAgenda({ projects, habits, entries, routines, routineExecutions }, from, to, today)
     : [];
+  // For the day tab: only keep yesterday's items if they actually need attention
+  const items = tab === 'day'
+    ? rawItems.filter((i) =>
+        i.date >= today ||
+        (i.kind === 'task' && i.overdue) ||
+        (i.kind === 'habit' && (
+          i.slot.status === 'overdue' ||
+          (i.slot.status === 'skipped' && i.slot.explicit === true)
+        ))
+      )
+    : rawItems;
   const doneCount = items.filter(itemDone).length;
 
   const habitActions = habitSlotActions({ today, entries, add, update, remove, setSkipped, onError: errorAlert });
@@ -100,7 +112,7 @@ export default function HomeScreen() {
         {!loaded ? (
           <Text style={styles.empty}>Loading…</Text>
         ) : tab === 'day' ? (
-          <DayView items={items} actions={actions} />
+          <DayView items={items} today={today} actions={actions} />
         ) : (
           <WeekView items={items} today={today} from={from} actions={actions} />
         )}
@@ -111,7 +123,16 @@ export default function HomeScreen() {
 
 // ── Views ────────────────────────────────────────────────────────────────────
 
-function DayView({ items, actions }: { items: HomeItem[]; actions: RowActions }) {
+function isOverdue(i: HomeItem, today: string): boolean {
+  if (i.kind === 'task') return i.overdue;
+  if (i.kind === 'habit') return i.slot.status === 'overdue' || (i.slot.status === 'skipped' && i.slot.explicit === true && i.date < today);
+  return false;
+}
+
+function DayView({ items, today, actions }: { items: HomeItem[]; today: string; actions: RowActions }) {
+  const overdueItems = items.filter((i) => isOverdue(i, today));
+  const todayItems = items.filter((i) => !isOverdue(i, today) && i.date >= today);
+
   const sections: { title: string; icon: IconName; kind: HomeItem['kind'] }[] = [
     { title: 'Tasks', icon: 'check-box', kind: 'task' },
     { title: 'Habits', icon: 'track-changes', kind: 'habit' },
@@ -119,8 +140,17 @@ function DayView({ items, actions }: { items: HomeItem[]; actions: RowActions })
   ];
   return (
     <>
+      {overdueItems.length > 0 && (
+        <View style={styles.section}>
+          <View style={styles.sectionHead}>
+            <MaterialIcons name="error-outline" size={16} color={OVERDUE} />
+            <Text style={[styles.sectionTitle, { color: OVERDUE }]}>Overdue</Text>
+          </View>
+          {overdueItems.map((i) => <Row key={i.key} item={i} actions={actions} />)}
+        </View>
+      )}
       {sections.map((s) => {
-        const rows = items.filter((i) => i.kind === s.kind);
+        const rows = todayItems.filter((i) => i.kind === s.kind);
         return (
           <View key={s.kind} style={styles.section}>
             <View style={styles.sectionHead}>

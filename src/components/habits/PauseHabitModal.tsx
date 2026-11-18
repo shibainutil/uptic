@@ -22,11 +22,13 @@ interface Props {
   initialUntil?: string;
   /** `until` is the last paused day; omitted = paused until resumed. */
   onSave: (from: string, until?: string) => void;
+  /** If provided, shows a Remove button to delete this pause entirely. */
+  onDelete?: () => void;
   onClose: () => void;
 }
 
 /** Pause a habit from a date, for a set period or until the user turns it back on. */
-export function PauseHabitModal({ visible, today, initialFrom, initialUntil, onSave, onClose }: Props) {
+export function PauseHabitModal({ visible, today, initialFrom, initialUntil, onSave, onDelete, onClose }: Props) {
   const defaultFrom = initialFrom ?? today;
   const defaultUntil = initialUntil ?? addDays(defaultFrom, 14);
   const [from, setFrom] = useState(defaultFrom);
@@ -64,6 +66,9 @@ export function PauseHabitModal({ visible, today, initialFrom, initialUntil, onS
             : 'Sessions scheduled from the start date on are removed. Resume the habit when you are ready and it picks up from that day.'}
         </Text>
         <Button label="Save" variant="primary" onPress={save} />
+        {onDelete && (
+          <Button label="Remove pause" variant="danger" onPress={onDelete} />
+        )}
       </View>
     </Modal>
   );

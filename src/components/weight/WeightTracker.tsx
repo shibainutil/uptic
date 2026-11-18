@@ -261,7 +261,10 @@ export function WeightTracker() {
   const targetReachDate = targetProjection.kind === 'projected' ? targetProjection.date : null;
   const extendChart = targetReachDate != null;
   const projectedOffset = extendChart && targetReachDate && chartBaseISO ? diffDays(targetReachDate, chartBaseISO) : null;
-  const domainEndOffset = Math.max(lastOffset, projectedOffset ?? 0, 1);
+  // The vertical marker line shows the user's own deadline (target.byDate), not the projected
+  // reach date — those are two different things and conflating them was confusing.
+  const deadlineOffset = target?.byDate && chartBaseISO ? diffDays(target.byDate, chartBaseISO) : null;
+  const domainEndOffset = Math.max(lastOffset, projectedOffset ?? 0, deadlineOffset ?? 0, 1);
 
   function xForOffset(offset: number): number {
     if (chartEntries.length <= 1) return (PLOT_LEFT_PAD + (plotWidth - PLOT_RIGHT_PAD)) / 2;
@@ -317,8 +320,8 @@ export function WeightTracker() {
     y: yForKg(barKgValues[i]),
   }));
 
-  const targetDateTickX = extendChart && projectedOffset != null ? xForOffset(projectedOffset) : null;
-  const targetDateLabel = extendChart && targetReachDate ? formatXTickLabel(targetReachDate) : null;
+  const targetDateTickX = deadlineOffset != null ? xForOffset(deadlineOffset) : null;
+  const targetDateLabel = target?.byDate ? formatXTickLabel(target.byDate) : null;
 
   // Marker geometry per point — min/max/current get a bigger ringed dot; everything else
   // stays a small subtle dot. Values are shown as badges to the right of the chart instead
@@ -378,7 +381,8 @@ export function WeightTracker() {
   // equidistant, and readable at any timeframe — dynamic, recomputed whenever the range
   // selection (or the projection) changes what's in view. Always the same 45° slant so it's
   // predictable rather than jumping between angles.
-  const axisEndISO = extendChart && targetReachDate ? targetReachDate : lastEntryISO;
+  const axisEndCandidates = [lastEntryISO, targetReachDate, target?.byDate].filter((d): d is string => !!d);
+  const axisEndISO = axisEndCandidates.reduce((a, b) => (b > a ? b : a), lastEntryISO);
   const xTicksRaw = chartBaseISO && axisEndISO ? chooseXTicks(chartBaseISO, axisEndISO) : [];
   const xTicks = xTicksRaw.length ? xTicksRaw : (chartBaseISO && axisEndISO ? [chartBaseISO, axisEndISO] : []);
   const xTickPositions = xTicks.map((iso) => ({ iso, x: xForOffset(diffDays(iso, chartBaseISO)) }));

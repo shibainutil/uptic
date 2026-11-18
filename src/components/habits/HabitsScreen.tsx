@@ -68,15 +68,20 @@ function OptionsMenu({ visible, title, options, onClose }: {
 
 // ── Progress bar ──────────────────────────────────────────────────────────────
 
-function ProgressBar({ rate }: { rate: number }) {
+function ProgressBar({ rate, completedCount, targetSessions }: {
+  rate: number; completedCount?: number; targetSessions?: number;
+}) {
   const pct = Math.round(Math.min(Math.max(rate, 0), 1) * 100);
   const color = barColor(rate);
+  const label = completedCount != null && targetSessions != null
+    ? `${completedCount} / ${targetSessions}`
+    : `${pct}%`;
   return (
     <View style={barSt.row}>
       <View style={barSt.track}>
         <View style={[barSt.fill, { width: `${pct}%` as any, backgroundColor: color }]} />
       </View>
-      <Text style={[barSt.pct, { color }]}>{pct}%</Text>
+      <Text style={[barSt.pct, { color }]}>{label}</Text>
     </View>
   );
 }
@@ -160,8 +165,14 @@ function HabitCard({ habit, completedCount, sessionRate, section, firstSlot, onA
         </View>
       </View>
 
-      {/* Progress bar — hidden for future habits (always 0%) */}
-      {section !== 'future' && <ProgressBar rate={sessionRate} />}
+      {/* Progress bar — hidden for scheduled (future-start) habits */}
+      {section !== 'future' && (
+        <ProgressBar
+          rate={sessionRate}
+          completedCount={habit.kind === 'limited' && habit.targetSessions != null ? completedCount : undefined}
+          targetSessions={habit.kind === 'limited' ? habit.targetSessions : undefined}
+        />
+      )}
 
       {/* First actionable slot */}
       {firstSlot && (
@@ -289,16 +300,18 @@ export function HabitsScreen() {
     else                              section = 'ongoing';
 
     // Find the most relevant slot to show on the card:
-    // overdue (yesterday unlogged) > today (due) > done/skipped (most recent, for undo).
+    // overdue > yesterday-skipped > today > next upcoming > recent done/skipped (for undo).
     let firstSlot: SessionSlot | undefined;
-    if (section === 'ongoing') {
+    if (section === 'ongoing' || section === 'future') {
       const slots = sessionSlots(habit, entries, today);
       const overdue = slots.find(s => s.status === 'overdue');
+      const yesterdaySkipped = slots.find(s => s.status === 'skipped' && s.explicit && s.date === addDays(today, -1));
       const todaySlot = slots.find(s => s.status === 'today');
+      const nextUpcoming = slots.find(s => s.status === 'upcoming');
       const recentDoneSkipped = slots
         .filter(s => (s.status === 'done' || s.status === 'skipped') && s.date >= addDays(today, -1))
         .sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time))[0];
-      firstSlot = overdue ?? todaySlot ?? recentDoneSkipped;
+      firstSlot = overdue ?? yesterdaySkipped ?? todaySlot ?? recentDoneSkipped ?? nextUpcoming;
       if (overdue) section = 'overdue';
     }
 
@@ -351,7 +364,7 @@ export function HabitsScreen() {
     { key: 'overdue',   label: 'Overdue' },
     { key: 'ongoing',   label: 'Ongoing' },
     { key: 'paused',    label: 'Paused' },
-    { key: 'future',    label: 'Future' },
+    { key: 'future',    label: 'Scheduled' },
     { key: 'completed', label: 'Completed' },
     { key: 'archived',  label: 'Archived' },
   ];
@@ -476,7 +489,7 @@ const barSt = StyleSheet.create({
     borderRadius: 4, borderWidth: 1, borderColor: colors.border, overflow: 'hidden',
   },
   fill: { height: '100%', borderRadius: 4 },
-  pct: { fontSize: font.sm, fontWeight: '700', width: 36, textAlign: 'right' },
+  pct: { fontSize: font.sm, fontWeight: '700', minWidth: 36, textAlign: 'right' },
 });
 
 const menuSt = StyleSheet.create({

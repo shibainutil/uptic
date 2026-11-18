@@ -87,14 +87,27 @@ export function withPause(pauses: HabitPause[], from: string, until?: string): H
   return [...rest, merged].sort((a, b) => a.from.localeCompare(b.from));
 }
 
-/** Resume: the pause covering today ends today (inclusive) so already-paused sessions
- *  are not resurrected as pending. The habit resumes from tomorrow. If the pause
- *  started today, it is removed entirely. */
+/** Resume: end the current pause so it no longer covers today. The pause's until is set
+ *  to yesterday so pauseCovering(today) returns undefined after the call. If the pause
+ *  started today or later, it is removed entirely. */
 export function withoutCurrentPause(habit: Habit, todayISO_: string): HabitPause[] {
+  const yesterday = addDays(todayISO_, -1);
   return (habit.pauses ?? []).flatMap((p) => {
     if (!(todayISO_ >= p.from && (p.until == null || todayISO_ <= p.until))) return [p];
-    return p.from >= todayISO_ ? [] : [{ from: p.from, until: todayISO_ }];
+    return p.from >= todayISO_ ? [] : [{ from: p.from, until: yesterday }];
   });
+}
+
+/** Modify habit pauses to uncover a single date — undo a paused session by adjusting or splitting the pause. */
+export function splitPauseAt(habit: Habit, date: string): HabitPause[] {
+  const p = pauseCovering(habit, date);
+  if (!p) return habit.pauses ?? [];
+  const rest = (habit.pauses ?? []).filter((x) => x !== p);
+  const before: HabitPause | null = p.from < date ? { from: p.from, until: addDays(date, -1) } : null;
+  const after: HabitPause | null = (p.until == null || p.until > date)
+    ? (p.until ? { from: addDays(date, 1), until: p.until } : { from: addDays(date, 1) })
+    : null;
+  return [...rest, ...(before ? [before] : []), ...(after ? [after] : [])];
 }
 
 /** How many (date × time-of-day) occurrences a schedule produces in [from, until], minus `off` dates. */
@@ -272,6 +285,8 @@ export interface SessionSlot {
   status: SlotStatus;
   /** Logged on a day the schedule doesn't list (still counts toward totals). */
   extra?: boolean;
+  /** True when the skip was explicitly set by the user (date is in skippedDates). False for auto-skipped past slots. */
+  explicit?: boolean;
 }
 
 const PAST_SLOT_DAYS = 90;     // how far back unlogged / done slots are listed
@@ -306,13 +321,14 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
     const logged = loggedByDate.get(d) ?? 0;
     times.forEach((time, i) => {
       let status: SlotStatus;
+      let explicit: boolean | undefined;
       if (i < logged) status = 'done';
+      else if (skipped.has(d)) { status = 'skipped'; explicit = true; }
       else if (paused_) status = 'paused';
-      else if (skipped.has(d)) status = 'skipped';
       else if (d === todayISO_) { status = 'today'; pendingToday++; }
       else if (d === yesterday) status = 'overdue';
       else status = 'skipped';
-      out.push({ key: `${d}|${time}`, date: d, time, status });
+      out.push({ key: `${d}|${time}`, date: d, time, status, explicit });
     });
   }
 
@@ -344,7 +360,7 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
     for (let i = 0; i < 800 && (pending < remaining || forced(cursor)); i++, cursor = addDays(cursor, 1)) {
       if (!isDue(habit.schedule, fromISO(cursor), habit.startDate) || isPaused(habit, cursor)) continue;
       for (const time of times) {
-        if (skipped.has(cursor)) { out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'skipped' }); continue; }
+        if (skipped.has(cursor)) { out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'skipped', explicit: true }); continue; }
         if (pending >= remaining && !forced(cursor)) break;
         out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'upcoming' });
         pending++;
