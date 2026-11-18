@@ -331,43 +331,30 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
     const paused_ = isPaused(habit, d);
     const logged = loggedByDate.get(d) ?? 0;
 
-    if (d === todayISO_) {
-      // Today: count-based with explicit skips checked first (so skipping one slot
-      // doesn't consume a done credit meant for another).
-      let remainingLogged = logged;
-      times.forEach((time) => {
-        let status: SlotStatus;
-        let explicit: boolean | undefined;
-        const isExplicitSkip = skippedSlots.has(`${d}|${time}`) || skipped.has(d);
-        if (isExplicitSkip) { status = 'skipped'; explicit = true; }
-        else if (remainingLogged > 0) { status = 'done'; remainingLogged--; }
-        else { status = 'today'; pendingToday++; }
-        out.push({ key: `${d}|${time}`, date: d, time, status, explicit });
-      });
-    } else {
-      // Past: match by exact slot time first (markDone sets loggedAt = slot time for past
-      // dates); any unmatched logged count falls back to filling remaining non-skipped slots
-      // in order (handles bulk entries where count > 1 or time wasn't slot-matched).
-      const matched = new Set<string>();
-      let unmatchedCount = logged;
-      for (const time of times) {
-        const c = loggedBySlotTime.get(`${d}|${time}`) ?? 0;
-        if (c > 0) { matched.add(time); unmatchedCount -= c; }
-      }
-      unmatchedCount = Math.max(0, unmatchedCount);
-
-      times.forEach((time) => {
-        let status: SlotStatus;
-        let explicit: boolean | undefined;
-        const isExplicitSkip = skippedSlots.has(`${d}|${time}`) || skipped.has(d);
-        if (isExplicitSkip) { status = 'skipped'; explicit = true; }
-        else if (matched.has(time)) { status = 'done'; }
-        else if (unmatchedCount > 0) { status = 'done'; unmatchedCount--; }
-        else if (paused_) status = 'paused';
-        else status = 'overdue';
-        out.push({ key: `${d}|${time}`, date: d, time, status, explicit });
-      });
+    // Match entries to slots by exact HH:MM — markDone always writes loggedAt at
+    // the slot's scheduled time, so each slot can be identified independently.
+    // Unmatched count (bulk entries or legacy data) falls back to filling remaining
+    // non-skipped slots in order.
+    const matched = new Set<string>();
+    let unmatchedCount = logged;
+    for (const time of times) {
+      const c = loggedBySlotTime.get(`${d}|${time}`) ?? 0;
+      if (c > 0) { matched.add(time); unmatchedCount -= c; }
     }
+    unmatchedCount = Math.max(0, unmatchedCount);
+
+    times.forEach((time) => {
+      let status: SlotStatus;
+      let explicit: boolean | undefined;
+      const isExplicitSkip = skippedSlots.has(`${d}|${time}`) || skipped.has(d);
+      if (isExplicitSkip) { status = 'skipped'; explicit = true; }
+      else if (matched.has(time)) { status = 'done'; }
+      else if (unmatchedCount > 0) { status = 'done'; unmatchedCount--; }
+      else if (paused_) status = 'paused';
+      else if (d === todayISO_) { status = 'today'; pendingToday++; }
+      else status = 'overdue';
+      out.push({ key: `${d}|${time}`, date: d, time, status, explicit });
+    });
   }
 
   // Sessions logged on days the schedule doesn't list would otherwise be invisible.

@@ -20,10 +20,11 @@ export function habitSlotActions({ today, entries, add, update, remove, setSkipp
   const guard = (task: Promise<unknown> | unknown) => { Promise.resolve(task).catch(onError); };
 
   return {
-    /** Log the slot as done: on its own date and time, or right now for today's. */
+    /** Log the slot as done at its scheduled time (createdAt records the real wall-clock moment). */
     markDone(habitId: string, slot: SessionSlot) {
       const [h, m] = slot.time.split(':').map(Number);
-      const at = slot.date === today ? new Date() : (() => { const d = fromISO(slot.date); d.setHours(h, m, 0, 0); return d; })();
+      const at = fromISO(slot.date);
+      at.setHours(h, m, 0, 0);
       guard(add({ habitId, loggedAt: at.toISOString(), count: 1 }));
     },
 
