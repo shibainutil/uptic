@@ -33,14 +33,19 @@ export function habitSlotActions({ today, entries, add, update, remove, setSkipp
       guard(setSkipped(habitId, slot.key, value));
     },
 
-    /** Take back a Done: remove the latest session logged that day (or one off its count). */
+    /** Take back a Done: remove the entry logged at this slot's exact time. */
     undoDone(habitId: string, slot: SessionSlot) {
-      const latest = entries
-        .filter((e) => e.habitId === habitId && toISO(new Date(e.loggedAt)) === slot.date)
+      const [h, m] = slot.time.split(':').map(Number);
+      const match = entries
+        .filter((e) => {
+          if (e.habitId !== habitId || toISO(new Date(e.loggedAt)) !== slot.date) return false;
+          const d = new Date(e.loggedAt);
+          return d.getHours() === h && d.getMinutes() === m;
+        })
         .sort((x, y) => y.loggedAt.localeCompare(x.loggedAt))[0];
-      if (!latest) return;
-      const count = latest.count ?? 1;
-      guard(count > 1 ? update(latest.id, { count: count - 1 }) : remove(latest.id));
+      if (!match) return;
+      const count = match.count ?? 1;
+      guard(count > 1 ? update(match.id, { count: count - 1 }) : remove(match.id));
     },
   };
 }
