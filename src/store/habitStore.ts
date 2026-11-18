@@ -83,10 +83,20 @@ export function useHabits(userId: string | null | undefined) {
   /** Skip (or un-skip) one slot by its key ("yyyy-mm-dd|HH:MM") or a bare date. */
   const setSkipped = useCallback(async (id: string, slotKey: string, skipped: boolean) => {
     const isSlotKey = slotKey.includes('|');
-    await updateDoc(userDoc(userId!, HABITS_COL, id), isSlotKey
-      ? { skippedSlots: skipped ? arrayUnion(slotKey) : arrayRemove(slotKey) }
-      : { skippedDates: skipped ? arrayUnion(slotKey) : arrayRemove(slotKey) },
-    );
+    if (skipped) {
+      await updateDoc(userDoc(userId!, HABITS_COL, id), isSlotKey
+        ? { skippedSlots: arrayUnion(slotKey) }
+        : { skippedDates: arrayUnion(slotKey) },
+      );
+    } else {
+      // Remove from both fields — the slot may have been stored under the legacy
+      // skippedDates (bare date) before per-slot keys were introduced.
+      const bareDate = isSlotKey ? slotKey.split('|')[0] : slotKey;
+      await updateDoc(userDoc(userId!, HABITS_COL, id), {
+        skippedSlots: arrayRemove(slotKey),
+        skippedDates: arrayRemove(bareDate),
+      });
+    }
   }, [userId]);
 
   /** Replace the habit's pauses (add, end or cancel one). */
