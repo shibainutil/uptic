@@ -137,10 +137,14 @@ const styles = StyleSheet.create({
     textAlign: 'center', color: colors.textMuted,
     fontSize: font.sm, fontWeight: '500', paddingVertical: spacing.sm,
   },
-  dayCell: { alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.xs, height: 48 },
+  // Every cell reserves the same border width so today's outline doesn't shift its contents.
+  dayCell: {
+    alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.xs, height: 48,
+    borderWidth: 1.5, borderColor: 'transparent',
+  },
   dayCellPaused: { backgroundColor: 'rgba(234,179,8,0.18)' },
   dayCellPausedOut: { backgroundColor: 'rgba(234,179,8,0.09)' },
-  dayCellToday: { backgroundColor: `${colors.accent}18` },
+  dayCellToday: { borderColor: colors.accent },
   dayNumber: { color: colors.text, fontSize: font.md },
   dayNumberToday: { color: colors.accent, fontWeight: '700' },
   dayNumberOut: { opacity: 0.35 },

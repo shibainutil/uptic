@@ -12,9 +12,11 @@ interface Props {
   value: string;
   onChange: (iso: string) => void;
   disabled?: boolean;
+  minDate?: string;
+  maxDate?: string;
 }
 
-export function DatePicker({ label, value, onChange, disabled }: Props) {
+export function DatePicker({ label, value, onChange, disabled, minDate, maxDate }: Props) {
   const [open, setOpen] = useState(false);
   const selected = fromISO(value);
 
@@ -39,6 +41,8 @@ export function DatePicker({ label, value, onChange, disabled }: Props) {
           value={value}
           onSelect={(iso) => { onChange(iso); setOpen(false); }}
           onClose={() => setOpen(false)}
+          minDate={minDate}
+          maxDate={maxDate}
         />
       )}
     </View>

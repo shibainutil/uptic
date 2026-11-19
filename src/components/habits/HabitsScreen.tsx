@@ -5,23 +5,20 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { useHabits, useHabitLogEntries } from '../../store/habitStore';
 import { todayISO, fromISO, addDays } from '../../lib/schedule';
-import { computeRing, describeSchedule, isPaused, sessionSlots, withoutCurrentPause, type SessionSlot } from '../../lib/habitSchedule';
-import { isHabitComplete, totalSessions, type Habit, type HabitLogEntry } from '../../types/habits';
+import { describeSchedule, isPaused, sessionSlots, withoutCurrentPause, type SessionSlot } from '../../lib/habitSchedule';
+import { isHabitComplete, totalSessions, type Habit } from '../../types/habits';
 import { habitSlotActions } from '../../lib/habitSlotActions';
 import { Badge } from '../ui/Badge';
-import { LogEntryModal } from './LogEntryModal';
+import { ProgressBar, slotsRate } from './ProgressBar';
+import { ActionBtn, ActionBtnGroup } from './ActionBtn';
+import { SectionHeader } from './SectionHeader';
+import { slotDateLabel } from '../../lib/slotLabel';
 import { colors, spacing, font, radius } from '../../theme';
 
 const LIMITED_COLOR = '#A855F7';
-const TARGET_COLOR = '#EAB308';
 
-type SectionKey = 'overdue' | 'due' | 'complete' | 'pending' | 'paused' | 'completed' | 'archived';
+type SectionKey = 'overdue' | 'due' | 'done' | 'skipped' | 'pending' | 'paused' | 'completed' | 'archived';
 
-function barColor(rate: number): string {
-  if (rate >= 0.9) return colors.success;
-  if (rate >= 0.5) return TARGET_COLOR;
-  return colors.danger;
-}
 
 function isHabitPaused(habit: Habit, today: string): boolean {
   return isPaused(habit, today);
@@ -68,36 +65,31 @@ function OptionsMenu({ visible, title, options, onClose }: {
 
 // ── Progress bar ──────────────────────────────────────────────────────────────
 
-function ProgressBar({ rate, completedCount, targetSessions }: {
-  rate: number; completedCount?: number; targetSessions?: number;
-}) {
-  const pct = Math.round(Math.min(Math.max(rate, 0), 1) * 100);
-  const color = barColor(rate);
-  const label = completedCount != null && targetSessions != null
-    ? `${completedCount} / ${targetSessions}`
-    : `${pct}%`;
-  return (
-    <View style={barSt.row}>
-      <View style={barSt.track}>
-        <View style={[barSt.fill, { width: `${pct}%` as any, backgroundColor: color }]} />
-      </View>
-      <Text style={[barSt.pct, { color }]}>{label}</Text>
-    </View>
-  );
-}
 
 // ── Habit card ────────────────────────────────────────────────────────────────
 
 const OVERDUE_COLOR = '#F97316';
+const PAUSE_COLOR = '#EAB308';
 
-function HabitCard({ habit, completedCount, sessionRate, section, firstSlot, onAdd, onEdit,
+function cardBorderColor(section: SectionKey, firstSlot?: SessionSlot): string {
+  switch (section) {
+    case 'overdue':  return OVERDUE_COLOR;
+    case 'due':      return colors.accent;
+    case 'done':     return colors.success;
+    case 'skipped':  return colors.danger;
+    case 'pending':  return colors.border;
+    case 'paused':   return PAUSE_COLOR;
+    default:         return colors.surface2;
+  }
+}
+
+function HabitCard({ habit, completedCount, sessionRate, section, firstSlot, onEdit,
   onViewEntries, onPauseToggle, onArchiveToggle, onReset, onDelete, onMarkDone, onSkip, onUndoDone }: {
   habit: Habit;
   completedCount: number;
   sessionRate: number;
   section: SectionKey;
   firstSlot?: SessionSlot;
-  onAdd: (d: Omit<HabitLogEntry, 'id' | 'createdAt'>) => void;
   onEdit: () => void;
   onViewEntries: () => void;
   onPauseToggle: () => void;
@@ -109,7 +101,6 @@ function HabitCard({ habit, completedCount, sessionRate, section, firstSlot, onA
   onUndoDone: (slot: SessionSlot) => void;
 }) {
   const [menuVisible, setMenuVisible] = useState(false);
-  const [logVisible, setLogVisible] = useState(false);
   const today = todayISO();
   const paused = isHabitPaused(habit, today);
 
@@ -125,10 +116,11 @@ function HabitCard({ habit, completedCount, sessionRate, section, firstSlot, onA
     : firstSlot?.status === 'today' ? colors.accent
     : firstSlot?.status === 'done' ? colors.success
     : firstSlot?.status === 'skipped' ? colors.danger
+    : firstSlot?.status === 'paused' ? PAUSE_COLOR
     : colors.textMuted;
 
   return (
-    <Pressable style={cardSt.card} onPress={onViewEntries}>
+    <Pressable style={[cardSt.card, { borderColor: cardBorderColor(section, firstSlot) }]} onPress={onViewEntries}>
       {/* Header row */}
       <View style={cardSt.headerRow}>
         <View style={cardSt.headerMain}>
@@ -148,17 +140,14 @@ function HabitCard({ habit, completedCount, sessionRate, section, firstSlot, onA
             )}
             {habit.kind === 'limited' && habit.targetSessions != null && (
               <Badge
-                color={TARGET_COLOR}
+                color={LIMITED_COLOR}
                 label={`${completedCount} / ${habit.targetSessions}`}
-                icon={<MaterialIcons name="gps-fixed" size={10} color={TARGET_COLOR} />}
+                icon={<MaterialIcons name="gps-fixed" size={10} color={LIMITED_COLOR} />}
               />
             )}
           </View>
         </View>
         <View style={cardSt.headerActions}>
-          <Pressable style={[cardSt.iconBtn, cardSt.addBtn]} onPress={() => setLogVisible(true)}>
-            <MaterialIcons name="add" size={16} color="#fff" />
-          </Pressable>
           <Pressable style={cardSt.menuBtn} onPress={() => setMenuVisible(true)}>
             <MaterialIcons name="more-vert" size={18} color={colors.textMuted} />
           </Pressable>
@@ -167,11 +156,7 @@ function HabitCard({ habit, completedCount, sessionRate, section, firstSlot, onA
 
       {/* Progress bar — hidden for habits that haven't started yet */}
       {habit.startDate <= today && (
-        <ProgressBar
-          rate={sessionRate}
-          completedCount={habit.kind === 'limited' && habit.targetSessions != null ? completedCount : undefined}
-          targetSessions={habit.kind === 'limited' ? habit.targetSessions : undefined}
-        />
+        <ProgressBar rate={sessionRate} />
       )}
 
       {/* First actionable slot */}
@@ -180,32 +165,25 @@ function HabitCard({ habit, completedCount, sessionRate, section, firstSlot, onA
           <MaterialIcons
             name={firstSlot.status === 'done' ? 'check-circle'
               : firstSlot.status === 'skipped' ? 'cancel'
+              : firstSlot.status === 'paused' ? 'pause-circle-outline'
               : 'radio-button-unchecked'}
             size={18}
             color={slotTint}
           />
           <Text style={[cardSt.slotDate, { color: slotTint }]}>
-            {firstSlot.status === 'overdue' ? 'Yesterday' : firstSlot.status === 'today' ? 'Today' : fromISO(firstSlot.date).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
-            {' · '}{firstSlot.time}
+            {slotDateLabel(firstSlot)}
           </Text>
           {firstSlot.status === 'done' || firstSlot.status === 'skipped' ? (
-            <Pressable
-              hitSlop={8}
-              style={cardSt.slotBtn}
+            <ActionBtn
+              label="Undo" icon="refresh" scheme="grey"
               onPress={() => firstSlot.status === 'done' ? onUndoDone(firstSlot) : onSkip(firstSlot, false)}
-            >
-              <Text style={cardSt.slotBtnText}>Undo</Text>
-            </Pressable>
-          ) : (
-            <>
-              <Pressable hitSlop={8} style={cardSt.slotBtn} onPress={() => onSkip(firstSlot, true)}>
-                <Text style={cardSt.slotBtnText}>Skip</Text>
-              </Pressable>
-              <Pressable hitSlop={8} style={[cardSt.slotBtn, cardSt.slotBtnDone]} onPress={() => onMarkDone(firstSlot)}>
-                <Text style={[cardSt.slotBtnText, { color: '#fff' }]}>Done</Text>
-              </Pressable>
-            </>
-          )}
+            />
+          ) : firstSlot.status === 'today' || firstSlot.status === 'overdue' ? (
+            <ActionBtnGroup>
+              <ActionBtn label="Skip" icon="close" scheme="red" onPress={() => onSkip(firstSlot, true)} />
+              <ActionBtn label="Done" icon="check" scheme="green" onPress={() => onMarkDone(firstSlot)} />
+            </ActionBtnGroup>
+          ) : null}
         </View>
       )}
 
@@ -215,37 +193,12 @@ function HabitCard({ habit, completedCount, sessionRate, section, firstSlot, onA
         options={menuOptions}
         onClose={() => setMenuVisible(false)}
       />
-      <LogEntryModal
-        visible={logVisible}
-        onSave={(loggedAt, notes, count) => {
-          onAdd({ habitId: habit.id, loggedAt, notes: notes || undefined, count });
-          setLogVisible(false);
-        }}
-        onClose={() => setLogVisible(false)}
-      />
     </Pressable>
   );
 }
 
 // ── Section header ────────────────────────────────────────────────────────────
 
-function SectionHeader({ label, count, open, onToggle }: {
-  label: string; count: number; open: boolean; onToggle: () => void;
-}) {
-  return (
-    <Pressable style={sectSt.header} onPress={onToggle}>
-      <Text style={sectSt.label}>{label}</Text>
-      <View style={sectSt.right}>
-        <Text style={sectSt.count}>{count}</Text>
-        <MaterialIcons
-          name={open ? 'keyboard-arrow-up' : 'keyboard-arrow-down'}
-          size={18}
-          color={colors.textMuted}
-        />
-      </View>
-    </Pressable>
-  );
-}
 
 // ── Main screen ───────────────────────────────────────────────────────────────
 
@@ -255,10 +208,9 @@ export function HabitsScreen() {
   const { habits, update: updateHabit, remove: removeHabit, setPauses, setSkipped } = useHabits(user?.uid);
   const { entries, add: addEntry, update: updateEntry, remove: removeEntry, resetEntries } = useHabitLogEntries(user?.uid);
   const today = todayISO();
-  const nowTime = (() => { const n = new Date(); return `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}`; })();
 
   const [openSections, setOpenSections] = useState<Set<SectionKey>>(
-    new Set(['overdue', 'due', 'complete', 'pending', 'paused']),
+    new Set(['overdue', 'due', 'done', 'skipped', 'pending', 'paused']),
   );
 
   function toggleSection(key: SectionKey) {
@@ -270,7 +222,7 @@ export function HabitsScreen() {
   }
 
   const slotActions = habitSlotActions({
-    today, entries, add: addEntry, update: updateEntry, remove: removeEntry, setSkipped,
+    today, habits, entries, setPauses, add: addEntry, update: updateEntry, remove: removeEntry, setSkipped,
     onError: (e) => Alert.alert('Error', e instanceof Error ? e.message : 'Something went wrong.'),
   });
 
@@ -288,13 +240,15 @@ export function HabitsScreen() {
     const complete = isHabitComplete(habit, completedCount, today);
     const paused = isHabitPaused(habit, today);
 
-    const allTimeRate = computeRing(habit, entries, 'allTime', today, nowTime).rate;
-    const sessionRate = habit.kind === 'limited' && habit.targetSessions != null
-      ? Math.min(completedCount / habit.targetSessions, 1)
-      : allTimeRate;
-
     let section: SectionKey;
     let firstSlot: SessionSlot | undefined;
+
+    // Compute slots for all active habits — used by both section logic and rate calculation.
+    const slots = (habit.archived || complete) ? [] : sessionSlots(habit, entries, today);
+
+    const allTimeRate = slotsRate(slots, today);    const sessionRate = habit.kind === 'limited' && habit.targetSessions != null
+      ? Math.min(completedCount / habit.targetSessions, 1)
+      : allTimeRate;
 
     if (habit.archived) {
       section = 'archived';
@@ -302,23 +256,34 @@ export function HabitsScreen() {
       section = 'completed';
     } else if (paused) {
       section = 'paused';
+      firstSlot = slots
+        .filter(s => s.status === 'paused')
+        .sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time))[0];
     } else {
-      const slots = sessionSlots(habit, entries, today);
-      // A slot is unhandled if it hasn't been done or skipped yet.
-      const firstUnhandled = slots.find(
-        s => s.date <= today && s.status !== 'done' && s.status !== 'skipped' && s.status !== 'paused',
-      );
+      // Most recent unhandled slot on or before today, and most recent handled slot.
+      const pastAndToday = slots.filter(s => s.date <= today && s.status !== 'paused');
+      const lastUnhandled = pastAndToday.filter(
+        s => s.status !== 'done' && s.status !== 'skipped',
+      ).at(-1);
+      const lastHandled = pastAndToday.filter(
+        s => s.status === 'done' || s.status === 'skipped',
+      ).at(-1);
+      // If the most recent handled slot is newer than the most recent unhandled slot,
+      // the older unhandled slots are abandoned — don't drag the habit to overdue.
+      const activeUnhandled = (lastHandled && lastUnhandled && lastHandled.key > lastUnhandled.key)
+        ? undefined
+        : lastUnhandled;
       const hasSlotToday = slots.some(s => s.date === today && s.status !== 'paused');
 
-      if (firstUnhandled) {
-        section = firstUnhandled.date < today ? 'overdue' : 'due';
-        firstSlot = firstUnhandled;
+      if (activeUnhandled) {
+        section = activeUnhandled.date < today ? 'overdue' : 'due';
+        firstSlot = activeUnhandled;
       } else if (hasSlotToday) {
-        section = 'complete';
         // Show the last handled slot from today so the user can undo.
         firstSlot = slots
           .filter(s => s.date === today && (s.status === 'done' || s.status === 'skipped'))
           .sort((a, b) => b.time.localeCompare(a.time))[0];
+        section = firstSlot?.status === 'skipped' ? 'skipped' : 'done';
       } else {
         section = 'pending';
         firstSlot = slots.find(s => s.status === 'upcoming');
@@ -370,12 +335,13 @@ export function HabitsScreen() {
     );
   }
 
-  const SECTIONS: { key: SectionKey; label: string }[] = [
-    { key: 'overdue',   label: 'Overdue' },
-    { key: 'due',       label: 'Due' },
-    { key: 'complete',  label: 'Complete' },
+  const SECTIONS: { key: SectionKey; label: string; color?: string }[] = [
+    { key: 'overdue',   label: 'Overdue',  color: OVERDUE_COLOR },
+    { key: 'due',       label: 'Due',      color: colors.accent },
+    { key: 'paused',    label: 'Paused',   color: PAUSE_COLOR },
+    { key: 'skipped',   label: 'Skipped',  color: colors.danger },
+    { key: 'done',      label: 'Done',     color: colors.success },
     { key: 'pending',   label: 'Pending' },
-    { key: 'paused',    label: 'Paused' },
     { key: 'completed', label: 'Completed' },
     { key: 'archived',  label: 'Archived' },
   ];
@@ -399,14 +365,21 @@ export function HabitsScreen() {
         <Text style={styles.addBtnText}>Add habit</Text>
       </Pressable>
 
-      {SECTIONS.map(({ key, label }) => {
-        const sectionItems = items.filter(i => i.section === key);
+      {SECTIONS.map(({ key, label, color }) => {
+        const sectionItems = items
+          .filter(i => i.section === key)
+          .sort((a, b) => {
+            const aKey = a.firstSlot ? `${a.firstSlot.date}|${a.firstSlot.time}` : '9999';
+            const bKey = b.firstSlot ? `${b.firstSlot.date}|${b.firstSlot.time}` : '9999';
+            return aKey.localeCompare(bKey);
+          });
         if (sectionItems.length === 0) return null;
         const open = openSections.has(key);
         return (
           <View key={key} style={styles.section}>
             <SectionHeader
               label={label}
+              color={color}
               count={sectionItems.length}
               open={open}
               onToggle={() => toggleSection(key)}
@@ -415,7 +388,6 @@ export function HabitsScreen() {
               <HabitCard
                 key={item.habit.id}
                 {...item}
-                onAdd={addEntry}
                 onEdit={() => router.push(`/habits/habit/${item.habit.id}`)}
                 onViewEntries={() => router.push(`/habits/entries/${item.habit.id}`)}
                 onPauseToggle={() => handlePauseToggle(item.habit)}
@@ -451,15 +423,6 @@ const styles = StyleSheet.create({
   section: { gap: 4 },
 });
 
-const sectSt = StyleSheet.create({
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: spacing.xs, paddingHorizontal: 2,
-  },
-  label: { color: colors.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6 },
-  right: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  count: { color: colors.textDim, fontSize: 11, fontWeight: '600' },
-});
 
 const cardSt = StyleSheet.create({
   card: {
@@ -477,30 +440,12 @@ const cardSt = StyleSheet.create({
   name: { color: colors.text, fontSize: font.md, fontWeight: '600' },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingTop: 2 },
-  iconBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
-  addBtn: { backgroundColor: colors.accent },
   menuBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   slotRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
-    paddingTop: spacing.xs, borderTopWidth: 1, borderTopColor: colors.surface2,
+    paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.surface2,
   },
   slotDate: { flex: 1, fontSize: font.sm },
-  slotBtn: {
-    paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.sm,
-    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface2,
-  },
-  slotBtnDone: { backgroundColor: colors.accent, borderColor: colors.accent },
-  slotBtnText: { color: colors.text, fontSize: font.sm, fontWeight: '600' },
-});
-
-const barSt = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  track: {
-    flex: 1, height: 7, backgroundColor: colors.surface2,
-    borderRadius: 4, borderWidth: 1, borderColor: colors.border, overflow: 'hidden',
-  },
-  fill: { height: '100%', borderRadius: 4 },
-  pct: { fontSize: font.sm, fontWeight: '700', minWidth: 36, textAlign: 'right' },
 });
 
 const menuSt = StyleSheet.create({

@@ -4,6 +4,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider, useAuth } from '../src/context/AuthContext';
+import { useDevReconnect } from '../src/lib/devReconnect';
 
 // react-native-draggable-flatlist's nested lists (NestableDraggableFlatList inside
 // NestableScrollContainer) call measureLayout against the animated outer ScrollView,
@@ -33,6 +34,7 @@ function RootNavigator() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const segments = useSegments();
+  useDevReconnect(!loading && !!user);
 
   useEffect(() => {
     if (loading) return;

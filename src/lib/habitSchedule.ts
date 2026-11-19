@@ -98,16 +98,13 @@ export function withoutCurrentPause(habit: Habit, todayISO_: string): HabitPause
   });
 }
 
-/** Modify habit pauses to uncover a single date — undo a paused session by adjusting or splitting the pause. */
-export function splitPauseAt(habit: Habit, date: string): HabitPause[] {
+/** Undo a paused session: end the pause covering `date` the day before, so neither that
+ *  date nor anything after it stays paused. A pause starting on/after `date` is removed. */
+export function endPauseFrom(habit: Habit, date: string): HabitPause[] {
   const p = pauseCovering(habit, date);
   if (!p) return habit.pauses ?? [];
   const rest = (habit.pauses ?? []).filter((x) => x !== p);
-  const before: HabitPause | null = p.from < date ? { from: p.from, until: addDays(date, -1) } : null;
-  const after: HabitPause | null = (p.until == null || p.until > date)
-    ? (p.until ? { from: addDays(date, 1), until: p.until } : { from: addDays(date, 1) })
-    : null;
-  return [...rest, ...(before ? [before] : []), ...(after ? [after] : [])];
+  return p.from < date ? [...rest, { from: p.from, until: addDays(date, -1) }] : rest;
 }
 
 /** How many (date × time-of-day) occurrences a schedule produces in [from, until], minus `off` dates. */
@@ -197,10 +194,10 @@ export function describeSchedule(schedule: HabitSchedule): string {
 
 // ── Progress rings ───────────────────────────────────────────────────────────
 
-export type RingPeriod = 'day' | 'week' | 'month' | 'quarter' | 'year' | 'allTime';
+export type ProgressPeriod = 'day' | 'week' | 'month' | 'quarter' | 'year' | 'allTime';
 
 /** Inclusive [start, end] ISO date bounds for the period containing `todayISO`. */
-export function periodBounds(period: RingPeriod, todayISO: string): [string, string] {
+export function periodBounds(period: ProgressPeriod, todayISO: string): [string, string] {
   const d = fromISO(todayISO);
   const y = d.getFullYear();
   const m = d.getMonth();
@@ -230,15 +227,15 @@ export function periodBounds(period: RingPeriod, todayISO: string): [string, str
   }
 }
 
-export interface RingResult {
+export interface ProgressResult {
   rate: number; // 0..1
   completed: number;
   expected: number;
 }
 
-/** Progress for one habit over one ring period, clamped to [habit.startDate, today].
+/** Progress for one habit over a period, clamped to [habit.startDate, today].
  *  Pass `nowTime` as "HH:MM" (24h) so today's future time-slots are excluded from expected. */
-export function computeRing(habit: Habit, entries: HabitLogEntry[], period: RingPeriod, todayISO: string, nowTime?: string): RingResult {
+export function computeProgress(habit: Habit, entries: HabitLogEntry[], period: ProgressPeriod, todayISO: string, nowTime?: string): ProgressResult {
   const [periodStart, periodEndRaw] = period === 'allTime'
     ? [habit.startDate, todayISO]
     : periodBounds(period, todayISO);
@@ -246,17 +243,41 @@ export function computeRing(habit: Habit, entries: HabitLogEntry[], period: Ring
   const end = periodEndRaw > todayISO ? todayISO : periodEndRaw;
   if (diffDays(end, start) < 0) return { rate: 0, completed: 0, expected: 0 };
 
-  const baseExpected = countScheduledSlots(habit.schedule, habit.startDate, start, end, (d) => isOff(habit, d));
-  // Subtract today's time slots that haven't been reached yet so the ring doesn't
-  // count future sessions on the current day as already expected.
-  const futureTodaySlots = (end === todayISO && nowTime != null && !isOff(habit, todayISO) && isDue(habit.schedule, fromISO(todayISO), habit.startDate))
-    ? (habit.schedule.timesOfDay ?? ['09:00']).filter((t) => t > nowTime).length
+  // Use only paused days (not skipped ones) as the exclusion filter: a skipped slot was
+  // still on the schedule, so it counts as expected but not completed.
+  const baseExpected = countScheduledSlots(habit.schedule, habit.startDate, start, end, (d) => isPaused(habit, d));
+  // Subtract today's time slots that haven't been reached yet AND haven't been
+  // explicitly handled (done or skipped) so the ring doesn't count genuinely
+  // pending future sessions on the current day as already expected.
+  const skippedSlotSet = new Set(habit.skippedSlots ?? []);
+  const futureTodaySlots = (end === todayISO && nowTime != null && !isPaused(habit, todayISO) && isDue(habit.schedule, fromISO(todayISO), habit.startDate))
+    ? (habit.schedule.timesOfDay ?? ['09:00']).filter((t) => {
+        if (t <= nowTime) return false;
+        // Already explicitly skipped → still counts as expected, don't subtract
+        if (skippedSlotSet.has(`${todayISO}|${t}`) || (habit.skippedDates ?? []).includes(todayISO)) return false;
+        return true;
+      }).length
     : 0;
   const expected = baseExpected - futureTodaySlots;
-  const rangeEndExclusive = addDays(end, 1);
-  const completed = totalSessions(entries.filter(
-    (e) => e.habitId === habit.id && e.loggedAt >= start && e.loggedAt < rangeEndExclusive,
-  ));
+  // Count completed slots per scheduled day, skipping entries whose exact slot key is
+  // in skippedSlots (a slot that was done and then explicitly skipped stays skipped).
+  // Also cap per-day count at slotsPerDay to avoid duplicate entries inflating the rate.
+  const spd = slotsPerDay(habit.schedule);
+  const mine = entries.filter((e) => e.habitId === habit.id);
+  const skippedDatesSet = new Set(habit.skippedDates ?? []);
+  const dueDatesInRange = enumerateDueDates(habit.schedule, habit.startDate, start, end)
+    .filter((d) => !isPaused(habit, d));
+  let completed = 0;
+  for (const d of dueDatesInRange) {
+    if (skippedDatesSet.has(d)) continue; // whole day skipped — 0 completions
+    const count = mine.filter((e) => {
+      if (entryDate(e) !== d) return false;
+      const eDate = new Date(e.loggedAt);
+      const hhmm = `${String(eDate.getHours()).padStart(2, '0')}:${String(eDate.getMinutes()).padStart(2, '0')}`;
+      return !skippedSlotSet.has(`${d}|${hhmm}`);
+    }).length;
+    completed += Math.min(count, spd);
+  }
 
   const rate = expected > 0 ? Math.min(completed / expected, 1) : (completed > 0 ? 1 : 0);
   return { rate, completed, expected };
@@ -294,6 +315,8 @@ export interface SessionSlot {
   extra?: boolean;
   /** True when the skip was explicitly set by the user (date is in skippedDates). False for auto-skipped past slots. */
   explicit?: boolean;
+  /** For done slots: the log entry that fills this slot. */
+  entryId?: string;
 }
 
 const PAST_SLOT_DAYS = 90;     // how far back unlogged / done slots are listed
@@ -311,17 +334,14 @@ const ONGOING_UPCOMING = 10;   // upcoming slots listed for habits without a ses
  */
 export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: string, through?: string): SessionSlot[] {
   const mine = entries.filter((e) => e.habitId === habit.id);
-  const loggedByDate = new Map<string, number>();
-  for (const e of mine) loggedByDate.set(entryDate(e), (loggedByDate.get(entryDate(e)) ?? 0) + (e.count ?? 1));
-  // For past dates: match entries to slots by exact HH:MM so multi-session days
-  // don't bleed across slots (markDone sets loggedAt to the slot's exact time for past dates).
-  const loggedBySlotTime = new Map<string, number>();
-  for (const e of mine) {
+  const hhmmOf = (e: HabitLogEntry) => {
+    const t = new Date(e.loggedAt);
+    return `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+  };
+  const entriesByDate = new Map<string, HabitLogEntry[]>();
+  for (const e of [...mine].sort((a, b) => a.loggedAt.localeCompare(b.loggedAt))) {
     const d = entryDate(e);
-    const eDate = new Date(e.loggedAt);
-    const hhmm = `${String(eDate.getHours()).padStart(2, '0')}:${String(eDate.getMinutes()).padStart(2, '0')}`;
-    const key = `${d}|${hhmm}`;
-    loggedBySlotTime.set(key, (loggedBySlotTime.get(key) ?? 0) + (e.count ?? 1));
+    entriesByDate.set(d, [...(entriesByDate.get(d) ?? []), e]);
   }
   const skipped = new Set(habit.skippedDates ?? []);
   const skippedSlots = new Set(habit.skippedSlots ?? []);
@@ -349,32 +369,38 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
     if (!isDue(habit.schedule, fromISO(d), anchor)) continue;
     coveredDates.add(d);
     const paused_ = isPaused(habit, d);
-    const logged = loggedByDate.get(d) ?? 0;
-
-    // Match entries to slots by exact HH:MM — markDone always writes loggedAt at
-    // the slot's scheduled time, so each slot can be identified independently.
-    // Unmatched count (bulk entries or legacy data) falls back to filling remaining
-    // non-skipped slots in order.
-    const matched = new Set<string>();
-    let unmatchedCount = logged;
+    // Entries logged at a slot's exact time fill that slot. Any other entries that day
+    // (edited times, manual logs) fill the remaining open slots in order; an entry with
+    // count N can fill up to N slots.
+    const dayEntries = entriesByDate.get(d) ?? [];
+    const exact = new Map<string, HabitLogEntry>();
+    const used = new Set<string>();
     for (const time of times) {
-      const c = loggedBySlotTime.get(`${d}|${time}`) ?? 0;
-      if (c > 0) { matched.add(time); unmatchedCount -= c; }
+      const e = dayEntries.find((x) => !used.has(x.id) && hhmmOf(x) === time);
+      if (e) { exact.set(time, e); used.add(e.id); }
     }
-    unmatchedCount = Math.max(0, unmatchedCount);
+    const spare = dayEntries.filter((e) => !used.has(e.id)).flatMap((e) => Array(e.count ?? 1).fill(e) as HabitLogEntry[]);
 
     times.forEach((time) => {
       let status: SlotStatus;
       let explicit: boolean | undefined;
+      let entry: HabitLogEntry | undefined;
       const isExplicitSkip = skippedSlots.has(`${d}|${time}`) || skipped.has(d);
       if (isExplicitSkip) { status = 'skipped'; explicit = true; }
-      else if (matched.has(time)) { status = 'done'; }
-      else if (unmatchedCount > 0) { status = 'done'; unmatchedCount--; }
+      else if ((entry = exact.get(time) ?? spare.shift())) { status = 'done'; }
       else if (paused_) status = 'paused';
       else if (d === todayISO_) { status = 'today'; pendingToday++; }
       else status = 'overdue';
-      out.push({ key: `${d}|${time}`, date: d, time, status, explicit });
+      if (entry) used.add(entry.id);
+      out.push({
+        key: `${d}|${time}`, date: d, time: entry ? hhmmOf(entry) : time, status, explicit, entryId: entry?.id,
+      });
     });
+    // Entries beyond the day's scheduled slots still get their own row.
+    for (const e of dayEntries) {
+      if (used.has(e.id)) continue;
+      out.push({ key: `${d}|${hhmmOf(e)}|logged|${e.id}`, date: d, time: hhmmOf(e), status: 'done', extra: true, entryId: e.id });
+    }
   }
 
   // Sessions logged on days the schedule doesn't list would otherwise be invisible.
@@ -387,7 +413,7 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
     const d = entryDate(e);
     if (d < pastStart || d > todayISO_ || seenExtra.has(d) || coveredDates.has(d)) continue;
     seenExtra.add(d);
-    out.push({ key: `${d}|${hh(e.loggedAt)}|logged`, date: d, time: hh(e.loggedAt), status: 'done', extra: true });
+    out.push({ key: `${d}|${hh(e.loggedAt)}|logged`, date: d, time: hh(e.loggedAt), status: 'done', extra: true, entryId: e.id });
   }
 
   const completedCount = totalSessions(mine);

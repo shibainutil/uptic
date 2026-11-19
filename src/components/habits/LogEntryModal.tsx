@@ -17,6 +17,8 @@ interface Props {
   onSave: (loggedAt: string, notes: string, count: number) => void;
   onDelete?: () => void;
   onClose: () => void;
+  /** Earliest selectable date (ISO yyyy-mm-dd). */
+  minDate?: string;
 }
 
 function splitDateTime(iso: string): [string, string] {
@@ -24,7 +26,7 @@ function splitDateTime(iso: string): [string, string] {
   return [toISO(d), `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`];
 }
 
-export function LogEntryModal({ visible, entry, onSave, onDelete, onClose }: Props) {
+export function LogEntryModal({ visible, entry, onSave, onDelete, onClose, minDate }: Props) {
   const [date, time] = splitDateTime(entry?.loggedAt ?? new Date().toISOString());
   const [d, setD] = useState(date);
   const [t, setT] = useState(time);
@@ -41,7 +43,7 @@ export function LogEntryModal({ visible, entry, onSave, onDelete, onClose }: Pro
   return (
     <Modal title={entry ? 'Edit Session' : 'Log Session'} visible={visible} onClose={onClose}>
       <View style={styles.body}>
-        <DatePicker label="Date" value={d} onChange={setD} />
+        <DatePicker label="Date" value={d} onChange={setD} minDate={minDate} />
         <View style={styles.field}>
           <Text style={styles.label}>Time</Text>
           <TimePicker value={t} onChange={setT} />

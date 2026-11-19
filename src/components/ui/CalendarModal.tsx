@@ -34,10 +34,12 @@ interface Props {
   onClose: () => void;
   /** Latest selectable date (inclusive), as ISO yyyy-mm-dd. Later days are shown but disabled. */
   maxDate?: string;
+  /** Earliest selectable date (inclusive), as ISO yyyy-mm-dd. Earlier days are shown but disabled. */
+  minDate?: string;
 }
 
 /** Calendar-only modal (no trigger). Parent controls visibility. */
-export function CalendarModal({ title = 'Select date', visible, value, onSelect, onClose, maxDate }: Props) {
+export function CalendarModal({ title = 'Select date', visible, value, onSelect, onClose, maxDate, minDate }: Props) {
   const selected = fromISO(value);
   const [viewYear, setViewYear] = useState(selected.getFullYear());
   const [viewMonth, setViewMonth] = useState(selected.getMonth());
@@ -87,7 +89,7 @@ export function CalendarModal({ title = 'Select date', visible, value, onSelect,
             if (!date) return <View key={di} style={styles.dayCell} />;
             const isSelected = isSameDay(date, selected);
             const isToday = isSameDay(date, today);
-            const disabled = maxDate != null && toISO(date) > maxDate;
+            const disabled = (maxDate != null && toISO(date) > maxDate) || (minDate != null && toISO(date) < minDate);
             return (
               <Pressable
                 key={di}
