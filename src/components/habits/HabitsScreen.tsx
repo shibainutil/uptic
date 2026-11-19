@@ -15,7 +15,7 @@ import { colors, spacing, font, radius } from '../../theme';
 const LIMITED_COLOR = '#A855F7';
 const TARGET_COLOR = '#EAB308';
 
-type SectionKey = 'overdue' | 'future' | 'ongoing' | 'paused' | 'completed' | 'archived';
+type SectionKey = 'overdue' | 'due' | 'complete' | 'pending' | 'paused' | 'completed' | 'archived';
 
 function barColor(rate: number): string {
   if (rate >= 0.9) return colors.success;
@@ -165,8 +165,8 @@ function HabitCard({ habit, completedCount, sessionRate, section, firstSlot, onA
         </View>
       </View>
 
-      {/* Progress bar — hidden for scheduled (future-start) habits */}
-      {section !== 'future' && (
+      {/* Progress bar — hidden for habits that haven't started yet */}
+      {habit.startDate <= today && (
         <ProgressBar
           rate={sessionRate}
           completedCount={habit.kind === 'limited' && habit.targetSessions != null ? completedCount : undefined}
@@ -258,7 +258,7 @@ export function HabitsScreen() {
   const nowTime = (() => { const n = new Date(); return `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}`; })();
 
   const [openSections, setOpenSections] = useState<Set<SectionKey>>(
-    new Set(['overdue', 'future', 'ongoing', 'paused']),
+    new Set(['overdue', 'due', 'complete', 'pending', 'paused']),
   );
 
   function toggleSection(key: SectionKey) {
@@ -294,26 +294,35 @@ export function HabitsScreen() {
       : allTimeRate;
 
     let section: SectionKey;
-    if (habit.archived)               section = 'archived';
-    else if (complete)                section = 'completed';
-    else if (paused)                  section = 'paused';
-    else if (habit.startDate > today) section = 'future';
-    else                              section = 'ongoing';
-
-    // Find the most relevant slot to show on the card:
-    // overdue > yesterday-skipped > today > next upcoming > recent done/skipped (for undo).
     let firstSlot: SessionSlot | undefined;
-    if (section === 'ongoing' || section === 'future') {
+
+    if (habit.archived) {
+      section = 'archived';
+    } else if (complete) {
+      section = 'completed';
+    } else if (paused) {
+      section = 'paused';
+    } else {
       const slots = sessionSlots(habit, entries, today);
-      const overdue = slots.find(s => s.status === 'overdue' && s.date === addDays(today, -1));
-      const yesterdaySkipped = slots.find(s => s.status === 'skipped' && s.explicit && s.date === addDays(today, -1));
-      const todaySlot = slots.find(s => s.status === 'today');
-      const nextUpcoming = slots.find(s => s.status === 'upcoming');
-      const recentDoneSkipped = slots
-        .filter(s => (s.status === 'done' || s.status === 'skipped') && s.date >= addDays(today, -1))
-        .sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time))[0];
-      firstSlot = overdue ?? yesterdaySkipped ?? todaySlot ?? recentDoneSkipped ?? nextUpcoming;
-      if (overdue) section = 'overdue';
+      // A slot is unhandled if it hasn't been done or skipped yet.
+      const firstUnhandled = slots.find(
+        s => s.date <= today && s.status !== 'done' && s.status !== 'skipped' && s.status !== 'paused',
+      );
+      const hasSlotToday = slots.some(s => s.date === today && s.status !== 'paused');
+
+      if (firstUnhandled) {
+        section = firstUnhandled.date < today ? 'overdue' : 'due';
+        firstSlot = firstUnhandled;
+      } else if (hasSlotToday) {
+        section = 'complete';
+        // Show the last handled slot from today so the user can undo.
+        firstSlot = slots
+          .filter(s => s.date === today && (s.status === 'done' || s.status === 'skipped'))
+          .sort((a, b) => b.time.localeCompare(a.time))[0];
+      } else {
+        section = 'pending';
+        firstSlot = slots.find(s => s.status === 'upcoming');
+      }
     }
 
     return { habit, completedCount, sessionRate, section, firstSlot };
@@ -363,9 +372,10 @@ export function HabitsScreen() {
 
   const SECTIONS: { key: SectionKey; label: string }[] = [
     { key: 'overdue',   label: 'Overdue' },
-    { key: 'ongoing',   label: 'Ongoing' },
+    { key: 'due',       label: 'Due' },
+    { key: 'complete',  label: 'Complete' },
+    { key: 'pending',   label: 'Pending' },
     { key: 'paused',    label: 'Paused' },
-    { key: 'future',    label: 'Scheduled' },
     { key: 'completed', label: 'Completed' },
     { key: 'archived',  label: 'Archived' },
   ];
