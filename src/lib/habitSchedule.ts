@@ -381,11 +381,11 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
   const completedCount = totalSessions(mine);
   const done = habit.archived || isHabitComplete(habit, completedCount, todayISO_);
 
-  // For every-N-days habits: re-anchor future due dates from the most recently
-  // logged entry so an ad-hoc session on a non-due day shifts the upcoming schedule.
-  // Week/month schedules keep their fixed anchor (day-of-week constraints don't re-anchor cleanly).
+  // flexibleSchedule: re-anchor future due dates from the last logged entry so
+  // an ad-hoc session shifts the upcoming schedule (plants, haircut, etc.).
+  // When off (default), future slots keep the fixed startDate anchor (physio, etc.).
   let futureAnchor = habit.startDate;
-  if (habit.schedule.unit === 'day' && habit.schedule.interval > 1 && mine.length > 0) {
+  if (habit.flexibleSchedule && mine.length > 0) {
     const lastLogged = mine.map((e) => entryDate(e)).sort().at(-1)!;
     if (lastLogged > habit.startDate) futureAnchor = lastLogged;
   }

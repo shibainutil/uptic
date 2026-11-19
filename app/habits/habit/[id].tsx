@@ -120,6 +120,7 @@ function HabitForm({ existing, forMilestone = false }: { existing?: Habit; forMi
   const [targetSessions, setTargetSessions] = useState(String(existing?.targetSessions ?? 30));
   const [hasTargetDate, setHasTargetDate] = useState(existing?.targetDate != null);
   const [targetDate, setTargetDate] = useState(existing?.targetDate ?? addDays(todayISO(), 30));
+  const [flexibleSchedule, setFlexibleSchedule] = useState(existing?.flexibleSchedule ?? false);
 
   function toggleDay(d: number) {
     setDaysOfWeek((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d]));
@@ -152,6 +153,7 @@ function HabitForm({ existing, forMilestone = false }: { existing?: Habit; forMi
       schedule,
       targetSessions: kind === 'limited' && hasTargetSessions ? sessions : undefined,
       targetDate: kind === 'limited' && hasTargetDate ? targetDate : undefined,
+      flexibleSchedule: flexibleSchedule || undefined,
     };
 
     setSaving(true);
@@ -267,6 +269,16 @@ function HabitForm({ existing, forMilestone = false }: { existing?: Habit; forMi
           </View>
         )}
 
+        <Pressable style={styles.toggleRow} onPress={() => setFlexibleSchedule((v) => !v)}>
+          <View style={[styles.checkbox, flexibleSchedule && styles.checkboxActive]}>
+            {flexibleSchedule && <Text style={styles.checkboxMark}>✓</Text>}
+          </View>
+          <View style={styles.flex1}>
+            <Text style={styles.toggleLabel}>Flexible schedule</Text>
+            <Text style={styles.toggleHint}>Next occurrence shifts to {interval === '1' ? 'one' : interval} {unit}{Number(interval) !== 1 ? 's' : ''} after each completion</Text>
+          </View>
+        </Pressable>
+
         <View style={styles.formRow}>
           <Button label="Cancel" onPress={() => router.back()} style={styles.flex1} disabled={saving} />
           <Button label={isNew ? 'Create' : 'Save'} variant="primary" onPress={save} disabled={!name.trim() || saving} style={styles.flex1} />
@@ -315,6 +327,7 @@ const styles = StyleSheet.create({
   chipText: { color: colors.textMuted, fontSize: font.sm },
   chipTextActive: { color: colors.accent },
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  toggleHint: { color: colors.textDim, fontSize: font.xs, marginTop: 2 },
   checkbox: {
     width: 20, height: 20, borderRadius: 4, borderWidth: 1, borderColor: colors.border,
     alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface2,

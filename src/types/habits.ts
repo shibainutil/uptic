@@ -47,6 +47,15 @@ export interface Habit {
    */
   skippedSlots?: string[];
 
+  /**
+   * When true, logging an entry (on or off the fixed schedule) re-anchors future due
+   * dates to `lastLoggedDate + interval` instead of the fixed startDate anchor.
+   * Good for "every N days/weeks/months" habits like plants or haircuts where you want
+   * the schedule to shift naturally after each completion.
+   * Default false — fixed-schedule habits (physio Mon/Wed/Fri) should leave this off.
+   */
+  flexibleSchedule?: boolean;
+
   /** Pauses, past (kept as history), current and scheduled; never overlapping. */
   pauses?: HabitPause[];
 
