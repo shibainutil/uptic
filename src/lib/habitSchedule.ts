@@ -372,8 +372,7 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
   const seenExtra = new Set<string>();
   for (const e of mine) {
     const d = entryDate(e);
-    if (d < pastStart || d > todayISO_ || seenExtra.has(d) || coveredDates.has(d)
-      || !isDue(habit.schedule, fromISO(d), habit.startDate)) continue;
+    if (d < pastStart || d > todayISO_ || seenExtra.has(d) || coveredDates.has(d)) continue;
     seenExtra.add(d);
     out.push({ key: `${d}|${hh(e.loggedAt)}|logged`, date: d, time: hh(e.loggedAt), status: 'done', extra: true });
   }
