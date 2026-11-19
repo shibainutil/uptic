@@ -381,6 +381,15 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
   const completedCount = totalSessions(mine);
   const done = habit.archived || isHabitComplete(habit, completedCount, todayISO_);
 
+  // For every-N-days habits: re-anchor future due dates from the most recently
+  // logged entry so an ad-hoc session on a non-due day shifts the upcoming schedule.
+  // Week/month schedules keep their fixed anchor (day-of-week constraints don't re-anchor cleanly).
+  let futureAnchor = habit.startDate;
+  if (habit.schedule.unit === 'day' && habit.schedule.interval > 1 && mine.length > 0) {
+    const lastLogged = mine.map((e) => entryDate(e)).sort().at(-1)!;
+    if (lastLogged > habit.startDate) futureAnchor = lastLogged;
+  }
+
   if (!done) {
     const remaining = habit.kind === 'limited' && habit.targetSessions != null
       ? Math.max(0, habit.targetSessions - completedCount) - pendingToday
@@ -390,7 +399,7 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
     const goalLimited = habit.kind === 'limited' && habit.targetSessions != null;
     const forced = (d: string) => !goalLimited && through != null && d <= through;
     for (let i = 0; i < 800 && (pending < remaining || forced(cursor)); i++, cursor = addDays(cursor, 1)) {
-      if (!isDue(habit.schedule, fromISO(cursor), habit.startDate) || isPaused(habit, cursor)) continue;
+      if (!isDue(habit.schedule, fromISO(cursor), futureAnchor) || isPaused(habit, cursor)) continue;
       for (const time of times) {
         if (skippedSlots.has(`${cursor}|${time}`) || skipped.has(cursor)) { out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'skipped', explicit: true }); continue; }
         if (pending >= remaining && !forced(cursor)) break;
