@@ -2,7 +2,7 @@
   "expo": {
     "name": "Uptic",
     "slug": "uptic",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -44,7 +44,13 @@
         }
       ],
       "expo-updates",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#2F6FF0"
+        }
+      ],
       "@react-native-google-signin/google-signin",
       [
         "expo-image-picker",

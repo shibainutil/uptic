@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider, useAuth } from '../src/context/AuthContext';
 import { useDevReconnect } from '../src/lib/devReconnect';
+import { useHabitNotifications } from '../src/hooks/useHabitNotifications';
 
 // react-native-draggable-flatlist's nested lists (NestableDraggableFlatList inside
 // NestableScrollContainer) call measureLayout against the animated outer ScrollView,
@@ -35,6 +36,7 @@ function RootNavigator() {
   const router = useRouter();
   const segments = useSegments();
   useDevReconnect(!loading && !!user);
+  useHabitNotifications(user?.uid);
 
   useEffect(() => {
     if (loading) return;
@@ -55,6 +57,7 @@ function RootNavigator() {
       <Stack.Screen name="fitness/routine-execution/[id]" options={{ presentation: 'card' }} />
       <Stack.Screen name="habits/habit/[id]" options={{ presentation: 'card' }} />
       <Stack.Screen name="habits/entries/[habitId]" options={{ presentation: 'card' }} />
+      <Stack.Screen name="notifications" options={{ presentation: 'card' }} />
       <Stack.Screen name="pillars/[id]" options={{ presentation: 'card' }} />
       <Stack.Screen name="pillars/edit/[id]" options={{ presentation: 'card' }} />
       <Stack.Screen name="projects/[id]" options={{ presentation: 'card' }} />

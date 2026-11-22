@@ -11,8 +11,8 @@ export interface HabitSchedule {
 /**
  * A stretch where the habit is on hold (holiday, illness…). `from`..`until` are
  * inclusive ISO dates; no `until` means paused until the user resumes it.
- * Paused days aren't scheduled and aren't expected, so nothing counts against
- * the habit; a session goal simply finishes later.
+ * Sessions on paused days stay on the schedule but are marked paused: they aren't
+ * expected, so nothing counts against the habit; a session goal simply finishes later.
  */
 export interface HabitPause {
   from: string;

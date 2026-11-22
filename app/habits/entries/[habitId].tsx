@@ -15,12 +15,14 @@ import { totalSessions, type HabitPause } from '../../../src/types/habits';
 import { ProgressBar, slotsRate } from '../../../src/components/habits/ProgressBar';
 import { fromISO, todayISO } from '../../../src/lib/schedule';
 import { habitSlotActions } from '../../../src/lib/habitSlotActions';
+import { useNow } from '../../../src/hooks/useNow';
 import { colors, spacing, font, radius } from '../../../src/theme';
 
 import { LabeledBox } from '../../../src/components/ui/LabeledBox';
 import { ActionBtn, ActionBtnGroup, PAUSE_COLOR, PAUSE_BG, PAUSE_BORDER } from '../../../src/components/habits/ActionBtn';
 
 const OVERDUE_COLOR = '#F97316';
+const UPCOMING_COLOR = '#A855F7';
 
 type MIName = React.ComponentProps<typeof MaterialIcons>['name'];
 
@@ -56,8 +58,9 @@ export default function HabitEntriesScreen() {
   const now = new Date();
   const [view, setView] = useState({ year: now.getFullYear(), month: now.getMonth() });
 
+  const clock = useNow();
   const today = todayISO();
-  const slots = habit ? sessionSlots(habit, entries, today) : [];
+  const slots = habit ? sessionSlots(habit, entries, today, undefined, clock) : [];
 
   const rate = habit?.kind === 'limited' && habit.targetSessions != null
     ? Math.min(totalSessions(entries.filter((e) => e.habitId === habit.id)) / habit.targetSessions, 1)
@@ -65,11 +68,12 @@ export default function HabitEntriesScreen() {
 
   const overdueSlots = slots.filter((s) => s.status === 'overdue');
   const dueSlots = slots.filter((s) => s.status === 'today');
+  const laterSlots = slots.filter((s) => s.status === 'later');
   const pastSlots = slots
-    .filter((s) => s.status === 'done' || s.status === 'skipped' || s.status === 'paused')
+    .filter((s) => s.status === 'done' || s.status === 'skipped' || (s.status === 'paused' && s.date <= today))
     .sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time));
   const futureSlots = slots
-    .filter((s) => s.status === 'upcoming')
+    .filter((s) => s.date > today && (s.status === 'upcoming' || s.status === 'paused'))
     .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
 
   const pause = habit ? pauseCovering(habit, today) : undefined;
@@ -203,6 +207,15 @@ export default function HabitEntriesScreen() {
           </>
         )}
 
+        {laterSlots.length > 0 && (
+          <>
+            <Text style={styles.sectionLabel}>Upcoming</Text>
+            {laterSlots.map((slot) => (
+              <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} onUndoPause={undoPause} />
+            ))}
+          </>
+        )}
+
         {/* Complete */}
         {pastSlots.length > 0 && (
           <>
@@ -233,7 +246,7 @@ export default function HabitEntriesScreen() {
           </>
         )}
 
-        {overdueSlots.length === 0 && dueSlots.length === 0 && pastSlots.length === 0 && futureSlots.length === 0 && (
+        {overdueSlots.length === 0 && dueSlots.length === 0 && laterSlots.length === 0 && pastSlots.length === 0 && futureSlots.length === 0 && (
           <Text style={styles.emptyText}>Nothing scheduled yet.</Text>
         )}
       </ScrollView>
@@ -264,13 +277,14 @@ export default function HabitEntriesScreen() {
 }
 
 function slotTint(status: SessionSlot['status'], future?: boolean): string {
-  if (future) return colors.textDim;
+  if (future && status !== 'paused') return colors.textDim;
   switch (status) {
     case 'done':    return colors.success;
     case 'skipped': return colors.danger;
     case 'overdue': return OVERDUE_COLOR;
     case 'paused':  return PAUSE_COLOR;
     case 'today':   return colors.accent;
+    case 'later':   return UPCOMING_COLOR;
     default:        return colors.textMuted;
   }
 }
@@ -289,6 +303,7 @@ const SLOT_STATUS_LABEL: Partial<Record<SessionSlot['status'], string>> = {
   done:    'Done',
   skipped: 'Skipped',
   overdue: 'Overdue',
+  later:   'Upcoming',
   paused:  'Paused',
 };
 

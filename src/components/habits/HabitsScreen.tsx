@@ -13,11 +13,12 @@ import { ProgressBar, slotsRate } from './ProgressBar';
 import { ActionBtn, ActionBtnGroup } from './ActionBtn';
 import { SectionHeader } from './SectionHeader';
 import { slotDateLabel } from '../../lib/slotLabel';
+import { useNow } from '../../hooks/useNow';
 import { colors, spacing, font, radius } from '../../theme';
 
 const LIMITED_COLOR = '#A855F7';
 
-type SectionKey = 'overdue' | 'due' | 'done' | 'skipped' | 'pending' | 'paused' | 'completed' | 'archived';
+type SectionKey = 'overdue' | 'due' | 'upcoming' | 'done' | 'skipped' | 'pending' | 'paused' | 'completed' | 'archived';
 
 
 function isHabitPaused(habit: Habit, today: string): boolean {
@@ -70,11 +71,13 @@ function OptionsMenu({ visible, title, options, onClose }: {
 
 const OVERDUE_COLOR = '#F97316';
 const PAUSE_COLOR = '#EAB308';
+const UPCOMING_COLOR = '#A855F7';
 
 function cardBorderColor(section: SectionKey, firstSlot?: SessionSlot): string {
   switch (section) {
     case 'overdue':  return OVERDUE_COLOR;
     case 'due':      return colors.accent;
+    case 'upcoming': return UPCOMING_COLOR;
     case 'done':     return colors.success;
     case 'skipped':  return colors.danger;
     case 'pending':  return colors.border;
@@ -114,6 +117,7 @@ function HabitCard({ habit, completedCount, sessionRate, section, firstSlot, onE
 
   const slotTint = firstSlot?.status === 'overdue' ? OVERDUE_COLOR
     : firstSlot?.status === 'today' ? colors.accent
+    : firstSlot?.status === 'later' ? UPCOMING_COLOR
     : firstSlot?.status === 'done' ? colors.success
     : firstSlot?.status === 'skipped' ? colors.danger
     : firstSlot?.status === 'paused' ? PAUSE_COLOR
@@ -166,6 +170,7 @@ function HabitCard({ habit, completedCount, sessionRate, section, firstSlot, onE
             name={firstSlot.status === 'done' ? 'check-circle'
               : firstSlot.status === 'skipped' ? 'cancel'
               : firstSlot.status === 'paused' ? 'pause-circle-outline'
+              : firstSlot.status === 'overdue' ? 'error-outline'
               : 'radio-button-unchecked'}
             size={18}
             color={slotTint}
@@ -178,7 +183,7 @@ function HabitCard({ habit, completedCount, sessionRate, section, firstSlot, onE
               label="Undo" icon="refresh" scheme="grey"
               onPress={() => firstSlot.status === 'done' ? onUndoDone(firstSlot) : onSkip(firstSlot, false)}
             />
-          ) : firstSlot.status === 'today' || firstSlot.status === 'overdue' ? (
+          ) : firstSlot.status === 'today' || firstSlot.status === 'overdue' || firstSlot.status === 'later' ? (
             <ActionBtnGroup>
               <ActionBtn label="Skip" icon="close" scheme="red" onPress={() => onSkip(firstSlot, true)} />
               <ActionBtn label="Done" icon="check" scheme="green" onPress={() => onMarkDone(firstSlot)} />
@@ -207,10 +212,11 @@ export function HabitsScreen() {
   const { user } = useAuth();
   const { habits, update: updateHabit, remove: removeHabit, setPauses, setSkipped } = useHabits(user?.uid);
   const { entries, add: addEntry, update: updateEntry, remove: removeEntry, resetEntries } = useHabitLogEntries(user?.uid);
+  const now = useNow();
   const today = todayISO();
 
   const [openSections, setOpenSections] = useState<Set<SectionKey>>(
-    new Set(['overdue', 'due', 'done', 'skipped', 'pending', 'paused']),
+    new Set(['overdue', 'due', 'upcoming', 'done', 'skipped', 'pending', 'paused']),
   );
 
   function toggleSection(key: SectionKey) {
@@ -244,7 +250,7 @@ export function HabitsScreen() {
     let firstSlot: SessionSlot | undefined;
 
     // Compute slots for all active habits — used by both section logic and rate calculation.
-    const slots = (habit.archived || complete) ? [] : sessionSlots(habit, entries, today);
+    const slots = (habit.archived || complete) ? [] : sessionSlots(habit, entries, today, undefined, now);
 
     const allTimeRate = slotsRate(slots, today);    const sessionRate = habit.kind === 'limited' && habit.targetSessions != null
       ? Math.min(completedCount / habit.targetSessions, 1)
@@ -256,12 +262,14 @@ export function HabitsScreen() {
       section = 'completed';
     } else if (paused) {
       section = 'paused';
-      firstSlot = slots
-        .filter(s => s.status === 'paused')
-        .sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time))[0];
+      // Paused sessions now run ahead into the pause too: show today's (or the latest past)
+      // one, else the next one coming up.
+      const pausedSlots = slots.filter(s => s.status === 'paused');
+      firstSlot = pausedSlots.filter(s => s.date <= today).at(-1) ?? pausedSlots[0];
     } else {
-      // Most recent unhandled slot on or before today, and most recent handled slot.
-      const pastAndToday = slots.filter(s => s.date <= today && s.status !== 'paused');
+      // Most recent unhandled slot that is already due (later-today sessions wait their
+      // turn below), and most recent handled slot.
+      const pastAndToday = slots.filter(s => s.date <= today && s.status !== 'paused' && s.status !== 'later');
       const lastUnhandled = pastAndToday.filter(
         s => s.status !== 'done' && s.status !== 'skipped',
       ).at(-1);
@@ -276,8 +284,11 @@ export function HabitsScreen() {
       const hasSlotToday = slots.some(s => s.date === today && s.status !== 'paused');
 
       if (activeUnhandled) {
-        section = activeUnhandled.date < today ? 'overdue' : 'due';
+        section = activeUnhandled.status === 'overdue' ? 'overdue' : 'due';
         firstSlot = activeUnhandled;
+      } else if (slots.some(s => s.status === 'later')) {
+        section = 'upcoming';
+        firstSlot = slots.find(s => s.status === 'later');
       } else if (hasSlotToday) {
         // Show the last handled slot from today so the user can undo.
         firstSlot = slots
@@ -338,6 +349,7 @@ export function HabitsScreen() {
   const SECTIONS: { key: SectionKey; label: string; color?: string }[] = [
     { key: 'overdue',   label: 'Overdue',  color: OVERDUE_COLOR },
     { key: 'due',       label: 'Due',      color: colors.accent },
+    { key: 'upcoming',  label: 'Upcoming', color: UPCOMING_COLOR },
     { key: 'paused',    label: 'Paused',   color: PAUSE_COLOR },
     { key: 'skipped',   label: 'Skipped',  color: colors.danger },
     { key: 'done',      label: 'Done',     color: colors.success },

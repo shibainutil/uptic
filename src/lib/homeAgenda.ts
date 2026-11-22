@@ -35,10 +35,10 @@ const KIND_ORDER = { habit: 0, routine: 1, task: 2 } as const;
  *   milestones due in the range (done ones too, ticked), plus still-open tasks of
  *   milestones that were due before `today` (overdue);
  * - habit sessions: the habit's scheduled sessions (done / skipped / missed / upcoming),
- *   never for paused days or habits that reached their session goal;
+ *   paused days show their sessions as paused; never for habits that reached their session goal;
  * - fitness routines: routine occurrences due in the range.
  */
-export function buildAgenda(input: Input, from: string, to: string, today: string): HomeItem[] {
+export function buildAgenda(input: Input, from: string, to: string, today: string, now: Date = new Date()): HomeItem[] {
   const items: HomeItem[] = [];
 
   for (const p of input.projects) {
@@ -63,7 +63,7 @@ export function buildAgenda(input: Input, from: string, to: string, today: strin
   for (const h of input.habits) {
     const mine = input.entries.filter((e) => e.habitId === h.id);
     if (isHabitComplete(h, totalSessions(mine), today)) continue;
-    for (const slot of sessionSlots(h, input.entries, today, to)) {
+    for (const slot of sessionSlots(h, input.entries, today, to, now)) {
       if (slot.date < from || slot.date > to) continue;
       items.push({ kind: 'habit', key: `h|${h.id}|${slot.key}`, date: slot.date, habitId: h.id, name: h.name, slot });
     }
@@ -82,6 +82,11 @@ export function buildAgenda(input: Input, from: string, to: string, today: strin
     || KIND_ORDER[a.kind] - KIND_ORDER[b.kind]
     || time(a).localeCompare(time(b))
     || label(a).localeCompare(label(b)));
+}
+
+/** Whether an item counts toward the "x of y done" summary: paused sessions aren't expected. */
+export function itemCounted(i: HomeItem): boolean {
+  return !(i.kind === 'habit' && i.slot.status === 'paused');
 }
 
 /** Whether an item counts as finished, for the "x of y done" summary. */

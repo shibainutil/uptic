@@ -10,9 +10,9 @@ function barColor(rate: number): string {
   return colors.danger;
 }
 
-/** Done ÷ every non-paused slot up to and including today. */
+/** Done ÷ every non-paused slot up to and including today (later-today sessions aren't counted yet). */
 export function slotsRate(slots: SessionSlot[], today: string): number {
-  const considered = slots.filter((s) => s.date <= today && s.status !== 'paused');
+  const considered = slots.filter((s) => s.date <= today && s.status !== 'paused' && s.status !== 'later');
   if (considered.length === 0) return 0;
   return considered.filter((s) => s.status === 'done').length / considered.length;
 }

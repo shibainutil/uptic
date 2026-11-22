@@ -17,9 +17,16 @@ const DOT_COLOR: Record<SlotStatus, string> = {
   skipped: colors.danger,
   overdue: '#F97316',
   today: colors.accent,
+  later: '#A855F7',
   upcoming: colors.textDim,
   paused: '#EAB308',
 };
+
+// Paused-day fills, pre-blended over colors.surface (#1E1E1E) at 18 % / 9 % yellow. They
+// are opaque on purpose: semi-transparent fills on neighbouring cells showed thin lines
+// where rows met (edges blending twice or leaving a sub-pixel gap).
+const PAUSED_FILL = '#43391A';
+const PAUSED_FILL_OUT = '#302B1C';
 
 interface Cell { date: Date; inMonth: boolean }
 
@@ -52,6 +59,9 @@ export function HabitCalendar({ year, month, onChange, slots, today, pausedOn }:
   const cells = buildMonthGrid(year, month);
   const weeks: Cell[][] = [];
   for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+
+  const pausedTint = ({ date, inMonth }: Cell): string | undefined =>
+    pausedOn?.(toISO(date)) ? (inMonth ? PAUSED_FILL : PAUSED_FILL_OUT) : undefined;
 
   const shift = (delta: number) => {
     const d = new Date(year, month + delta, 1);
@@ -91,17 +101,20 @@ export function HabitCalendar({ year, month, onChange, slots, today, pausedOn }:
             const iso = toISO(date);
             const isToday = iso === today;
             const dots = inMonth ? byDate.get(iso) ?? [] : [];
-            const paused = !!pausedOn?.(iso);
+            const tint = pausedTint(week[di]);
+            // Same tint in the cell to the right / below: overlap it by a pixel so no seam
+            // can show between the two (the colours are opaque, so the overlap is invisible).
+            const right = di < 6 && pausedTint(week[di + 1]) === tint;
+            const below = wi < weeks.length - 1 && pausedTint(weeks[wi + 1][di]) === tint;
             return (
-              <View
-                key={di}
-                style={[
-                  styles.dayCell,
-                  colWidth(di),
-                  paused && (inMonth ? styles.dayCellPaused : styles.dayCellPausedOut),
-                  isToday && styles.dayCellToday,
-                ]}
-              >
+              <View key={di} style={[styles.dayCell, colWidth(di)]}>
+                {tint && (
+                  <View
+                    pointerEvents="none"
+                    style={[styles.pausedFill, { backgroundColor: tint, right: right ? -1 : 0, bottom: below ? -1 : 0 }]}
+                  />
+                )}
+                {isToday && <View pointerEvents="none" style={styles.todayRing} />}
                 <Text style={[styles.dayNumber, isToday && styles.dayNumberToday, !inMonth && styles.dayNumberOut]}>
                   {date.getDate()}
                 </Text>
@@ -137,14 +150,13 @@ const styles = StyleSheet.create({
     textAlign: 'center', color: colors.textMuted,
     fontSize: font.sm, fontWeight: '500', paddingVertical: spacing.sm,
   },
-  // Every cell reserves the same border width so today's outline doesn't shift its contents.
+  // Cells have no border or background of their own: the paused fill and today's outline
+  // are overlays, so neither shifts the cell's contents nor leaves seams between rows.
   dayCell: {
-    alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.xs, height: 48,
-    borderWidth: 1.5, borderColor: 'transparent',
+    alignItems: 'center', paddingTop: spacing.sm + 1.5, paddingBottom: spacing.xs + 1.5, height: 48,
   },
-  dayCellPaused: { backgroundColor: 'rgba(234,179,8,0.18)' },
-  dayCellPausedOut: { backgroundColor: 'rgba(234,179,8,0.09)' },
-  dayCellToday: { borderColor: colors.accent },
+  todayRing: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderWidth: 1.5, borderColor: colors.accent },
+  pausedFill: { position: 'absolute', top: 0, left: 0 },
   dayNumber: { color: colors.text, fontSize: font.md },
   dayNumberToday: { color: colors.accent, fontWeight: '700' },
   dayNumberOut: { opacity: 0.35 },

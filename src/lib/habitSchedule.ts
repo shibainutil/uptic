@@ -304,7 +304,23 @@ export function habitWindowCounts(habit: Habit, entries: HabitLogEntry[], fromIS
 // reshuffles them. Marking a slot done logs an ordinary entry; skipping adds the
 // date to `skippedDates`.
 
-export type SlotStatus = 'done' | 'skipped' | 'overdue' | 'today' | 'upcoming' | 'paused';
+/**
+ * Today's unhandled sessions follow the clock: 'later' (shown as Upcoming) while the
+ * scheduled time is more than DUE_WINDOW_MIN away, 'today' (Due) from DUE_WINDOW_MIN
+ * before until DUE_WINDOW_MIN after it, then 'overdue'. 'upcoming' is a future day.
+ */
+export type SlotStatus = 'done' | 'skipped' | 'overdue' | 'today' | 'later' | 'upcoming' | 'paused';
+
+export const DUE_WINDOW_MIN = 60;
+
+/** Status of an unhandled session today at `time` ("HH:MM"), given the current moment. */
+export function todaySlotStatus(time: string, now: Date): 'later' | 'today' | 'overdue' {
+  const [h, m] = time.split(':').map(Number);
+  const diff = h * 60 + m - (now.getHours() * 60 + now.getMinutes());
+  if (diff > DUE_WINDOW_MIN) return 'later';
+  if (diff < -DUE_WINDOW_MIN) return 'overdue';
+  return 'today';
+}
 
 export interface SessionSlot {
   key: string;
@@ -325,14 +341,17 @@ const ONGOING_UPCOMING = 10;   // upcoming slots listed for habits without a ses
 /**
  * Past slots (done / skipped / missed) from the last ~90 days, today's slots, and
  * the upcoming slots still needed: for a habit with a session goal, exactly as
- * many as are left to reach it (skipped dates excluded, so they push the end
- * later); otherwise the next 10.
+ * many as are left to reach it (skipped and paused dates excluded, so they push
+ * the end later); otherwise the next 10. Scheduled days inside a pause are listed
+ * too, with status 'paused'.
  */
 /**
  * `through`: for habits without a session goal, keep listing upcoming slots at least up to
  * this date (the next 10 may not reach the end of the week for a busy habit).
  */
-export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: string, through?: string): SessionSlot[] {
+export function sessionSlots(
+  habit: Habit, entries: HabitLogEntry[], todayISO_: string, through?: string, now: Date = new Date(),
+): SessionSlot[] {
   const mine = entries.filter((e) => e.habitId === habit.id);
   const hhmmOf = (e: HabitLogEntry) => {
     const t = new Date(e.loggedAt);
@@ -394,7 +413,7 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
       if (isExplicitSkip) { status = 'skipped'; explicit = true; }
       else if ((entry = exact.get(time) ?? spare.shift())) { status = 'done'; }
       else if (paused_) status = 'paused';
-      else if (d === todayISO_) { status = 'today'; pendingToday++; }
+      else if (d === todayISO_) { status = todaySlotStatus(time, now); pendingToday++; }
       else status = 'overdue';
       if (entry) used.add(entry.id);
       out.push({
@@ -432,8 +451,23 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
     let cursor = addDays(todayISO_, 1);
     const goalLimited = habit.kind === 'limited' && habit.targetSessions != null;
     const forced = (d: string) => !goalLimited && through != null && d <= through;
+    let pausedAhead = 0;
     for (let i = 0; i < 800 && (pending < remaining || forced(cursor)); i++, cursor = addDays(cursor, 1)) {
-      if (!isDue(habit.schedule, fromISO(cursor), anchorFor(cursor)) || isPaused(habit, cursor)) continue;
+      if (!isDue(habit.schedule, fromISO(cursor), anchorFor(cursor))) continue;
+      // Paused days keep their sessions on the schedule, marked paused: they aren't due,
+      // can't go overdue and don't count toward the remaining sessions, so a session goal
+      // still finishes later. An open-ended pause would repeat forever, so only list
+      // its next few sessions.
+      const pause = pauseCovering(habit, cursor);
+      if (pause) {
+        if (pause.until == null && pausedAhead >= ONGOING_UPCOMING && !forced(cursor)) break;
+        for (const time of times) {
+          const skippedHere = skippedSlots.has(`${cursor}|${time}`) || skipped.has(cursor);
+          out.push({ key: `${cursor}|${time}`, date: cursor, time, status: skippedHere ? 'skipped' : 'paused', explicit: skippedHere || undefined });
+          pausedAhead++;
+        }
+        continue;
+      }
       for (const time of times) {
         if (skippedSlots.has(`${cursor}|${time}`) || skipped.has(cursor)) { out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'skipped', explicit: true }); continue; }
         if (pending >= remaining && !forced(cursor)) break;

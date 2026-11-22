@@ -7,30 +7,43 @@ const INSET = 12;
 // Capitals sit above the line box's centre (room for descenders); nudge the label down
 // so the border runs through the middle of the letters.
 const NUDGE = 1;
+// Vertical room reserved above the box for an optional element centred on the top-right border.
+const RIGHT_ROOM = 28;
 
-/** A bordered box whose label sits in a gap in its top edge (like a fieldset legend). */
-export function LabeledBox({ label, labelColor = colors.textMuted, style, children }: {
+/** A bordered box whose label sits in a gap in its top edge (like a fieldset legend).
+ * `right` is an optional element (a badge, a small toggle) centred on the top border at the
+ * right; it should have an opaque background so the border doesn't show through it. */
+export function LabeledBox({ label, labelColor = colors.textMuted, style, right, children }: {
   label: string;
   labelColor?: string;
   style?: StyleProp<ViewStyle>;
+  right?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const flat = StyleSheet.flatten(style) ?? {};
   const bw = (flat.borderWidth as number | undefined) ?? 1;
   const boxBg = flat.backgroundColor ?? 'transparent';
-  const labelTop = -LINE / 2 + NUDGE;
+  // With a right element, the room above the border is padding (inside this view) rather than
+  // margin, so the element's upper half stays within bounds and receives touches on Android.
+  const top = right ? RIGHT_ROOM / 2 : 0;
+  const labelTop = top - LINE / 2 + NUDGE;
 
   return (
-    <View style={st.wrap}>
+    <View style={right ? { paddingTop: top } : st.wrap}>
       <View style={style}>{children}</View>
       <View style={[st.legend, { top: labelTop }]} pointerEvents="none">
         {/* Covers only the border segment behind the text. Page colour + the box's own
             (possibly translucent) background stacked = exactly what's inside the box. */}
-        <View style={[st.mask, { top: -labelTop, height: bw, backgroundColor: colors.bg }]}>
+        <View style={[st.mask, { top: top - labelTop, height: bw, backgroundColor: colors.bg }]}>
           <View style={[StyleSheet.absoluteFill, { backgroundColor: boxBg }]} />
         </View>
         <Text style={[st.legendText, { color: labelColor }]}>{label}</Text>
       </View>
+      {right ? (
+        <View style={[st.right, { height: RIGHT_ROOM }]} pointerEvents="box-none">
+          {right}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -45,4 +58,5 @@ const st = StyleSheet.create({
     fontSize: LABEL_SIZE, lineHeight: LINE,
     fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, includeFontPadding: false,
   },
+  right: { position: 'absolute', top: 0, right: INSET, justifyContent: 'center' },
 });

@@ -9,17 +9,19 @@ import { useHabits, useHabitLogEntries } from '../../src/store/habitStore';
 import {
   useRoutines, useRoutineExecutions, useExerciseExecutions, useRoutineReconcile,
 } from '../../src/store/gymStore';
-import { buildAgenda, itemDone, type HomeItem } from '../../src/lib/homeAgenda';
+import { buildAgenda, itemCounted, itemDone, type HomeItem } from '../../src/lib/homeAgenda';
 import { habitSlotActions } from '../../src/lib/habitSlotActions';
 import { ActionBtn, ActionBtnGroup } from '../../src/components/habits/ActionBtn';
 import { SectionHeader } from '../../src/components/habits/SectionHeader';
 import { slotDateLabel } from '../../src/lib/slotLabel';
+import { useNow } from '../../src/hooks/useNow';
 import { addDays, fromISO, todayISO } from '../../src/lib/schedule';
 import { colors, spacing, font, radius } from '../../src/theme';
 
 const SUCCESS = '#22C55E';
 const OVERDUE = '#F97316';
 const PAUSE_COLOR = '#EAB308';
+const UPCOMING = '#A855F7';
 
 const shortDate = (iso: string) =>
   fromISO(iso).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
@@ -42,12 +44,13 @@ export default function HomeScreen() {
   // the Fitness tab hasn't been opened.
   useRoutineReconcile(user?.uid, routines, routineExecutions, exerciseExecutions, routinesLoaded);
 
+  const now = useNow();
   const today = todayISO();
   const yesterday = addDays(today, -1);
   const loaded = projectsLoaded && habitsLoaded && entriesLoaded && routinesLoaded;
 
   const rawItems = loaded
-    ? buildAgenda({ projects, habits, entries, routines, routineExecutions }, yesterday, today, today)
+    ? buildAgenda({ projects, habits, entries, routines, routineExecutions }, yesterday, today, today, now)
     : [];
   // Only keep yesterday's items if they actually need attention
   const items = rawItems.filter((i) =>
@@ -55,7 +58,8 @@ export default function HomeScreen() {
     (i.kind === 'task' && i.overdue) ||
     (i.kind === 'habit' && i.slot.status === 'overdue')
   );
-  const doneCount = items.filter(itemDone).length;
+  const counted = items.filter(itemCounted);
+  const doneCount = counted.filter(itemDone).length;
 
   const habitActions = habitSlotActions({ today, habits, entries, setPauses, add, update, remove, setSkipped, onError: errorAlert });
   const actions: RowActions = {
@@ -73,8 +77,8 @@ export default function HomeScreen() {
           <Text style={styles.summaryTitle}>
             {fromISO(today).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
           </Text>
-          {loaded && items.length > 0 && (
-            <Text style={styles.summarySub}>{doneCount} of {items.length} done</Text>
+          {loaded && counted.length > 0 && (
+            <Text style={styles.summarySub}>{doneCount} of {counted.length} done</Text>
           )}
         </View>
 
@@ -100,6 +104,7 @@ function isOverdue(i: HomeItem, today: string): boolean {
 const HABIT_GROUPS: { title: string; statuses: string[]; color?: string }[] = [
   { title: 'Overdue', statuses: ['overdue'], color: OVERDUE },
   { title: 'Due', statuses: ['today'], color: colors.accent },
+  { title: 'Upcoming', statuses: ['later'], color: UPCOMING },
   { title: 'Paused', statuses: ['paused'], color: PAUSE_COLOR },
   { title: 'Skipped', statuses: ['skipped'], color: colors.danger },
   { title: 'Done', statuses: ['done'], color: SUCCESS },
@@ -225,13 +230,15 @@ function Row({ item, actions, borderColor }: { item: HomeItem; actions: RowActio
 
   const { slot } = item;
   const tint = slot.status === 'done' ? SUCCESS : slot.status === 'skipped' ? colors.danger : slot.status === 'overdue' ? OVERDUE
-    : slot.status === 'paused' ? PAUSE_COLOR : slot.status === 'today' ? colors.accent : colors.textMuted;
-  const statusText = { done: 'Done', skipped: 'Skipped', overdue: 'Overdue', today: 'Due', upcoming: '', paused: 'Paused' }[slot.status];
+    : slot.status === 'paused' ? PAUSE_COLOR : slot.status === 'today' ? colors.accent
+    : slot.status === 'later' ? UPCOMING : colors.textMuted;
+  const statusText = { done: 'Done', skipped: 'Skipped', overdue: 'Overdue', today: 'Due', later: 'Upcoming', upcoming: '', paused: 'Paused' }[slot.status];
   return (
     <View style={rowStyle}>
       <MaterialIcons
         name={slot.status === 'done' ? 'check-circle' : slot.status === 'skipped' ? 'cancel'
-          : slot.status === 'paused' ? 'pause-circle-outline' : 'radio-button-unchecked'}
+          : slot.status === 'paused' ? 'pause-circle-outline'
+          : slot.status === 'overdue' ? 'error-outline' : 'radio-button-unchecked'}
         size={24}
         color={tint}
       />

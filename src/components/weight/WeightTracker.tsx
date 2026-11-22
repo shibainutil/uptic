@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react';
-import { View, Text, Pressable, ScrollView, StyleSheet, LayoutChangeEvent } from 'react-native';
+import { View, Text, Pressable, ScrollView, StyleSheet, LayoutChangeEvent, LayoutAnimation } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import Svg, { Polyline, Line, Circle, Text as SvgText } from 'react-native-svg';
 import { useAuth } from '../../context/AuthContext';
@@ -8,45 +8,54 @@ import { WeightEntryModal } from './WeightEntryModal';
 import { WeightTargetModal } from './WeightTargetModal';
 import { WeightDateFilterModal, type DateRange } from './WeightDateFilterModal';
 import { WeightPointDetailModal } from './WeightPointDetailModal';
+import { TargetProgress } from './TargetProgress';
+import { LabeledBox } from '../ui/LabeledBox';
 import { colors, spacing, font, radius } from '../../theme';
 import { fromISO, toISO, diffDays, addDays, todayISO } from '../../lib/schedule';
 import { fitWeightTrend } from '../../lib/weightTrend';
+import { groupWeightPeriods, formatPeriodLabel, type PeriodMode, type WeightPeriod } from '../../lib/weightPeriods';
 import { toKg, fromKg, formatDelta, deltaColor, type WeightEntry, type WeightUnit } from '../../types/weight';
 
 const PLOT_HEIGHT = 220;
 const PLOT_Y_PAD = 28;
-// Every tick label is the same fixed "DD MMM YYYY" shape at a fixed 45° slant, so this can be
-// a precise constant rather than a guess: ~11 chars * 5.5px * cos(45°) ≈ 43px of leftward
-// overhang from the first tick (which sits exactly at offset 0, i.e. this same x). Sized so
-// the label's own left edge lands right at the plot's left boundary — no extra gap, no clip.
-const PLOT_LEFT_PAD = 44;
+// Y-axis labels are drawn inside the chart SVG, right-aligned at this x. The data starts just
+// past them; the first rotated x-axis label (~43px of leftward overhang) tucks in underneath
+// the y-axis labels instead of needing its own empty margin inside the plot.
+const Y_AXIS_WIDTH = 34;
+const GRID_LEFT = Y_AXIS_WIDTH + 4;
+const PLOT_LEFT_PAD = GRID_LEFT + 8;
 const PLOT_RIGHT_PAD = 12;
 const XAXIS_HEIGHT = 44; // reserved below the plot for rotated tick labels
+// Band above the plot holding the max/min/now/target value badges.
+const BADGE_WIDTH = 46;
+const BADGE_HEIGHT = 19;
+const BADGE_BAND = 24;
+const BADGE_NAMES: Record<string, string> = { max: 'Max', min: 'Min', now: 'Current', goal: 'Target' };
 const TOTAL_SVG_HEIGHT = PLOT_HEIGHT + XAXIS_HEIGHT;
-const Y_AXIS_WIDTH = 38;
 const GRID_STEP = 5; // y-axis tick spacing, in the displayed unit
 const DEFAULT_MAX = 100; // y-axis max fallback (displayed unit) when nothing is logged yet
-const TREND_COLOR = colors.textMuted;
 const TARGET_COLOR = '#F59E0B';
 const TARGET_ICON = '🎯';
 const CHART_ICON = '📈';
-const DOT_DASH = '0.1,6'; // near-zero dash + round cap renders as a true dot, not a short dash
 const DOT_CYCLE = 6.1;
 const REF_DASH = '4,4'; // regular dashes for the max/min/current/target reference lines
 const REF_DASH_CYCLE = 8;
+// Reference lines are fainter than the plotted weight line so the real data stays dominant.
+const REF_OPACITY = 0.5;
 
 function formatRowDate(iso: string): string {
-  return fromISO(iso).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
+  return fromISO(iso).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 }
+
+const PERIOD_MODES: { mode: PeriodMode; label: string }[] = [
+  { mode: 'week', label: 'Weekly' },
+  { mode: 'month', label: 'Monthly' },
+];
 
 function formatAxisDate(iso: string): string {
   const d = fromISO(iso);
   const month = d.toLocaleDateString(undefined, { month: 'short' });
   return `${d.getDate()} ${month} '${String(d.getFullYear()).slice(-2)}`;
-}
-
-function formatMonthLabel(monthKey: string): string {
-  return fromISO(`${monthKey}-01`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 }
 
 function formatValue(kg: number, unit: WeightUnit): string {
@@ -58,32 +67,24 @@ function subtractMonths(iso: string, months: number): string {
   return toISO(new Date(d.getFullYear(), d.getMonth() - months, d.getDate()));
 }
 
-/** Regular day-spaced ticks from startISO, stepping by `stepDays` — always starts exactly at
- * startISO, so the first tick lines up precisely with the left edge of the plot. */
-function dayStepTicks(startISO: string, endISO: string, stepDays: number): string[] {
-  const totalDays = diffDays(endISO, startISO);
-  const ticks: string[] = [];
-  for (let d = 0; d <= totalDays; d += stepDays) ticks.push(addDays(startISO, d));
-  return ticks;
-}
+// Month steps for the x-axis ticks; the smallest one that keeps the count readable is used.
+const MONTH_STEP_CANDIDATES = [1, 2, 3, 4, 6, 12, 24, 36, 60, 120];
+const MAX_X_TICKS = 7;
 
-// Covers anything from a few days to decades, always keeping tick count to ~5-8. A uniform
-// day step (rather than calendar-month alignment) is what guarantees the ticks land exactly
-// equidistant in pixels, since the x-scale itself is linear in days.
-const DAY_STEP_CANDIDATES = [
-  1, 2, 3, 5, 7, 10, 14, 21, 30, 45, 60, 90, 120, 182, 270,
-  365, 548, 730, 1095, 1461, 1826, 2557, 3653, 5479, 7305,
-];
-
-/** Picks a uniform day step from the span so the axis always shows a regular, equidistant,
- * readable set of ticks (~5-8) — dynamic to whatever timeframe is in view. */
-function chooseXTicks(startISO: string, endISO: string): string[] {
-  const totalDays = diffDays(endISO, startISO);
-  let step = DAY_STEP_CANDIDATES[DAY_STEP_CANDIDATES.length - 1];
-  for (const s of DAY_STEP_CANDIDATES) {
-    if (Math.ceil(totalDays / s) + 1 <= 8) { step = s; break; }
+/** X-axis ticks: the last day of each month within [startISO, endISO]. Over longer spans only
+ * every n-th month end is kept, aligned to the calendar (e.g. quarter ends, year ends). */
+function monthEndTicks(startISO: string, endISO: string): string[] {
+  const start = fromISO(startISO);
+  const end = fromISO(endISO);
+  const all: { iso: string; monthIndex: number }[] = [];
+  for (let y = start.getFullYear(), m = start.getMonth(); y * 12 + m <= end.getFullYear() * 12 + end.getMonth(); m++) {
+    if (m === 12) { m = 0; y++; }
+    const iso = toISO(new Date(y, m + 1, 0));
+    if (iso >= startISO && iso <= endISO) all.push({ iso, monthIndex: y * 12 + m });
   }
-  return dayStepTicks(startISO, endISO, step);
+  const step = MONTH_STEP_CANDIDATES.find((k) => all.filter((t) => (t.monthIndex + 1) % k === 0).length <= MAX_X_TICKS)
+    ?? MONTH_STEP_CANDIDATES[MONTH_STEP_CANDIDATES.length - 1];
+  return all.filter((t) => (t.monthIndex + 1) % step === 0).map((t) => t.iso);
 }
 
 function formatXTickLabel(iso: string): string {
@@ -109,21 +110,6 @@ function projectTargetDate(currentKg: number | null, targetKg: number | null, we
   const daysNeeded = ((targetKg - currentKg) / weeklyRateKg) * 7;
   if (daysNeeded <= 0) return { kind: 'never' };
   return { kind: 'projected', date: addDays(todayISO(), Math.round(daysNeeded)) };
-}
-
-function projectionComment(p: TargetProjection, byDate?: string): string {
-  switch (p.kind) {
-    case 'reached': return 'Target reached!';
-    case 'projected':
-      if (byDate) {
-        return p.date <= byDate
-          ? `Projected ${formatAxisDate(p.date)} — ahead of your ${formatAxisDate(byDate)} goal`
-          : `Projected ${formatAxisDate(p.date)} — past your ${formatAxisDate(byDate)} goal`;
-      }
-      return `Projected ${formatAxisDate(p.date)}`;
-    case 'never':
-      return byDate ? `Won’t reach it by ${formatAxisDate(byDate)} at this rate` : 'Won’t reach at this rate';
-  }
 }
 
 /** Whether the trend is on pace to hit the target. With a deadline set, this compares the
@@ -164,17 +150,30 @@ export function WeightTracker() {
   const [editingEntry, setEditingEntry] = useState<WeightEntry | undefined>(undefined);
   const [range, setRange] = useState<RangeSelection>({ kind: 'all' });
   const [plotWidth, setPlotWidth] = useState(0);
-  const [selectedEntry, setSelectedEntry] = useState<WeightEntry | null>(null);
+  const [selectedPeriod, setSelectedPeriod] = useState<WeightPeriod | null>(null);
+  const [mode, setMode] = useState<PeriodMode>('week');
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  function changeMode(next: PeriodMode) {
+    if (next === mode) return;
+    setMode(next);
+    setExpanded(new Set());
+  }
+
+  function toggleExpanded(key: string) {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
 
   const ascending = [...entries].sort((a, b) => a.date.localeCompare(b.date));
   const latest = ascending[ascending.length - 1];
-  const previous = ascending[ascending.length - 2];
-  const first = ascending[0];
   const displayUnit: WeightUnit = latest?.unit ?? 'kg';
 
   const currentKg = latest ? toKg(latest.value, latest.unit) : null;
-  const deltaSincePrev = latest && previous ? currentKg! - toKg(previous.value, previous.unit) : null;
-  const deltaAllTime = latest && first && first !== latest ? currentKg! - toKg(first.value, first.unit) : null;
 
   function onPlotLayout(e: LayoutChangeEvent) {
     setPlotWidth(e.nativeEvent.layout.width);
@@ -195,22 +194,6 @@ export function WeightTracker() {
   const dateIndex = new Map(ascending.map((e, i) => [e.date, i]));
   function prevOf(e: WeightEntry): WeightEntry | undefined {
     return ascending[dateIndex.get(e.date)! - 1];
-  }
-
-  // Latest entry on or before `dateISO` — used to find "one week ago" even when that
-  // exact day wasn't logged.
-  function entryOnOrBefore(dateISO: string): WeightEntry | undefined {
-    let lo = 0, hi = ascending.length - 1, result: WeightEntry | undefined;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (ascending[mid].date <= dateISO) { result = ascending[mid]; lo = mid + 1; }
-      else hi = mid - 1;
-    }
-    return result;
-  }
-
-  function openDetail(entry: WeightEntry) {
-    setSelectedEntry(entry);
   }
 
   const resolvedFilter = resolveRange(range);
@@ -239,22 +222,25 @@ export function WeightTracker() {
   const targetProjection = projectTargetDate(currentKg, targetKg, weeklyRateKg);
   const onTrack = isOnTrack(targetProjection, target?.byDate, weeklyRateKg);
 
-  const selectedPrevEntry = selectedEntry ? prevOf(selectedEntry) : undefined;
-  const selectedDeltaPrevKg = selectedEntry && selectedPrevEntry
-    ? toKg(selectedEntry.value, selectedEntry.unit) - toKg(selectedPrevEntry.value, selectedPrevEntry.unit)
-    : null;
-  const selectedWeekAgoEntry = selectedEntry ? entryOnOrBefore(addDays(selectedEntry.date, -7)) : undefined;
-  const selectedDeltaWeekKg = selectedEntry && selectedWeekAgoEntry
-    ? toKg(selectedEntry.value, selectedEntry.unit) - toKg(selectedWeekAgoEntry.value, selectedWeekAgoEntry.unit)
-    : null;
+  // ── Aggregation ────────────────────────────────────────────────────────
+  // The chart and the list both show one point/box per week or month — the average of that
+  // period's entries. `allPeriods` (unfiltered) only supplies "vs previous period" deltas, so
+  // the oldest visible period still gets a delta when the date filter cuts off its predecessor.
+  const periods = groupWeightPeriods(filteredAscending, mode);
+  const allPeriods = groupWeightPeriods(ascending, mode);
+  const allPeriodIndex = new Map(allPeriods.map((p, i) => [p.key, i]));
+  function prevPeriodDeltaKg(p: WeightPeriod): number | null {
+    const prev = allPeriods[allPeriodIndex.get(p.key)! - 1];
+    return prev ? p.avgKg - prev.avgKg : null;
+  }
+  const periodNoun = mode === 'week' ? 'week' : 'month';
 
   // ── Chart geometry ─────────────────────────────────────────────────────
-  // No point cap — the chart always plots exactly the entries in the selected range, so it
-  // never disagrees with the list below it.
-  const chartEntries = filteredAscending;
-  const chartBaseISO = chartEntries[0]?.date;
-  const lastEntryISO = chartEntries[chartEntries.length - 1]?.date;
-  const lastOffset = chartEntries.length ? diffDays(lastEntryISO, chartBaseISO) : 0;
+  // Each average is plotted at the mean date of the entries it covers, on a true day scale.
+  const chartPoints = periods;
+  const chartBaseISO = chartPoints[0]?.centerISO;
+  const lastPointISO = chartPoints[chartPoints.length - 1]?.centerISO;
+  const lastOffset = chartPoints.length ? diffDays(lastPointISO, chartBaseISO) : 0;
 
   // Always extend to show the projection, no matter how far out it lands — a distant
   // target shouldn't make its own marker disappear.
@@ -266,21 +252,20 @@ export function WeightTracker() {
   const deadlineOffset = target?.byDate && chartBaseISO ? diffDays(target.byDate, chartBaseISO) : null;
   const domainEndOffset = Math.max(lastOffset, projectedOffset ?? 0, deadlineOffset ?? 0, 1);
 
+  const dataRightX = plotWidth - PLOT_RIGHT_PAD;
+
   function xForOffset(offset: number): number {
-    if (chartEntries.length <= 1) return (PLOT_LEFT_PAD + (plotWidth - PLOT_RIGHT_PAD)) / 2;
-    const usable = plotWidth - PLOT_LEFT_PAD - PLOT_RIGHT_PAD;
+    if (chartPoints.length <= 1 && domainEndOffset <= 1) return (PLOT_LEFT_PAD + dataRightX) / 2;
+    const usable = dataRightX - PLOT_LEFT_PAD;
     return PLOT_LEFT_PAD + (offset / domainEndOffset) * usable;
   }
 
-  const barKgValues = chartEntries.map((e) => toKg(e.value, e.unit));
+  const pointKgValues = chartPoints.map((p) => p.avgKg);
 
   // The drawn trend line uses the regression's *slope* but is anchored at (today, currentKg)
   // — the exact same anchor projectTargetDate() uses — instead of the regression's own
-  // intercept. That keeps it a single straight line (constant slope, no kink) while also
-  // guaranteeing it actually passes through the target at the projected reach date: that
-  // date was solved for on this same line, so evaluating it here lands back on targetKg
-  // (up to sub-day rounding). Anchoring at the regression's own fitted "today" value instead
-  // would drift away from the target the further out the projection reaches.
+  // intercept. That keeps it a single straight line while guaranteeing it passes through the
+  // target at the projected reach date.
   function anchoredTrendKgAt(dateISO: string): number | null {
     if (!fit || currentKg == null) return null;
     return currentKg + fit.slopeKgPerDay * diffDays(dateISO, todayISO());
@@ -288,22 +273,25 @@ export function WeightTracker() {
   const trendAtBaseKg = chartBaseISO ? anchoredTrendKgAt(chartBaseISO) : null;
   const trendAtDomainEndKg = chartBaseISO ? anchoredTrendKgAt(addDays(chartBaseISO, domainEndOffset)) : null;
 
-  // Y-axis: top is the highest of the logged values / target / trend line (100 as a sane
-  // default with no data yet) — folding the trend line's own endpoints in here guarantees
-  // it's always fully contained inside the plot, never drawn above/below the visible area.
-  // Ticks are equidistant GRID_STEP-unit steps, and the bottom tick is always at least one
-  // full step below the lowest such value, so both ends land cleanly on the same 5-unit grid.
+  const currentInView = !!(latest && filteredAscending.some((e) => e.id === latest.id));
+
+  // Max/min are the highest and lowest *plotted* averages, so their badges line up with points
+  // on the line. "Now" is the latest logged weight, matching the Current card above.
+  const maxAvgKg = pointKgValues.length ? Math.max(...pointKgValues) : null;
+  const minAvgKg = pointKgValues.length ? Math.min(...pointKgValues) : null;
+
+  // Y-axis, on a GRID_STEP grid: the bottom is the next multiple of GRID_STEP strictly below
+  // the lowest of the target and the displayed logged values (80 → 75, 81.8 → 80); the top is
+  // the next multiple at or above the highest. The trend line doesn't widen the axis — it is
+  // clipped to the plot instead, so a projection that runs past the target can't drag the
+  // bottom down a whole extra step.
   const stepKg = toKg(GRID_STEP, displayUnit);
-  const maxLoggedKg = barKgValues.length ? Math.max(...barKgValues) : toKg(DEFAULT_MAX, displayUnit);
-  const minLoggedKg = barKgValues.length ? Math.min(...barKgValues) : 0;
-  const rangeCandidates = [maxLoggedKg, minLoggedKg];
+  const rangeCandidates = pointKgValues.length ? [...pointKgValues] : [toKg(DEFAULT_MAX, displayUnit), 0];
   if (targetKg != null) rangeCandidates.push(targetKg);
-  if (trendAtBaseKg != null) rangeCandidates.push(trendAtBaseKg);
-  if (trendAtDomainEndKg != null) rangeCandidates.push(trendAtDomainEndKg);
-  const maxWithTargetKg = Math.max(...rangeCandidates);
-  const minWithTargetKg = Math.min(...rangeCandidates);
-  const maxKg = Math.ceil(maxWithTargetKg / stepKg) * stepKg;
-  const minKg = Math.floor((minWithTargetKg - stepKg) / stepKg) * stepKg;
+  if (currentInView && currentKg != null) rangeCandidates.push(currentKg);
+  const EPS = 1e-6;
+  const maxKg = Math.ceil((Math.max(...rangeCandidates) - EPS) / stepKg) * stepKg;
+  const minKg = Math.floor((Math.min(...rangeCandidates) - EPS) / stepKg) * stepKg;
   const range_ = maxKg - minKg;
 
   const tickCount = Math.round(range_ / stepKg);
@@ -315,51 +303,47 @@ export function WeightTracker() {
   }
 
   const baselineY = PLOT_HEIGHT - PLOT_Y_PAD;
-  const linePoints = chartEntries.map((e, i) => ({
-    x: xForOffset(diffDays(e.date, chartBaseISO)),
-    y: yForKg(barKgValues[i]),
+
+  const linePoints = chartPoints.map((p, i) => ({
+    x: xForOffset(diffDays(p.centerISO, chartBaseISO)),
+    y: yForKg(pointKgValues[i]),
   }));
 
   const targetDateTickX = deadlineOffset != null ? xForOffset(deadlineOffset) : null;
   const targetDateLabel = target?.byDate ? formatXTickLabel(target.byDate) : null;
 
-  // Marker geometry per point — min/max/current get a bigger ringed dot; everything else
-  // stays a small subtle dot. Values are shown as badges to the right of the chart instead
-  // of floating on the chart itself, so they never overlap the data.
-  const pointMarkers = chartEntries.map((e, i) => {
+  // Marker per point — the max/min averages and the latest period get a bigger colored dot.
+  const pointMarkers = chartPoints.map((p, i) => {
     const { x, y } = linePoints[i];
-    const kg = barKgValues[i];
-    const isMax = Math.abs(kg - maxLoggedKg) < 0.001;
-    const isMin = Math.abs(kg - minLoggedKg) < 0.001;
-    const isCurrent = latest ? e.id === latest.id : false;
-    // Priority: minimum > maximum > current — a point that's both the lowest ever and
-    // today's reading reads as the minimum (green).
-    const roleColor = isMin ? colors.success : isMax ? colors.danger : isCurrent ? colors.accent : null;
+    const kg = pointKgValues[i];
+    const isMax = maxAvgKg != null && Math.abs(kg - maxAvgKg) < 0.001;
+    const isMin = minAvgKg != null && Math.abs(kg - minAvgKg) < 0.001;
+    const isLatest = i === chartPoints.length - 1;
+    const roleColor = isMin ? colors.success : isMax ? colors.danger : isLatest ? colors.accent : null;
     return {
-      key: e.id,
-      entry: e,
+      key: p.key,
+      period: p,
       x, y,
       dotColor: roleColor ?? colors.accent,
-      dotRadius: roleColor ? 4 : 2,
-      ringRadius: roleColor ? 6 : 4,
+      dotRadius: roleColor ? 3 : 1.75,
+      ringRadius: roleColor ? 4.5 : 3,
     };
   });
 
-  const currentInView = !!(latest && chartEntries.some((e) => e.id === latest.id));
-
-  // Horizontal dotted reference lines for max/min/current/target. When two or more land at
-  // (nearly) the same height, they'd otherwise just paint over each other — instead each
-  // member of the cluster gets the dash pattern offset by an even fraction of the cycle, so
-  // the dots interleave into one continuous line alternating between the colors.
+  // ── Reference lines + badges ───────────────────────────────────────────
+  // Each value gets a faint horizontal dashed line at its level, plus a number-only badge in a
+  // centred row above the plot (the legend names the colours).
   const refLineDefs: { key: string; kg: number; color: string }[] = [];
-  if (chartEntries.length > 0) {
-    refLineDefs.push({ key: 'max', kg: maxLoggedKg, color: colors.danger });
-    refLineDefs.push({ key: 'min', kg: minLoggedKg, color: colors.success });
-    if (currentInView && currentKg != null) refLineDefs.push({ key: 'now', kg: currentKg, color: colors.accent });
-  }
+  if (maxAvgKg != null) refLineDefs.push({ key: 'max', kg: maxAvgKg, color: colors.danger });
+  if (minAvgKg != null) refLineDefs.push({ key: 'min', kg: minAvgKg, color: colors.success });
+  if (currentInView && currentKg != null) refLineDefs.push({ key: 'now', kg: currentKg, color: colors.accent });
   if (targetKg != null) refLineDefs.push({ key: 'goal', kg: targetKg, color: TARGET_COLOR });
 
   const refLinesWithY = refLineDefs.map((l) => ({ ...l, y: yForKg(l.kg) }));
+  const badges = refLinesWithY;
+
+  // When two or more reference lines land at (nearly) the same height, offset each one's dash
+  // pattern by an even fraction of the cycle so they interleave instead of painting over each other.
   const refLineClusters: (typeof refLinesWithY)[] = [];
   {
     const used = new Set<number>();
@@ -377,116 +361,122 @@ export function WeightTracker() {
     });
   }
 
-  // ── X-axis: a uniform day step is chosen from the visible span so ticks stay regular,
-  // equidistant, and readable at any timeframe — dynamic, recomputed whenever the range
-  // selection (or the projection) changes what's in view. Always the same 45° slant so it's
-  // predictable rather than jumping between angles.
-  const axisEndCandidates = [lastEntryISO, targetReachDate, target?.byDate].filter((d): d is string => !!d);
-  const axisEndISO = axisEndCandidates.reduce((a, b) => (b > a ? b : a), lastEntryISO);
-  const xTicksRaw = chartBaseISO && axisEndISO ? chooseXTicks(chartBaseISO, axisEndISO) : [];
-  const xTicks = xTicksRaw.length ? xTicksRaw : (chartBaseISO && axisEndISO ? [chartBaseISO, axisEndISO] : []);
-  const xTickPositions = xTicks.map((iso) => ({ iso, x: xForOffset(diffDays(iso, chartBaseISO)) }));
-  const xTickLabels = xTicks.map((iso) => formatXTickLabel(iso));
+  // ── X-axis: a uniform day step chosen from the visible span keeps ticks regular,
+  // equidistant, and readable at any timeframe.
+  const axisEndCandidates = [lastPointISO, targetReachDate, target?.byDate].filter((d): d is string => !!d);
+  const axisEndISO = axisEndCandidates.reduce((a, b) => (b > a ? b : a), lastPointISO);
+  // Ticks mark month ends only (see monthEndTicks).
+  const xTicks: string[] = chartBaseISO && axisEndISO ? monthEndTicks(chartBaseISO, axisEndISO) : [];
   const xLabelRotation = 45;
-
-  const descendingWithDelta = [...filteredAscending].reverse().map((e) => {
-    const prevChron = prevOf(e);
-    const delta = prevChron ? toKg(e.value, e.unit) - toKg(prevChron.value, prevChron.unit) : null;
-    return { entry: e, delta };
+  // With the labels slanted at 45°, two labels closer than this horizontally run into each other.
+  const X_LABEL_MIN_SEP = 16;
+  // The target-date label wins any clash: tick labels too close to it are left out.
+  const xTickPositions = xTicks.map((iso) => {
+    const x = xForOffset(diffDays(iso, chartBaseISO));
+    const hidden = targetDateTickX != null && targetDateLabel != null && Math.abs(x - targetDateTickX) < X_LABEL_MIN_SEP;
+    return { iso, x, label: hidden ? null : formatXTickLabel(iso) };
   });
 
-  const monthGroups: { key: string; label: string; avgKg: number; items: typeof descendingWithDelta }[] = [];
-  for (const item of descendingWithDelta) {
-    const key = item.entry.date.slice(0, 7);
-    const lastGroup = monthGroups[monthGroups.length - 1];
-    if (lastGroup && lastGroup.key === key) {
-      lastGroup.items.push(item);
-    } else {
-      monthGroups.push({ key, label: formatMonthLabel(key), avgKg: 0, items: [item] });
-    }
-  }
-  for (const g of monthGroups) {
-    g.avgKg = g.items.reduce((a, it) => a + toKg(it.entry.value, it.entry.unit), 0) / g.items.length;
-  }
+  // ── List: one box per period, newest first; entries inside newest first too.
+  const listPeriods = [...periods].reverse().map((p) => ({
+    period: p,
+    label: formatPeriodLabel(p, mode),
+    delta: prevPeriodDeltaKg(p),
+    items: [...p.entries].reverse().map((e) => {
+      const prevChron = prevOf(e);
+      const delta = prevChron ? toKg(e.value, e.unit) - toKg(prevChron.value, prevChron.unit) : null;
+      return { entry: e, delta };
+    }),
+  }));
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Weight</Text>
-        <Pressable onPress={openAdd} style={styles.addBtn}>
-          <Text style={styles.addBtnText}>+ Log</Text>
-        </Pressable>
-      </View>
-
       {!loaded ? null : entries.length === 0 ? (
         <View style={styles.empty}>
           <MaterialIcons name="monitor-weight" size={48} color={colors.textDim} />
           <Text style={styles.emptyText}>No weight logged yet.{'\n'}Log your first entry.</Text>
+          <Pressable onPress={openAdd} style={styles.addBtn}>
+            <Text style={styles.addBtnText}>+ Log</Text>
+          </Pressable>
         </View>
       ) : filteredAscending.length === 0 ? (
         <View style={styles.empty}>
           <MaterialIcons name="filter-list-off" size={48} color={colors.textDim} />
           <Text style={styles.emptyText}>No entries in this date range.</Text>
+          <Pressable onPress={openAdd} style={styles.addBtn}>
+            <Text style={styles.addBtnText}>+ Log</Text>
+          </Pressable>
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.scrollContent}>
-          <View style={styles.statsRow}>
-            <View style={styles.statCard}>
-              <Text style={styles.statLabel}>Current</Text>
-              <Text style={styles.statValue}>{formatValue(currentKg!, displayUnit)} <Text style={styles.statUnit}>{displayUnit}</Text></Text>
-            </View>
-            <View style={styles.statCard}>
-              <Text style={styles.statLabel}>Since last</Text>
-              <Text style={[styles.statValue, deltaColor(deltaSincePrev)]}>
-                {deltaSincePrev == null ? '—' : formatDelta(deltaSincePrev, displayUnit)}
-              </Text>
-            </View>
-            <View style={styles.statCard}>
-              <Text style={styles.statLabel}>All time</Text>
-              <Text style={[styles.statValue, deltaColor(deltaAllTime)]}>
-                {deltaAllTime == null ? '—' : formatDelta(deltaAllTime, displayUnit)}
-              </Text>
-            </View>
-            <View style={styles.statCard}>
-              <Text style={styles.statLabel}>Weekly avg</Text>
-              <Text style={[styles.statValue, deltaColor(weeklyRateKg)]}>
-                {weeklyRateKg == null ? '—' : formatDelta(weeklyRateKg, displayUnit)}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.targetCard}>
-            <View style={styles.targetHeader}>
-              <View style={styles.targetHeaderLeft}>
-                <Text style={styles.targetFlagIcon}>{TARGET_ICON}</Text>
-                <Text style={styles.targetTitle}>Target</Text>
+          <LabeledBox
+            label={`${TARGET_ICON} Target`}
+            style={styles.card}
+            right={target && weeklyRateKg != null ? (
+              <View style={styles.statusBadgeBase}>
+                <View style={[styles.statusBadge, { backgroundColor: `${onTrack ? colors.success : colors.danger}22` }]}>
+                  <Text style={[styles.statusBadgeText, { color: onTrack ? colors.success : colors.danger }]}>
+                    {onTrack ? 'On track' : 'Off track'}
+                  </Text>
+                </View>
               </View>
-              <Pressable onPress={() => setTargetModalOpen(true)} hitSlop={8}>
-                <MaterialIcons name={target ? 'edit' : 'add-circle-outline'} size={18} color={colors.accent} />
-              </Pressable>
-            </View>
-            {!target ? (
-              <Text style={styles.targetHint}>Set a target weight to see a prognosis based on your current trend.</Text>
-            ) : (
-              <View style={styles.targetValueRow}>
-                <Text style={styles.targetValue}>{formatValue(targetKg!, displayUnit)} <Text style={styles.statUnit}>{displayUnit}</Text></Text>
-                {weeklyRateKg != null && (
-                  <>
-                    <View style={[styles.statusBadge, onTrack ? styles.statusBadgeOn : styles.statusBadgeOff]}>
-                      <Text style={styles.statusBadgeText}>{onTrack ? '🟢 ON TRACK' : '🔴 OFF TRACK'}</Text>
-                    </View>
-                    <Text style={styles.prognosisText}>{projectionComment(targetProjection, target?.byDate)}</Text>
-                  </>
-                )}
-              </View>
-            )}
-          </View>
+            ) : undefined}
+          >
+            <Pressable onPress={() => setTargetModalOpen(true)} style={styles.targetBody}>
+              {!target ? (
+                <View style={styles.targetEmpty}>
+                  <MaterialIcons name="add-circle-outline" size={18} color={colors.accent} />
+                  <Text style={styles.targetHint}>Set a target weight to see when you'll reach it.</Text>
+                </View>
+              ) : (
+                <>
+                  <View style={styles.targetProgress}>
+                    <TargetProgress
+                      today={todayISO()}
+                      goalDate={target.byDate}
+                      projection={targetProjection}
+                      onTrack={onTrack}
+                      goalColor={TARGET_COLOR}
+                    />
+                  </View>
+                  <View style={styles.targetValueCol}>
+                    <Text style={styles.targetValue}>
+                      {formatValue(targetKg!, displayUnit)}<Text style={styles.targetUnit}> {displayUnit}</Text>
+                    </Text>
+                    {currentKg != null && (
+                      <Text style={styles.targetToGo}>
+                        {Math.abs(currentKg - targetKg!) < 0.05 ? 'reached' : `${fromKg(Math.abs(currentKg - targetKg!), displayUnit).toFixed(1)} ${displayUnit} to go`}
+                      </Text>
+                    )}
+                  </View>
+                </>
+              )}
+            </Pressable>
+          </LabeledBox>
 
-          <View style={styles.chartCard}>
-            <View style={styles.chartHeader}>
-              <Text style={styles.chartHeaderIcon}>{CHART_ICON}</Text>
-              <Text style={styles.chartHeaderTitle}>Evolution</Text>
-            </View>
+          <LabeledBox
+            label={`${CHART_ICON} Evolution`}
+            style={styles.card}
+            right={
+                <View style={styles.modeToggle}>
+                  {PERIOD_MODES.map((m) => {
+                    const active = m.mode === mode;
+                    return (
+                      <Pressable
+                        key={m.mode}
+                        onPress={() => changeMode(m.mode)}
+                        style={[styles.modeOption, active && styles.modeOptionActive]}
+                      >
+                        <Text style={[styles.modeOptionText, active && styles.modeOptionTextActive]}>{m.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+            }
+          >
+            <Text style={styles.chartSubtitle}>
+              {chartSubtitle} · {chartPoints.length} {chartPoints.length === 1 ? periodNoun : `${periodNoun}s`} · {filteredAscending.length} {filteredAscending.length === 1 ? 'entry' : 'entries'}
+            </Text>
 
             <View style={styles.rangeRow}>
               {RANGE_PRESETS.map((p) => {
@@ -512,76 +502,45 @@ export function WeightTracker() {
               </Pressable>
             </View>
 
-            <Text style={styles.chartSubtitle}>{chartSubtitle} · {chartEntries.length} {chartEntries.length === 1 ? 'entry' : 'entries'}</Text>
-
             <View style={styles.legendRow}>
-              <View style={styles.legendItem}>
-                <Svg width={20} height={6}>
-                  <Line x1={0} y1={3} x2={20} y2={3} stroke={colors.accent} strokeWidth={1.5} />
-                </Svg>
-                <Text style={styles.legendText}>Weight ({displayUnit})</Text>
-              </View>
-              <View style={styles.legendItem}>
-                <Svg width={20} height={6}>
-                  <Line x1={0} y1={3} x2={20} y2={3} stroke={TREND_COLOR} strokeWidth={1.5} strokeDasharray="0.1,6" strokeLinecap="round" />
-                </Svg>
-                <Text style={styles.legendText}>Trend</Text>
-              </View>
-              {chartEntries.length > 0 && (
-                <View style={styles.legendItem}>
+              {badges.map((b) => (
+                <View key={`legend-${b.key}`} style={styles.legendItem}>
                   <Svg width={20} height={6}>
-                    <Line x1={0} y1={3} x2={20} y2={3} stroke={colors.danger} strokeWidth={1} strokeDasharray={REF_DASH} />
+                    <Line x1={0} y1={3} x2={20} y2={3} stroke={b.color} strokeWidth={1.5} strokeOpacity={REF_OPACITY} strokeDasharray={REF_DASH} />
                   </Svg>
-                  <Text style={styles.legendText}>Max</Text>
+                  <Text style={styles.legendText}>{BADGE_NAMES[b.key]}</Text>
                 </View>
-              )}
-              {chartEntries.length > 0 && (
-                <View style={styles.legendItem}>
-                  <Svg width={20} height={6}>
-                    <Line x1={0} y1={3} x2={20} y2={3} stroke={colors.success} strokeWidth={1} strokeDasharray={REF_DASH} />
-                  </Svg>
-                  <Text style={styles.legendText}>Min</Text>
-                </View>
-              )}
-              {currentInView && (
-                <View style={styles.legendItem}>
-                  <Svg width={20} height={6}>
-                    <Line x1={0} y1={3} x2={20} y2={3} stroke={colors.accent} strokeWidth={1} strokeDasharray={REF_DASH} />
-                  </Svg>
-                  <Text style={styles.legendText}>Now</Text>
-                </View>
-              )}
-              {target && (
-                <View style={styles.legendItem}>
-                  <Svg width={20} height={6}>
-                    <Line x1={0} y1={3} x2={20} y2={3} stroke={TARGET_COLOR} strokeWidth={1} strokeDasharray={REF_DASH} />
-                  </Svg>
-                  <Text style={styles.legendText}>Target</Text>
-                </View>
-              )}
+              ))}
             </View>
 
-            <View style={styles.chartBody}>
-              <View style={styles.yAxis}>
-                {ticksKg.map((v, i) => (
-                  <Text key={i} style={[styles.axisLabel, styles.axisLabelAbs, { top: yForKg(v) }]}>
-                    {formatValue(v, displayUnit)}
-                  </Text>
-                ))}
-              </View>
-
-              <View style={styles.plotArea} onLayout={onPlotLayout}>
-                {plotWidth > 0 && chartEntries.length > 0 && (
+            <View style={styles.chartBody} onLayout={onPlotLayout}>
+              {plotWidth > 0 && chartPoints.length > 0 && (
+                <>
+                  <View style={styles.badgeBand}>
+                    {badges.map((b) => (
+                      <View
+                        key={`badge-${b.key}`}
+                        style={[styles.valueBadge, { backgroundColor: `${b.color}22` }]}
+                      >
+                        <Text style={[styles.valueBadgeText, { color: b.color }]}>{formatValue(b.kg, displayUnit)}</Text>
+                      </View>
+                    ))}
+                  </View>
                   <Svg width={plotWidth} height={TOTAL_SVG_HEIGHT}>
                     {ticksKg.map((v, i) => (
-                      <Line key={i} x1={0} y1={yForKg(v)} x2={plotWidth} y2={yForKg(v)} stroke={colors.border} strokeWidth={1} />
+                      <Fragment key={i}>
+                        <Line x1={GRID_LEFT} y1={yForKg(v)} x2={plotWidth} y2={yForKg(v)} stroke={colors.border} strokeWidth={1} />
+                        <SvgText x={Y_AXIS_WIDTH} y={yForKg(v) + 3.5} fontSize={10} fill={colors.textDim} textAnchor="end">
+                          {formatValue(v, displayUnit)}
+                        </SvgText>
+                      </Fragment>
                     ))}
 
                     {refLineClusters.map((cluster) => cluster.map((l, idx) => (
                       <Line
                         key={l.key}
-                        x1={0} y1={l.y} x2={plotWidth} y2={l.y}
-                        stroke={l.color} strokeWidth={1}
+                        x1={GRID_LEFT} y1={l.y} x2={plotWidth} y2={l.y}
+                        stroke={l.color} strokeWidth={1} strokeOpacity={REF_OPACITY}
                         strokeDasharray={REF_DASH}
                         strokeDashoffset={cluster.length > 1 ? (idx * REF_DASH_CYCLE) / cluster.length : 0}
                       />
@@ -590,7 +549,7 @@ export function WeightTracker() {
                     {targetDateTickX != null && (
                       <Line
                         x1={targetDateTickX} y1={PLOT_Y_PAD} x2={targetDateTickX} y2={baselineY}
-                        stroke={TARGET_COLOR} strokeWidth={0.75} strokeDasharray="4,4"
+                        stroke={TARGET_COLOR} strokeWidth={0.75} strokeOpacity={REF_OPACITY} strokeDasharray="4,4"
                       />
                     )}
 
@@ -607,17 +566,11 @@ export function WeightTracker() {
                       <Fragment key={p.key}>
                         <Circle cx={p.x} cy={p.y} r={p.ringRadius} fill={colors.surface} />
                         <Circle cx={p.x} cy={p.y} r={p.dotRadius} fill={p.dotColor} />
-                        <Circle cx={p.x} cy={p.y} r={12} fill="transparent" onPress={() => openDetail(p.entry)} />
+                        <Circle cx={p.x} cy={p.y} r={12} fill="transparent" onPress={() => setSelectedPeriod(p.period)} />
                       </Fragment>
                     ))}
 
-                    {fit && trendAtBaseKg != null && trendAtDomainEndKg != null && (
-                      <Line
-                        x1={xForOffset(0)} y1={yForKg(trendAtBaseKg)}
-                        x2={xForOffset(domainEndOffset)} y2={yForKg(trendAtDomainEndKg)}
-                        stroke={TREND_COLOR} strokeWidth={1.5} strokeDasharray={DOT_DASH} strokeLinecap="round"
-                      />
-                    )}
+
 
                     {extendChart && projectedOffset != null && targetKg != null && (
                       <SvgText x={xForOffset(projectedOffset)} y={yForKg(targetKg) + 4} fontSize={11} textAnchor="middle">
@@ -625,10 +578,10 @@ export function WeightTracker() {
                       </SvgText>
                     )}
 
-                    {xTickPositions.map(({ iso, x }, i) => (
+                    {xTickPositions.map(({ iso, x, label }) => (
                       <Fragment key={iso}>
                         <Line x1={x} y1={baselineY} x2={x} y2={baselineY + 5} stroke={colors.border} strokeWidth={1} />
-                        <SvgText
+                        {label != null && <SvgText
                           x={x}
                           y={baselineY + 16}
                           fontSize={10}
@@ -636,8 +589,8 @@ export function WeightTracker() {
                           textAnchor={xLabelRotation > 0 ? 'end' : 'middle'}
                           transform={xLabelRotation > 0 ? `rotate(${-xLabelRotation} ${x} ${baselineY + 16})` : undefined}
                         >
-                          {xTickLabels[i]}
-                        </SvgText>
+                          {label}
+                        </SvgText>}
                       </Fragment>
                     ))}
 
@@ -655,32 +608,57 @@ export function WeightTracker() {
                       </SvgText>
                     )}
                   </Svg>
-                )}
-              </View>
+                </>
+              )}
             </View>
-          </View>
+
+            <View style={styles.logRow}>
+              <Pressable onPress={openAdd} style={styles.addBtn}>
+                <Text style={styles.addBtnText}>+ Log</Text>
+              </Pressable>
+            </View>
+          </LabeledBox>
 
           <View style={styles.list}>
-            {monthGroups.map((group) => (
-              <View key={group.key} style={styles.monthGroup}>
-                <View style={styles.monthHeader}>
-                  <Text style={styles.monthLabel}>{group.label}</Text>
-                  <Text style={styles.monthAvg}>avg {formatValue(group.avgKg, displayUnit)} {displayUnit}</Text>
-                </View>
-                {group.items.map(({ entry: e, delta }) => (
-                  <Pressable key={e.id} style={styles.row} onPress={() => openEdit(e)}>
-                    <View style={styles.rowDate}>
-                      <Text style={styles.rowDateText}>{formatRowDate(e.date)}</Text>
+            {listPeriods.map(({ period, label, delta, items }) => {
+              const isOpen = expanded.has(period.key);
+              const count = period.entries.length;
+              return (
+                <View key={period.key} style={styles.periodBox}>
+                  <Pressable style={styles.periodHeader} onPress={() => toggleExpanded(period.key)}>
+                    <View style={styles.periodInfo}>
+                      <Text style={styles.periodLabel}>{label}</Text>
+                      <Text style={styles.periodCount}>{count} {count === 1 ? 'entry' : 'entries'}</Text>
                     </View>
-                    <Text style={styles.rowValue}>{e.value.toFixed(1)} {e.unit}</Text>
-                    <Text style={[styles.rowDelta, deltaColor(delta)]}>
-                      {delta == null ? '' : formatDelta(delta, displayUnit)}
-                    </Text>
-                    {e.note ? <MaterialIcons name="notes" size={14} color={colors.textDim} /> : null}
+                    <View style={styles.periodValues}>
+                      <Text style={styles.periodAvg}>
+                        {formatValue(period.avgKg, displayUnit)} <Text style={styles.statUnit}>{displayUnit}</Text>
+                      </Text>
+                      <Text style={[styles.periodDelta, deltaColor(delta)]}>
+                        {delta == null ? ' ' : formatDelta(delta, displayUnit)}
+                      </Text>
+                    </View>
+                    <MaterialIcons name={isOpen ? 'expand-less' : 'expand-more'} size={20} color={colors.textMuted} />
                   </Pressable>
-                ))}
-              </View>
-            ))}
+                  {isOpen && (
+                    <View style={styles.periodEntries}>
+                      {items.map(({ entry: e, delta: entryDelta }) => (
+                        <Pressable key={e.id} style={styles.row} onPress={() => openEdit(e)}>
+                          <View style={styles.rowDate}>
+                            <Text style={styles.rowDateText}>{formatRowDate(e.date)}</Text>
+                          </View>
+                          <Text style={styles.rowValue}>{e.value.toFixed(1)} {e.unit}</Text>
+                          <Text style={[styles.rowDelta, deltaColor(entryDelta)]}>
+                            {entryDelta == null ? '' : formatDelta(entryDelta, displayUnit)}
+                          </Text>
+                          {e.note ? <MaterialIcons name="notes" size={14} color={colors.textDim} /> : null}
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              );
+            })}
           </View>
         </ScrollView>
       )}
@@ -712,11 +690,12 @@ export function WeightTracker() {
       />
 
       <WeightPointDetailModal
-        visible={selectedEntry != null}
-        onClose={() => setSelectedEntry(null)}
-        entry={selectedEntry}
-        deltaVsPrevKg={selectedDeltaPrevKg}
-        deltaVsWeekKg={selectedDeltaWeekKg}
+        visible={selectedPeriod != null}
+        onClose={() => setSelectedPeriod(null)}
+        period={selectedPeriod}
+        mode={mode}
+        unit={displayUnit}
+        deltaVsPrevKg={selectedPeriod ? prevPeriodDeltaKg(selectedPeriod) : null}
       />
     </View>
   );
@@ -724,133 +703,120 @@ export function WeightTracker() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  headerTitle: { color: colors.text, fontSize: font.lg, fontWeight: '700' },
   addBtn: {
     backgroundColor: colors.accent,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs + 2,
     borderRadius: radius.sm,
   },
+  logRow: { flexDirection: 'row', justifyContent: 'flex-end' },
   addBtnText: { color: '#fff', fontSize: font.sm, fontWeight: '600' },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
   emptyText: { color: colors.textDim, fontSize: font.md, textAlign: 'center', lineHeight: 22 },
   scrollContent: { padding: spacing.lg, gap: spacing.lg },
-  statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  statCard: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.surface2,
-    padding: spacing.md,
-    gap: spacing.xs,
-    alignItems: 'center',
-  },
-  statLabel: { color: colors.textMuted, fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
-  statValue: { color: colors.text, fontSize: font.lg, fontWeight: '700' },
   statUnit: { fontSize: font.sm, fontWeight: '500', color: colors.textMuted },
-  targetCard: {
+  card: {
     backgroundColor: colors.surface,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.surface2,
     padding: spacing.md,
-    gap: spacing.xs,
-  },
-  targetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  targetHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  targetFlagIcon: { fontSize: 16 },
-  targetTitle: { color: colors.textMuted, fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
-  targetHint: { color: colors.textDim, fontSize: font.sm, lineHeight: 18 },
-  targetValueRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm },
-  targetValue: { color: colors.text, fontSize: font.lg, fontWeight: '700' },
-  statusBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-  },
-  statusBadgeOn: { backgroundColor: 'rgba(34,197,94,0.15)', borderColor: colors.success },
-  statusBadgeOff: { backgroundColor: 'rgba(239,68,68,0.15)', borderColor: colors.danger },
-  statusBadgeText: { fontSize: 10, fontWeight: '700', color: colors.text },
-  prognosisText: { color: colors.textMuted, fontSize: font.sm },
-  chartCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.surface2,
-    padding: spacing.md,
+    paddingTop: spacing.md + 4,
     gap: spacing.sm,
   },
-  chartHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  chartHeaderIcon: { fontSize: 16 },
-  chartHeaderTitle: { color: colors.textMuted, fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  targetBody: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
+  targetEmpty: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  targetHint: { flex: 1, color: colors.textDim, fontSize: font.sm, lineHeight: 18 },
+  targetProgress: { flex: 1 },
+  targetValueCol: { alignItems: 'flex-end' },
+  targetValue: { color: TARGET_COLOR, fontSize: 28, fontWeight: '800' },
+  targetUnit: { fontSize: font.md, fontWeight: '600', color: colors.textMuted },
+  targetToGo: { color: colors.textMuted, fontSize: font.sm },
+  // Opaque base so the box border doesn't show through the badge's translucent tint.
+  statusBadgeBase: { backgroundColor: colors.surface, borderRadius: 4 },
+  statusBadge: { paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: 4 },
+  statusBadgeText: { fontSize: 11, lineHeight: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
   rangeRow: { flexDirection: 'row', gap: spacing.xs },
   rangeChip: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.sm,
-    borderRadius: radius.sm,
+    paddingVertical: 5,
+    borderRadius: radius.sm - 2,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface2,
   },
   rangeChipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
-  rangeChipText: { fontSize: font.sm, fontWeight: '600', color: colors.textMuted },
+  rangeChipText: { fontSize: 11, fontWeight: '600', color: colors.textMuted },
   rangeChipTextActive: { color: '#fff' },
   rangeChipIcon: { flex: 0.7 },
   chartSubtitle: { color: colors.textDim, fontSize: font.sm },
   legendRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: spacing.md },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   legendText: { color: colors.textMuted, fontSize: font.sm },
-  chartBody: { flexDirection: 'row', gap: spacing.xs },
-  yAxis: { width: Y_AXIS_WIDTH, height: PLOT_HEIGHT, position: 'relative' },
-  plotArea: { flex: 1, height: TOTAL_SVG_HEIGHT },
-  axisLabel: { color: colors.textDim, fontSize: 10, textTransform: 'uppercase' },
-  axisLabelAbs: {
-    position: 'absolute',
-    right: 0,
-    width: Y_AXIS_WIDTH,
-    textAlign: 'right',
-    transform: [{ translateY: -6 }],
+  chartBody: { height: BADGE_BAND + TOTAL_SVG_HEIGHT },
+  badgeBand: { height: BADGE_BAND, flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-start', gap: spacing.sm },
+  // Same look as the app's other status badges: tinted background, coloured bold text, no border.
+  valueBadge: {
+    minWidth: BADGE_WIDTH,
+    height: BADGE_HEIGHT,
+    paddingHorizontal: spacing.xs + 2,
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  list: { gap: spacing.lg },
-  monthGroup: { gap: spacing.xs },
-  monthHeader: {
+  valueBadgeText: { fontSize: 11, lineHeight: 13, fontWeight: '700', letterSpacing: 0.5 },
+  modeToggle: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface2,
+    padding: 2,
   },
-  monthLabel: {
-    color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
+  modeOption: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.sm - 3 },
+  modeOptionActive: { backgroundColor: colors.accent },
+  modeOptionText: { fontSize: 11, fontWeight: '600', color: colors.textMuted },
+  modeOptionTextActive: { color: '#fff' },
+  list: { gap: spacing.sm },
+  periodBox: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.surface2,
+    overflow: 'hidden',
   },
-  monthAvg: { color: colors.textDim, fontSize: font.sm },
+  periodHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  periodInfo: { flex: 1, gap: 2 },
+  periodLabel: { color: colors.text, fontSize: font.md, fontWeight: '600' },
+  periodCount: { color: colors.textDim, fontSize: font.sm },
+  periodValues: { alignItems: 'flex-end', gap: 2 },
+  periodAvg: { color: colors.text, fontSize: font.lg, fontWeight: '700' },
+  periodDelta: { fontSize: font.sm, fontWeight: '500' },
+  periodEntries: {
+    borderTopWidth: 1,
+    borderTopColor: colors.surface2,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    gap: spacing.xs,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surface2,
     borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.surface2,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,
   },
-  rowDate: { width: 72 },
+  rowDate: { width: 96 },
   rowDateText: { color: colors.textMuted, fontSize: font.sm },
   rowValue: { flex: 1, color: colors.text, fontSize: font.md, fontWeight: '600' },
   rowDelta: { fontSize: font.sm, fontWeight: '500', minWidth: 64, textAlign: 'right' },

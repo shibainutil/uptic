@@ -53,6 +53,9 @@ export default function TabsLayout() {
 
         {/* Right: bug report + settings + profile */}
         <View style={styles.rightButtons}>
+          <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/notifications')} activeOpacity={0.7}>
+            <MaterialIcons name="notifications-none" size={24} color={colors.textMuted} />
+          </TouchableOpacity>
           <TouchableOpacity style={styles.iconBtn} onPress={() => setBugSheetOpen(true)} activeOpacity={0.7}>
             <MaterialIcons name="bug-report" size={24} color={colors.textMuted} />
           </TouchableOpacity>
