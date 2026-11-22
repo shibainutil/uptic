@@ -348,24 +348,29 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
   const times = (habit.schedule.timesOfDay ?? []).length ? habit.schedule.timesOfDay.slice().sort() : ['09:00'];
   const out: SessionSlot[] = [];
 
-  // flexibleSchedule: re-anchor due dates from the last logged entry so an
-  // ad-hoc session shifts the upcoming schedule (plants, haircut, etc.).
-  // Computed before the loops so it also applies to today's slot.
-  let flexAnchor = habit.startDate;
-  let lastLoggedDate: string | null = null;
-  if (habit.flexibleSchedule && mine.length > 0) {
-    lastLoggedDate = mine.map((e) => entryDate(e)).sort().at(-1)!;
-    if (lastLoggedDate > habit.startDate) flexAnchor = lastLoggedDate;
-  }
+  // flexibleSchedule: every logged entry re-anchors the schedule for the days after it
+  // (plants, haircut, etc.). The anchor for a date is the most recent entry date strictly
+  // before it, so the schedule is a chain: start → each log → the next log. Using one
+  // anchor (the latest log) for everything after it and startDate for everything before
+  // it re-derived past days on the original grid, which turned done sessions on the
+  // shifted grid into "extra" manual logs and resurrected phantom overdue slots.
+  const flexLogDates = habit.flexibleSchedule
+    ? [...new Set(mine.map((e) => entryDate(e)))].filter((d) => d > habit.startDate).sort()
+    : [];
+  const anchorFor = (d: string): string => {
+    let anchor = habit.startDate;
+    for (const ld of flexLogDates) {
+      if (ld >= d) break;
+      anchor = ld;
+    }
+    return anchor;
+  };
 
   const pastStart = habit.startDate > addDays(todayISO_, -PAST_SLOT_DAYS) ? habit.startDate : addDays(todayISO_, -PAST_SLOT_DAYS);
-  const yesterday = addDays(todayISO_, -1);
   let pendingToday = 0;
   const coveredDates = new Set<string>();
   for (let d = pastStart; d <= todayISO_; d = addDays(d, 1)) {
-    // For flexible habits: dates strictly after the last log use the new anchor,
-    // so today's slot disappears if it's not due under the shifted schedule.
-    const anchor = (lastLoggedDate && d > lastLoggedDate) ? lastLoggedDate : habit.startDate;
+    const anchor = anchorFor(d);
     if (!isDue(habit.schedule, fromISO(d), anchor)) continue;
     coveredDates.add(d);
     const paused_ = isPaused(habit, d);
@@ -428,7 +433,7 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
     const goalLimited = habit.kind === 'limited' && habit.targetSessions != null;
     const forced = (d: string) => !goalLimited && through != null && d <= through;
     for (let i = 0; i < 800 && (pending < remaining || forced(cursor)); i++, cursor = addDays(cursor, 1)) {
-      if (!isDue(habit.schedule, fromISO(cursor), flexAnchor) || isPaused(habit, cursor)) continue;
+      if (!isDue(habit.schedule, fromISO(cursor), anchorFor(cursor)) || isPaused(habit, cursor)) continue;
       for (const time of times) {
         if (skippedSlots.has(`${cursor}|${time}`) || skipped.has(cursor)) { out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'skipped', explicit: true }); continue; }
         if (pending >= remaining && !forced(cursor)) break;
