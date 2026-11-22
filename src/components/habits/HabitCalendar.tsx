@@ -99,9 +99,9 @@ export function HabitCalendar({ year, month, onChange, slots, today, pausedOn }:
                   styles.dayCell,
                   colWidth(di),
                   paused && (inMonth ? styles.dayCellPaused : styles.dayCellPausedOut),
-                  isToday && styles.dayCellToday,
                 ]}
               >
+                {isToday && <View pointerEvents="none" style={styles.todayRing} />}
                 <Text style={[styles.dayNumber, isToday && styles.dayNumberToday, !inMonth && styles.dayNumberOut]}>
                   {date.getDate()}
                 </Text>
@@ -137,14 +137,15 @@ const styles = StyleSheet.create({
     textAlign: 'center', color: colors.textMuted,
     fontSize: font.sm, fontWeight: '500', paddingVertical: spacing.sm,
   },
-  // Every cell reserves the same border width so today's outline doesn't shift its contents.
+  // Cells have no border: a transparent border made Android draw the paused background
+  // inset from the cell edge, leaving thin lines between paused week rows. Today's outline
+  // is an overlay instead, so it doesn't shift the cell's contents either.
   dayCell: {
-    alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.xs, height: 48,
-    borderWidth: 1.5, borderColor: 'transparent',
+    alignItems: 'center', paddingTop: spacing.sm + 1.5, paddingBottom: spacing.xs + 1.5, height: 48,
   },
+  todayRing: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderWidth: 1.5, borderColor: colors.accent },
   dayCellPaused: { backgroundColor: 'rgba(234,179,8,0.18)' },
   dayCellPausedOut: { backgroundColor: 'rgba(234,179,8,0.09)' },
-  dayCellToday: { borderColor: colors.accent },
   dayNumber: { color: colors.text, fontSize: font.md },
   dayNumberToday: { color: colors.accent, fontWeight: '700' },
   dayNumberOut: { opacity: 0.35 },

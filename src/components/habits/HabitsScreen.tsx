@@ -256,9 +256,10 @@ export function HabitsScreen() {
       section = 'completed';
     } else if (paused) {
       section = 'paused';
-      firstSlot = slots
-        .filter(s => s.status === 'paused')
-        .sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time))[0];
+      // Paused sessions now run ahead into the pause too: show today's (or the latest past)
+      // one, else the next one coming up.
+      const pausedSlots = slots.filter(s => s.status === 'paused');
+      firstSlot = pausedSlots.filter(s => s.date <= today).at(-1) ?? pausedSlots[0];
     } else {
       // Most recent unhandled slot on or before today, and most recent handled slot.
       const pastAndToday = slots.filter(s => s.date <= today && s.status !== 'paused');

@@ -325,8 +325,9 @@ const ONGOING_UPCOMING = 10;   // upcoming slots listed for habits without a ses
 /**
  * Past slots (done / skipped / missed) from the last ~90 days, today's slots, and
  * the upcoming slots still needed: for a habit with a session goal, exactly as
- * many as are left to reach it (skipped dates excluded, so they push the end
- * later); otherwise the next 10.
+ * many as are left to reach it (skipped and paused dates excluded, so they push
+ * the end later); otherwise the next 10. Scheduled days inside a pause are listed
+ * too, with status 'paused'.
  */
 /**
  * `through`: for habits without a session goal, keep listing upcoming slots at least up to
@@ -432,8 +433,23 @@ export function sessionSlots(habit: Habit, entries: HabitLogEntry[], todayISO_: 
     let cursor = addDays(todayISO_, 1);
     const goalLimited = habit.kind === 'limited' && habit.targetSessions != null;
     const forced = (d: string) => !goalLimited && through != null && d <= through;
+    let pausedAhead = 0;
     for (let i = 0; i < 800 && (pending < remaining || forced(cursor)); i++, cursor = addDays(cursor, 1)) {
-      if (!isDue(habit.schedule, fromISO(cursor), anchorFor(cursor)) || isPaused(habit, cursor)) continue;
+      if (!isDue(habit.schedule, fromISO(cursor), anchorFor(cursor))) continue;
+      // Paused days keep their sessions on the schedule, marked paused: they aren't due,
+      // can't go overdue and don't count toward the remaining sessions, so a session goal
+      // still finishes later. An open-ended pause would repeat forever, so only list
+      // its next few sessions.
+      const pause = pauseCovering(habit, cursor);
+      if (pause) {
+        if (pause.until == null && pausedAhead >= ONGOING_UPCOMING && !forced(cursor)) break;
+        for (const time of times) {
+          const skippedHere = skippedSlots.has(`${cursor}|${time}`) || skipped.has(cursor);
+          out.push({ key: `${cursor}|${time}`, date: cursor, time, status: skippedHere ? 'skipped' : 'paused', explicit: skippedHere || undefined });
+          pausedAhead++;
+        }
+        continue;
+      }
       for (const time of times) {
         if (skippedSlots.has(`${cursor}|${time}`) || skipped.has(cursor)) { out.push({ key: `${cursor}|${time}`, date: cursor, time, status: 'skipped', explicit: true }); continue; }
         if (pending >= remaining && !forced(cursor)) break;

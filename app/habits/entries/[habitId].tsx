@@ -66,10 +66,10 @@ export default function HabitEntriesScreen() {
   const overdueSlots = slots.filter((s) => s.status === 'overdue');
   const dueSlots = slots.filter((s) => s.status === 'today');
   const pastSlots = slots
-    .filter((s) => s.status === 'done' || s.status === 'skipped' || s.status === 'paused')
+    .filter((s) => s.status === 'done' || s.status === 'skipped' || (s.status === 'paused' && s.date <= today))
     .sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time));
   const futureSlots = slots
-    .filter((s) => s.status === 'upcoming')
+    .filter((s) => s.date > today && (s.status === 'upcoming' || s.status === 'paused'))
     .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
 
   const pause = habit ? pauseCovering(habit, today) : undefined;
@@ -264,7 +264,7 @@ export default function HabitEntriesScreen() {
 }
 
 function slotTint(status: SessionSlot['status'], future?: boolean): string {
-  if (future) return colors.textDim;
+  if (future && status !== 'paused') return colors.textDim;
   switch (status) {
     case 'done':    return colors.success;
     case 'skipped': return colors.danger;

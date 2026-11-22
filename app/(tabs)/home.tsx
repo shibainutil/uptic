@@ -9,7 +9,7 @@ import { useHabits, useHabitLogEntries } from '../../src/store/habitStore';
 import {
   useRoutines, useRoutineExecutions, useExerciseExecutions, useRoutineReconcile,
 } from '../../src/store/gymStore';
-import { buildAgenda, itemDone, type HomeItem } from '../../src/lib/homeAgenda';
+import { buildAgenda, itemCounted, itemDone, type HomeItem } from '../../src/lib/homeAgenda';
 import { habitSlotActions } from '../../src/lib/habitSlotActions';
 import { ActionBtn, ActionBtnGroup } from '../../src/components/habits/ActionBtn';
 import { SectionHeader } from '../../src/components/habits/SectionHeader';
@@ -55,7 +55,8 @@ export default function HomeScreen() {
     (i.kind === 'task' && i.overdue) ||
     (i.kind === 'habit' && i.slot.status === 'overdue')
   );
-  const doneCount = items.filter(itemDone).length;
+  const counted = items.filter(itemCounted);
+  const doneCount = counted.filter(itemDone).length;
 
   const habitActions = habitSlotActions({ today, habits, entries, setPauses, add, update, remove, setSkipped, onError: errorAlert });
   const actions: RowActions = {
@@ -73,8 +74,8 @@ export default function HomeScreen() {
           <Text style={styles.summaryTitle}>
             {fromISO(today).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
           </Text>
-          {loaded && items.length > 0 && (
-            <Text style={styles.summarySub}>{doneCount} of {items.length} done</Text>
+          {loaded && counted.length > 0 && (
+            <Text style={styles.summarySub}>{doneCount} of {counted.length} done</Text>
           )}
         </View>
 
