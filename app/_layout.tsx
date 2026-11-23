@@ -6,6 +6,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider, useAuth } from '../src/context/AuthContext';
 import { useDevReconnect } from '../src/lib/devReconnect';
 import { useHabitNotifications } from '../src/hooks/useHabitNotifications';
+import { useWeightHealthSync } from '../src/hooks/useWeightHealthSync';
 
 // react-native-draggable-flatlist's nested lists (NestableDraggableFlatList inside
 // NestableScrollContainer) call measureLayout against the animated outer ScrollView,
@@ -37,6 +38,7 @@ function RootNavigator() {
   const segments = useSegments();
   useDevReconnect(!loading && !!user);
   useHabitNotifications(user?.uid);
+  useWeightHealthSync(user?.uid);
 
   useEffect(() => {
     if (loading) return;

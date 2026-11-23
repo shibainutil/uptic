@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { ActionBtn } from '../src/components/habits/ActionBtn';
 import { colors, spacing, font, radius } from '../src/theme';
-import { useHealthStatus, openHealthSettings, type HealthStatus } from '../src/lib/healthConnect';
+import { useHealthStatus, useWeightWriteAllowed, openHealthSettings, healthConnectSupported, type HealthStatus } from '../src/lib/healthConnect';
 import { scaleSupported, useScaleReading } from '../src/lib/scaleReader';
 
 type MIName = React.ComponentProps<typeof MaterialIcons>['name'];
@@ -111,6 +111,7 @@ function ScaleCard() {
               <Text style={[styles.liveText, reading.status === 'stable' && { color: colors.success }]}>{live}</Text>
             </View>
           )}
+          <WeightToHealth />
           <View style={styles.actions}>
             <ActionBtn
               label={testing ? 'Stop' : 'Test scale'}
@@ -124,6 +125,22 @@ function ScaleCard() {
         <Text style={styles.note}>This version of the app was built without the scale reader. Install the latest build.</Text>
       )}
     </DeviceCard>
+  );
+}
+
+/** Weigh-ins are copied to Health Connect once Uptic may write weight there. */
+function WeightToHealth() {
+  const { allowed, allow } = useWeightWriteAllowed();
+  if (!healthConnectSupported() || allowed === null) return null;
+  return allowed ? (
+    <Text style={styles.note}>Weigh-ins are also saved to Health Connect.</Text>
+  ) : (
+    <>
+      <Text style={styles.note}>Allow Uptic to write weight to save your weigh-ins to Health Connect too.</Text>
+      <View style={styles.actions}>
+        <ActionBtn label="Save to Health Connect" icon="favorite" scheme="blue" onPress={allow} />
+      </View>
+    </>
   );
 }
 

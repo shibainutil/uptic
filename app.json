@@ -27,7 +27,8 @@
         "android.permission.health.READ_DISTANCE",
         "android.permission.health.READ_ACTIVE_CALORIES_BURNED",
         "android.permission.health.READ_HYDRATION",
-        "android.permission.health.WRITE_HYDRATION"
+        "android.permission.health.WRITE_HYDRATION",
+        "android.permission.health.WRITE_WEIGHT"
       ],
       "versionCode": 6
     },

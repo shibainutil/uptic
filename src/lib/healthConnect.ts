@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AppState, Platform, TurboModuleRegistry } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { toKg, type WeightEntry } from '../types/weight';
 
 /**
  * Android Health Connect: the phone's shared health store. Garmin Connect writes
@@ -30,10 +32,11 @@ function hc(): HC | null {
 /** True when this app build includes Health Connect support. */
 export const healthConnectSupported = (): boolean => !!hc();
 
-const READ_PERMISSIONS = [
+const PERMISSIONS = [
   { accessType: 'read', recordType: 'Steps' },
   { accessType: 'read', recordType: 'Distance' },
   { accessType: 'read', recordType: 'ActiveCaloriesBurned' },
+  { accessType: 'write', recordType: 'Weight' },
 ] as const;
 
 export type HealthStatus =
@@ -70,7 +73,7 @@ export async function getHealthStatus(): Promise<HealthStatus> {
 export async function connectHealth(): Promise<HealthStatus> {
   const m = await ensureInit();
   if (!m) return getHealthStatus();
-  await m.requestPermission(READ_PERMISSIONS as any);
+  await m.requestPermission(PERMISSIONS as any);
   return getHealthStatus();
 }
 
@@ -159,4 +162,82 @@ export async function readActivity(days: number): Promise<DayActivity[]> {
     return d;
   });
   return Promise.all(list.map((d) => aggregateDay(m, d)));
+}
+
+// ── Writing weight ─────────────────────────────────────────────────────────
+
+/** True when Uptic may write weight to Health Connect. */
+export async function canWriteWeight(): Promise<boolean> {
+  const m = await ensureInit().catch(() => null);
+  if (!m) return false;
+  const granted = await m.getGrantedPermissions();
+  return granted.some((p: any) => p.recordType === 'Weight' && p.accessType === 'write');
+}
+
+/** Whether weight writing is allowed, re-checked when the app comes back to the foreground. */
+export function useWeightWriteAllowed() {
+  const [allowed, setAllowed] = useState<boolean | null>(null);
+  const refresh = useCallback(() => {
+    canWriteWeight().then(setAllowed).catch(() => setAllowed(false));
+  }, []);
+  useEffect(() => {
+    refresh();
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') refresh(); });
+    return () => sub.remove();
+  }, [refresh]);
+  const allow = useCallback(async () => {
+    await connectHealth().catch(() => {});
+    refresh();
+  }, [refresh]);
+  return { allowed, allow };
+}
+
+const weightRecordId = (date: string) => `uptic-weight-${date}`;
+const syncedKey = (uid: string) => `healthConnect.weightSynced.${uid}`;
+
+/** When the weigh-in happened: the time it was logged if that was on the same day, else noon. */
+function weighInTime(e: WeightEntry): Date {
+  const logged = new Date(e.createdAt);
+  if (!isNaN(logged.getTime()) && ymd(logged) === e.date) return logged;
+  const [y, mo, d] = e.date.split('-').map(Number);
+  return new Date(y, mo - 1, d, 12, 0, 0, 0);
+}
+
+/**
+ * Mirrors Uptic's weight entries into Health Connect, one Weight record per day.
+ * Each record's clientRecordId is tied to its day, so writing it again replaces it.
+ * What was last written is remembered, so only new, changed and deleted days are sent.
+ */
+export async function syncWeightToHealth(uid: string, entries: WeightEntry[]): Promise<void> {
+  if (!(await canWriteWeight())) return;
+  const m = (await ensureInit())!;
+  let synced: Record<string, string> = {};
+  try { synced = JSON.parse((await AsyncStorage.getItem(syncedKey(uid))) ?? '{}'); } catch { synced = {}; }
+
+  const want: Record<string, string> = {};
+  const changed: WeightEntry[] = [];
+  for (const e of entries) {
+    const kg = Math.round(toKg(e.value, e.unit) * 100) / 100;
+    if (!(kg > 0)) continue;
+    const sig = `${kg}|${weighInTime(e).toISOString()}`;
+    want[e.date] = sig;
+    if (synced[e.date] !== sig) changed.push(e);
+  }
+  const removed = Object.keys(synced).filter((date) => !(date in want));
+
+  if (changed.length) {
+    const version = Date.now();
+    await m.insertRecords(changed.map((e) => ({
+      recordType: 'Weight' as const,
+      time: weighInTime(e).toISOString(),
+      weight: { value: Math.round(toKg(e.value, e.unit) * 100) / 100, unit: 'kilograms' as const },
+      metadata: { clientRecordId: weightRecordId(e.date), clientRecordVersion: version },
+    })) as any);
+  }
+  if (removed.length) {
+    await m.deleteRecordsByUuids('Weight', [], removed.map(weightRecordId));
+  }
+  if (changed.length || removed.length) {
+    await AsyncStorage.setItem(syncedKey(uid), JSON.stringify(want));
+  }
 }
