@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
-import { View, Text, ScrollView, RefreshControl, StyleSheet } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { AppState, View, Text, ScrollView, RefreshControl, StyleSheet } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { ProgressRing } from '../../src/components/ui/ProgressRing';
 import { ActionBtn } from '../../src/components/habits/ActionBtn';
 import { colors, spacing, font, radius } from '../../src/theme';
@@ -31,9 +31,15 @@ export default function StepsScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    if (status === 'connected') load();
-  }, [status, load]);
+  // Garmin Connect writes to Health Connect whenever the watch syncs, so read again each
+  // time the tab is opened and whenever the app comes back to the foreground (this also
+  // moves "Today" on after midnight).
+  useFocusEffect(useCallback(() => {
+    if (status !== 'connected') return;
+    load();
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') load(); });
+    return () => sub.remove();
+  }, [status, load]));
 
   if (status === null) return <View style={styles.container} />;
 
