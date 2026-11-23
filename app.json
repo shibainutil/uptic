@@ -2,7 +2,7 @@
   "expo": {
     "name": "Uptic",
     "slug": "uptic",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -30,7 +30,7 @@
         "android.permission.health.WRITE_HYDRATION",
         "android.permission.health.WRITE_WEIGHT"
       ],
-      "versionCode": 6
+      "versionCode": 7
     },
     "web": {
       "favicon": "./assets/favicon.png",
