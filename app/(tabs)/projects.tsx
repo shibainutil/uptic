@@ -39,7 +39,7 @@ export default function ProjectsScreen() {
 
   if (loaded && activePillars.length === 0) {
     return (
-      <SafeAreaView style={styles.container} edges={['bottom']}>
+      <SafeAreaView style={styles.container} edges={[]}>
         <View style={styles.empty}>
           <MaterialIcons name="flag" size={48} color={colors.textDim} />
           <Text style={styles.emptyTitle}>Set up pillars first</Text>
@@ -51,7 +51,7 @@ export default function ProjectsScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
+    <SafeAreaView style={styles.container} edges={[]}>
       <View style={styles.header}>
         <Text style={styles.count}>{openCount} open project{openCount !== 1 ? 's' : ''}</Text>
         <Pressable onPress={() => router.push('/projects/edit/new')} style={styles.addBtn}>

@@ -43,7 +43,7 @@ export default function PillarsScreen() {
 
   if (loaded && pillars.length === 0) {
     return (
-      <SafeAreaView style={styles.container} edges={['bottom']}>
+      <SafeAreaView style={styles.container} edges={[]}>
         <View style={styles.empty}>
           <MaterialIcons name="account-balance" size={48} color={colors.textDim} />
           <Text style={styles.emptyTitle}>No pillars yet</Text>
@@ -68,7 +68,7 @@ export default function PillarsScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
+    <SafeAreaView style={styles.container} edges={[]}>
       <View style={styles.header}>
         <Text style={styles.count}>{active.length} pillar{active.length !== 1 ? 's' : ''}</Text>
         <Pressable onPress={() => router.push('/pillars/edit/new')} style={styles.addBtn}>

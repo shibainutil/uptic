@@ -372,11 +372,6 @@ export function HabitsScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.list}>
-      <Pressable style={styles.addBtn} onPress={() => router.push('/habits/habit/new')}>
-        <MaterialIcons name="add" size={15} color="#fff" />
-        <Text style={styles.addBtnText}>Add habit</Text>
-      </Pressable>
-
       {SECTIONS.map(({ key, label, color }) => {
         const sectionItems = items
           .filter(i => i.section === key)
@@ -426,12 +421,6 @@ const styles = StyleSheet.create({
   emptyAdd: { backgroundColor: colors.accent, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderRadius: radius.sm },
   emptyAddText: { color: '#fff', fontWeight: '600', fontSize: font.sm },
   list: { padding: spacing.md, gap: spacing.sm },
-  addBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-end',
-    backgroundColor: colors.accent, paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2, borderRadius: radius.sm,
-  },
-  addBtnText: { color: '#fff', fontSize: font.sm, fontWeight: '600' },
   section: { gap: 4 },
 });
 

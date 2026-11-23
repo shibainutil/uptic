@@ -27,7 +27,7 @@ export default function FitnessScreen() {
   useRoutineReconcile(user?.uid, routines, routineExecutions, exerciseExecutions, executionsLoaded);
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
+    <SafeAreaView style={styles.container} edges={[]}>
       <View style={styles.subTabBar}>
         {SUB_TABS.map((t) => (
           <Pressable

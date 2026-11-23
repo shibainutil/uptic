@@ -57,6 +57,7 @@ function RootNavigator() {
       <Stack.Screen name="fitness/routine-execution/[id]" options={{ presentation: 'card' }} />
       <Stack.Screen name="habits/habit/[id]" options={{ presentation: 'card' }} />
       <Stack.Screen name="habits/entries/[habitId]" options={{ presentation: 'card' }} />
+      <Stack.Screen name="about" options={{ presentation: 'card' }} />
       <Stack.Screen name="notifications" options={{ presentation: 'card' }} />
       <Stack.Screen name="pillars/[id]" options={{ presentation: 'card' }} />
       <Stack.Screen name="pillars/edit/[id]" options={{ presentation: 'card' }} />

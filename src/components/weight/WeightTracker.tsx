@@ -10,6 +10,7 @@ import { WeightDateFilterModal, type DateRange } from './WeightDateFilterModal';
 import { WeightPointDetailModal } from './WeightPointDetailModal';
 import { TargetProgress } from './TargetProgress';
 import { LabeledBox } from '../ui/LabeledBox';
+import { useBottomBarAction } from '../../store/bottomBarStore';
 import { colors, spacing, font, radius } from '../../theme';
 import { fromISO, toISO, diffDays, addDays, todayISO } from '../../lib/schedule';
 import { fitWeightTrend } from '../../lib/weightTrend';
@@ -147,6 +148,7 @@ export function WeightTracker() {
   const [modalOpen, setModalOpen] = useState(false);
   const [targetModalOpen, setTargetModalOpen] = useState(false);
   const [filterModalOpen, setFilterModalOpen] = useState(false);
+  useBottomBarAction('Log', 'add', openAdd);
   const [editingEntry, setEditingEntry] = useState<WeightEntry | undefined>(undefined);
   const [range, setRange] = useState<RangeSelection>({ kind: 'all' });
   const [plotWidth, setPlotWidth] = useState(0);
@@ -611,12 +613,6 @@ export function WeightTracker() {
                 </>
               )}
             </View>
-
-            <View style={styles.logRow}>
-              <Pressable onPress={openAdd} style={styles.addBtn}>
-                <Text style={styles.addBtnText}>+ Log</Text>
-              </Pressable>
-            </View>
           </LabeledBox>
 
           <View style={styles.list}>
@@ -709,7 +705,6 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs + 2,
     borderRadius: radius.sm,
   },
-  logRow: { flexDirection: 'row', justifyContent: 'flex-end' },
   addBtnText: { color: '#fff', fontSize: font.sm, fontWeight: '600' },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
   emptyText: { color: colors.textDim, fontSize: font.md, textAlign: 'center', lineHeight: 22 },
