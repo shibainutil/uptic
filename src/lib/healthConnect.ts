@@ -118,6 +118,13 @@ function ymd(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+/**
+ * Only Garmin Connect's data counts. Other apps write steps too (Google Fit counts the
+ * phone's own steps), and Health Connect's aggregate merges every source, which adds
+ * steps the watch never counted.
+ */
+const GARMIN_CONNECT = 'com.garmin.android.apps.connectmobile';
+
 async function aggregateDay(m: HC, day: Date): Promise<DayActivity> {
   const start = startOfDay(day);
   const end = new Date(start);
@@ -129,9 +136,9 @@ async function aggregateDay(m: HC, day: Date): Promise<DayActivity> {
   };
   const safe = <T,>(p: Promise<T>) => p.catch(() => null);
   const [steps, dist, cal] = await Promise.all([
-    safe(m.aggregateRecord({ recordType: 'Steps', timeRangeFilter })),
-    safe(m.aggregateRecord({ recordType: 'Distance', timeRangeFilter })),
-    safe(m.aggregateRecord({ recordType: 'ActiveCaloriesBurned', timeRangeFilter })),
+    safe(m.aggregateRecord({ recordType: 'Steps', timeRangeFilter, dataOriginFilter: [GARMIN_CONNECT] })),
+    safe(m.aggregateRecord({ recordType: 'Distance', timeRangeFilter, dataOriginFilter: [GARMIN_CONNECT] })),
+    safe(m.aggregateRecord({ recordType: 'ActiveCaloriesBurned', timeRangeFilter, dataOriginFilter: [GARMIN_CONNECT] })),
   ]);
   return {
     date: ymd(start),
