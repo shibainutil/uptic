@@ -77,7 +77,7 @@ export default function HomeScreen() {
           <Text style={styles.summaryTitle}>
             {fromISO(today).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
           </Text>
-          {loaded && counted.length > 0 && <ProgressDots items={counted} today={today} doneCount={doneCount} />}
+          {loaded && items.length > 0 && <ProgressDots items={items} today={today} doneCount={doneCount} counted={counted.length} />}
         </View>
 
         {!loaded ? (
@@ -92,12 +92,12 @@ export default function HomeScreen() {
 
 // ── Views ────────────────────────────────────────────────────────────────────
 
-type DotStatus = 'done' | 'skipped' | 'overdue' | 'due' | 'upcoming';
+type DotStatus = 'done' | 'skipped' | 'paused' | 'overdue' | 'due' | 'upcoming';
 
-// Finished ones first, so the dots fill up from the left as the day goes on.
-const DOT_ORDER: DotStatus[] = ['done', 'skipped', 'overdue', 'due', 'upcoming'];
+// Same order as the status groups on the Habits screen (HABIT_GROUPS).
+const DOT_ORDER: DotStatus[] = ['overdue', 'due', 'upcoming', 'paused', 'skipped', 'done'];
 const DOT_COLOR: Record<DotStatus, string> = {
-  done: SUCCESS, skipped: colors.danger, overdue: OVERDUE, due: colors.accent, upcoming: UPCOMING,
+  done: SUCCESS, skipped: colors.danger, paused: PAUSE_COLOR, overdue: OVERDUE, due: colors.accent, upcoming: UPCOMING,
 };
 
 function dotStatus(i: HomeItem, today: string): DotStatus {
@@ -106,6 +106,7 @@ function dotStatus(i: HomeItem, today: string): DotStatus {
     switch (i.slot.status) {
       case 'done': return 'done';
       case 'skipped': return 'skipped';
+      case 'paused': return 'paused';
       case 'overdue': return 'overdue';
       case 'later': case 'upcoming': return 'upcoming';
       default: return 'due';
@@ -116,11 +117,11 @@ function dotStatus(i: HomeItem, today: string): DotStatus {
   return i.date < today ? 'overdue' : 'due';
 }
 
-/** One dot per item counted for today, coloured like the Habits screen's status groups. */
-function ProgressDots({ items, today, doneCount }: { items: HomeItem[]; today: string; doneCount: number }) {
+/** One dot per item on today's agenda (paused ones too), coloured like the Habits screen's status groups. */
+function ProgressDots({ items, today, doneCount, counted }: { items: HomeItem[]; today: string; doneCount: number; counted: number }) {
   const dots = items.map((i) => dotStatus(i, today)).sort((a, b) => DOT_ORDER.indexOf(a) - DOT_ORDER.indexOf(b));
   return (
-    <View style={styles.dots} accessible accessibilityLabel={`${doneCount} of ${items.length} done`}>
+    <View style={styles.dots} accessible accessibilityLabel={`${doneCount} of ${counted} done`}>
       {dots.map((d, n) => <View key={n} style={[styles.dot, { backgroundColor: DOT_COLOR[d] }]} />)}
     </View>
   );
