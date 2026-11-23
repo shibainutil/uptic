@@ -49,3 +49,6 @@ yarn-error.*
 
 # EAS local signing credentials (dev build uses debug.keystore)
 credentials.json
+
+# local Expo module build output
+modules/*/android/build/

@@ -31,6 +31,7 @@ const XAXIS_HEIGHT = 44; // reserved below the plot for rotated tick labels
 const BADGE_WIDTH = 46;
 const BADGE_HEIGHT = 19;
 const BADGE_BAND = 24;
+const LEGEND_SHIFT = 12;
 const BADGE_NAMES: Record<string, string> = { max: 'Max', min: 'Min', now: 'Current', goal: 'Target' };
 const TOTAL_SVG_HEIGHT = PLOT_HEIGHT + XAXIS_HEIGHT;
 const GRID_STEP = 5; // y-axis tick spacing, in the displayed unit
@@ -83,9 +84,12 @@ function monthEndTicks(startISO: string, endISO: string): string[] {
     const iso = toISO(new Date(y, m + 1, 0));
     if (iso >= startISO && iso <= endISO) all.push({ iso, monthIndex: y * 12 + m });
   }
-  const step = MONTH_STEP_CANDIDATES.find((k) => all.filter((t) => (t.monthIndex + 1) % k === 0).length <= MAX_X_TICKS)
+  // Thinning counts back from the last month, so the axis's final month end is always a tick.
+  const lastIndex = all.length ? all[all.length - 1].monthIndex : 0;
+  const keep = (t: { monthIndex: number }, k: number) => (lastIndex - t.monthIndex) % k === 0;
+  const step = MONTH_STEP_CANDIDATES.find((k) => all.filter((t) => keep(t, k)).length <= MAX_X_TICKS)
     ?? MONTH_STEP_CANDIDATES[MONTH_STEP_CANDIDATES.length - 1];
-  return all.filter((t) => (t.monthIndex + 1) % step === 0).map((t) => t.iso);
+  return all.filter((t) => keep(t, step)).map((t) => t.iso);
 }
 
 function formatXTickLabel(iso: string): string {
@@ -244,15 +248,12 @@ export function WeightTracker() {
   const lastPointISO = chartPoints[chartPoints.length - 1]?.centerISO;
   const lastOffset = chartPoints.length ? diffDays(lastPointISO, chartBaseISO) : 0;
 
-  // Always extend to show the projection, no matter how far out it lands — a distant
-  // target shouldn't make its own marker disappear.
-  const targetReachDate = targetProjection.kind === 'projected' ? targetProjection.date : null;
-  const extendChart = targetReachDate != null;
-  const projectedOffset = extendChart && targetReachDate && chartBaseISO ? diffDays(targetReachDate, chartBaseISO) : null;
-  // The vertical marker line shows the user's own deadline (target.byDate), not the projected
-  // reach date — those are two different things and conflating them was confusing.
-  const deadlineOffset = target?.byDate && chartBaseISO ? diffDays(target.byDate, chartBaseISO) : null;
-  const domainEndOffset = Math.max(lastOffset, projectedOffset ?? 0, deadlineOffset ?? 0, 1);
+  // The x-axis always runs to the end of the current month (its last tick), whatever range is
+  // selected; it isn't stretched to the target or projected date.
+  const today_ = fromISO(todayISO());
+  const currentMonthEndISO = toISO(new Date(today_.getFullYear(), today_.getMonth() + 1, 0));
+  const axisEndISO = lastPointISO && lastPointISO > currentMonthEndISO ? lastPointISO : currentMonthEndISO;
+  const domainEndOffset = Math.max(chartBaseISO ? diffDays(axisEndISO, chartBaseISO) : 0, lastOffset, 1);
 
   const dataRightX = plotWidth - PLOT_RIGHT_PAD;
 
@@ -311,9 +312,6 @@ export function WeightTracker() {
     y: yForKg(pointKgValues[i]),
   }));
 
-  const targetDateTickX = deadlineOffset != null ? xForOffset(deadlineOffset) : null;
-  const targetDateLabel = target?.byDate ? formatXTickLabel(target.byDate) : null;
-
   // Marker per point — the max/min averages and the latest period get a bigger colored dot.
   const pointMarkers = chartPoints.map((p, i) => {
     const { x, y } = linePoints[i];
@@ -365,18 +363,12 @@ export function WeightTracker() {
 
   // ── X-axis: a uniform day step chosen from the visible span keeps ticks regular,
   // equidistant, and readable at any timeframe.
-  const axisEndCandidates = [lastPointISO, targetReachDate, target?.byDate].filter((d): d is string => !!d);
-  const axisEndISO = axisEndCandidates.reduce((a, b) => (b > a ? b : a), lastPointISO);
   // Ticks mark month ends only (see monthEndTicks).
   const xTicks: string[] = chartBaseISO && axisEndISO ? monthEndTicks(chartBaseISO, axisEndISO) : [];
   const xLabelRotation = 45;
-  // With the labels slanted at 45°, two labels closer than this horizontally run into each other.
-  const X_LABEL_MIN_SEP = 16;
-  // The target-date label wins any clash: tick labels too close to it are left out.
   const xTickPositions = xTicks.map((iso) => {
     const x = xForOffset(diffDays(iso, chartBaseISO));
-    const hidden = targetDateTickX != null && targetDateLabel != null && Math.abs(x - targetDateTickX) < X_LABEL_MIN_SEP;
-    return { iso, x, label: hidden ? null : formatXTickLabel(iso) };
+    return { iso, x, label: formatXTickLabel(iso) };
   });
 
   // ── List: one box per period, newest first; entries inside newest first too.
@@ -414,15 +406,6 @@ export function WeightTracker() {
           <LabeledBox
             label={`${TARGET_ICON} Target`}
             style={styles.card}
-            right={target && weeklyRateKg != null ? (
-              <View style={styles.statusBadgeBase}>
-                <View style={[styles.statusBadge, { backgroundColor: `${onTrack ? colors.success : colors.danger}22` }]}>
-                  <Text style={[styles.statusBadgeText, { color: onTrack ? colors.success : colors.danger }]}>
-                    {onTrack ? 'On track' : 'Off track'}
-                  </Text>
-                </View>
-              </View>
-            ) : undefined}
           >
             <Pressable onPress={() => setTargetModalOpen(true)} style={styles.targetBody}>
               {!target ? (
@@ -445,6 +428,13 @@ export function WeightTracker() {
                     <Text style={styles.targetValue}>
                       {formatValue(targetKg!, displayUnit)}<Text style={styles.targetUnit}> {displayUnit}</Text>
                     </Text>
+                    {weeklyRateKg != null && (
+                      <View style={[styles.statusBadge, styles.targetStatus, { backgroundColor: `${onTrack ? colors.success : colors.danger}22` }]}>
+                        <Text style={[styles.statusBadgeText, { color: onTrack ? colors.success : colors.danger }]}>
+                          {onTrack ? 'On track' : 'Off track'}
+                        </Text>
+                      </View>
+                    )}
                     {currentKg != null && (
                       <Text style={styles.targetToGo}>
                         {Math.abs(currentKg - targetKg!) < 0.05 ? 'reached' : `${fromKg(Math.abs(currentKg - targetKg!), displayUnit).toFixed(1)} ${displayUnit} to go`}
@@ -459,22 +449,6 @@ export function WeightTracker() {
           <LabeledBox
             label={`${CHART_ICON} Evolution`}
             style={styles.card}
-            right={
-                <View style={styles.modeToggle}>
-                  {PERIOD_MODES.map((m) => {
-                    const active = m.mode === mode;
-                    return (
-                      <Pressable
-                        key={m.mode}
-                        onPress={() => changeMode(m.mode)}
-                        style={[styles.modeOption, active && styles.modeOptionActive]}
-                      >
-                        <Text style={[styles.modeOptionText, active && styles.modeOptionTextActive]}>{m.label}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-            }
           >
             <Text style={styles.chartSubtitle}>
               {chartSubtitle} · {chartPoints.length} {chartPoints.length === 1 ? periodNoun : `${periodNoun}s`} · {filteredAscending.length} {filteredAscending.length === 1 ? 'entry' : 'entries'}
@@ -548,13 +522,6 @@ export function WeightTracker() {
                       />
                     )))}
 
-                    {targetDateTickX != null && (
-                      <Line
-                        x1={targetDateTickX} y1={PLOT_Y_PAD} x2={targetDateTickX} y2={baselineY}
-                        stroke={TARGET_COLOR} strokeWidth={0.75} strokeOpacity={REF_OPACITY} strokeDasharray="4,4"
-                      />
-                    )}
-
                     {linePoints.length > 1 && (
                       <Polyline
                         points={linePoints.map((p) => `${p.x},${p.y}`).join(' ')}
@@ -572,14 +539,6 @@ export function WeightTracker() {
                       </Fragment>
                     ))}
 
-
-
-                    {extendChart && projectedOffset != null && targetKg != null && (
-                      <SvgText x={xForOffset(projectedOffset)} y={yForKg(targetKg) + 4} fontSize={11} textAnchor="middle">
-                        {TARGET_ICON}
-                      </SvgText>
-                    )}
-
                     {xTickPositions.map(({ iso, x, label }) => (
                       <Fragment key={iso}>
                         <Line x1={x} y1={baselineY} x2={x} y2={baselineY + 5} stroke={colors.border} strokeWidth={1} />
@@ -596,22 +555,26 @@ export function WeightTracker() {
                       </Fragment>
                     ))}
 
-                    {targetDateTickX != null && targetDateLabel != null && (
-                      <SvgText
-                        x={targetDateTickX}
-                        y={baselineY + 16}
-                        fontSize={10}
-                        fontWeight="700"
-                        fill={TARGET_COLOR}
-                        textAnchor={xLabelRotation > 0 ? 'end' : 'middle'}
-                        transform={xLabelRotation > 0 ? `rotate(${-xLabelRotation} ${targetDateTickX} ${baselineY + 16})` : undefined}
-                      >
-                        {targetDateLabel}
-                      </SvgText>
-                    )}
                   </Svg>
                 </>
               )}
+            </View>
+
+            <View style={styles.modeToggleRow}>
+              <View style={styles.modeToggle}>
+                {PERIOD_MODES.map((m) => {
+                  const active = m.mode === mode;
+                  return (
+                    <Pressable
+                      key={m.mode}
+                      onPress={() => changeMode(m.mode)}
+                      style={[styles.modeOption, active && styles.modeOptionActive]}
+                    >
+                      <Text style={[styles.modeOptionText, active && styles.modeOptionTextActive]}>{m.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
             </View>
           </LabeledBox>
 
@@ -724,11 +687,12 @@ const styles = StyleSheet.create({
   targetHint: { flex: 1, color: colors.textDim, fontSize: font.sm, lineHeight: 18 },
   targetProgress: { flex: 1 },
   targetValueCol: { alignItems: 'flex-end' },
-  targetValue: { color: TARGET_COLOR, fontSize: 28, fontWeight: '800' },
+  // Value and "to go" take equal height above and below the status badge, so the badge sits at
+  // the column's centre, level with the progress bar's track (also centred in its column).
+  targetValue: { color: TARGET_COLOR, fontSize: 28, lineHeight: 34, fontWeight: '800' },
   targetUnit: { fontSize: font.md, fontWeight: '600', color: colors.textMuted },
-  targetToGo: { color: colors.textMuted, fontSize: font.sm },
-  // Opaque base so the box border doesn't show through the badge's translucent tint.
-  statusBadgeBase: { backgroundColor: colors.surface, borderRadius: 4 },
+  targetToGo: { color: colors.textMuted, fontSize: font.sm, lineHeight: 18, marginBottom: 16 },
+  targetStatus: { marginVertical: 3 },
   statusBadge: { paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: 4 },
   statusBadgeText: { fontSize: 11, lineHeight: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
   rangeRow: { flexDirection: 'row', gap: spacing.xs },
@@ -747,11 +711,13 @@ const styles = StyleSheet.create({
   rangeChipTextActive: { color: '#fff' },
   rangeChipIcon: { flex: 0.7 },
   chartSubtitle: { color: colors.textDim, fontSize: font.sm },
-  legendRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: spacing.md },
+  // Pushed down (and the badge band pulled into the SVG's empty top padding by the same amount)
+  // so legend + badges sit centred between the range chips and the top of the plot.
+  legendRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: spacing.md, marginTop: LEGEND_SHIFT },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   legendText: { color: colors.textMuted, fontSize: font.sm },
-  chartBody: { height: BADGE_BAND + TOTAL_SVG_HEIGHT },
-  badgeBand: { height: BADGE_BAND, flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-start', gap: spacing.sm },
+  chartBody: { height: BADGE_BAND - LEGEND_SHIFT + TOTAL_SVG_HEIGHT },
+  badgeBand: { height: BADGE_BAND, marginBottom: -LEGEND_SHIFT, zIndex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-start', gap: spacing.sm },
   // Same look as the app's other status badges: tinted background, coloured bold text, no border.
   valueBadge: {
     minWidth: BADGE_WIDTH,
@@ -762,6 +728,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   valueBadgeText: { fontSize: 11, lineHeight: 13, fontWeight: '700', letterSpacing: 0.5 },
+  modeToggleRow: { alignItems: 'center' },
   modeToggle: {
     flexDirection: 'row',
     borderRadius: radius.sm,

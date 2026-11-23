@@ -122,36 +122,11 @@ export function setupHabitNotifications(): Promise<boolean> {
  * Bring scheduled notifications in line with the plan, and clear presented ones that no
  * longer apply: a handled session's, or a Due one whose session has turned Overdue.
  */
-export async function syncHabitNotifications(habits: Habit[], entries: HabitLogEntry[], today: string, now: Date) {
+async function syncOnce(habits: Habit[], entries: HabitLogEntry[], today: string, now: Date) {
   const plan = planHabitNotifications(habits, entries, today, now);
   const wanted = new Map(plan.map((p) => [p.id, p]));
 
   const open = openSessions(habits, entries, today, now);
-
-  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
-  const have = new Map<string, number>();
-  for (const req of scheduled) {
-    const d = habitData(req);
-    if (!d) continue;
-    const want = wanted.get(req.identifier);
-    const same = want && want.at === d.at && want.content.title === req.content.title && want.content.body === req.content.body;
-    if (same) { have.set(req.identifier, d.at); continue; }
-    // One that is about to fire for a still-open session drops out of the plan only
-    // because its moment is here; let it fire.
-    const firing = d.at <= now.getTime() + 10_000 && open.has(`${d.habitId}|${d.slotKey}`);
-    if (!firing) await Notifications.cancelScheduledNotificationAsync(req.identifier);
-  }
-  const posted = await loadPosted(today);
-  for (const p of plan) {
-    // Scheduled with the OS: it fires on its own, so catch-up must never post it again.
-    posted[p.id] = (p.content.data as HabitNotificationData).date;
-    if (have.has(p.id)) continue;
-    await Notifications.scheduleNotificationAsync({
-      identifier: p.id,
-      content: p.content,
-      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: p.at, channelId: CHANNEL },
-    });
-  }
 
   const presented = await Notifications.getPresentedNotificationsAsync();
   const shown = new Set<string>();
@@ -160,14 +135,60 @@ export async function syncHabitNotifications(habits: Habit[], entries: HabitLogE
     if (!d) continue;
     const slot = open.get(`${d.habitId}|${d.slotKey}`);
     if (!slot || (d.phase === 'due' && slot.status === 'overdue')) {
-      await Notifications.dismissNotificationAsync(n.request.identifier);
+      await Notifications.dismissNotificationAsync(n.request.identifier).catch(() => {});
     } else {
       shown.add(n.request.identifier);
     }
   }
 
-  await catchUp(habits, open, shown, posted, today);
-  await AsyncStorage.setItem(POSTED_KEY, JSON.stringify(posted));
+  try {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    const have = new Map<string, number>();
+    for (const req of scheduled) {
+      const d = habitData(req);
+      if (!d) continue;
+      const want = wanted.get(req.identifier);
+      const same = want && want.at === d.at && want.content.title === req.content.title && want.content.body === req.content.body;
+      if (same) { have.set(req.identifier, d.at); continue; }
+      // One that is about to fire for a still-open session drops out of the plan only
+      // because its moment is here; let it fire.
+      const firing = d.at <= now.getTime() + 10_000 && open.has(`${d.habitId}|${d.slotKey}`);
+      if (!firing) await Notifications.cancelScheduledNotificationAsync(req.identifier);
+    }
+    const posted = await loadPosted(today);
+    for (const p of plan) {
+      // Scheduled with the OS: it fires on its own, so catch-up must never post it again.
+      posted[p.id] = (p.content.data as HabitNotificationData).date;
+      if (have.has(p.id)) continue;
+      await Notifications.scheduleNotificationAsync({
+        identifier: p.id,
+        content: p.content,
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: p.at, channelId: CHANNEL },
+      });
+    }
+
+    await catchUp(habits, open, shown, posted, today);
+    await AsyncStorage.setItem(POSTED_KEY, JSON.stringify(posted));
+  } catch (e) {
+    console.warn('Habit notifications scheduling failed', e);
+  }
+}
+
+let syncing: Promise<void> | undefined;
+let nextSync: (() => Promise<void>) | undefined;
+
+/** Runs one sync at a time; while one runs, only the latest request is kept and runs next. */
+export function syncHabitNotifications(habits: Habit[], entries: HabitLogEntry[], today: string, now: Date): Promise<void> {
+  nextSync = () => syncOnce(habits, entries, today, now);
+  syncing ??= (async () => {
+    while (nextSync) {
+      const run = nextSync;
+      nextSync = undefined;
+      await run().catch((e) => console.warn('Habit notifications sync failed', e));
+    }
+    syncing = undefined;
+  })();
+  return syncing;
 }
 
 /**

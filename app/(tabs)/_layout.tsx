@@ -6,10 +6,17 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Application from 'expo-application';
 import { useAuth } from '../../src/context/AuthContext';
 import { colors, font, spacing, radius } from '../../src/theme';
 import BugReportPickerSheet from '../../src/components/BugReportPickerSheet';
 import { useBottomBarStore } from '../../src/store/bottomBarStore';
+
+/** Dev build (or Metro dev session) shows the dev app icon in the top bar, like the launcher icon. */
+const IS_DEV_BUILD = __DEV__ || (Application.applicationId ?? '').endsWith('.dev');
+const BRAND_LOGO = IS_DEV_BUILD
+  ? require('../../assets/icon-dev.png')
+  : require('../../assets/logo.png');
 
 type IconName = React.ComponentProps<typeof MaterialIcons>['name'];
 
@@ -17,7 +24,7 @@ type Tab = { name: string; title: string; icon: IconName };
 
 const HOME_TAB: Tab = { name: 'home', title: 'Home', icon: 'home' };
 
-/** Screens in the center selector. Home has its own button on the left of the bottom bar. */
+/** Screens in the center selector. Home has its own icon button in the center of the top bar. */
 const TABS: Tab[] = [
   { name: 'pillars',   title: 'Pillars',   icon: 'account-balance' },
   { name: 'projects',  title: 'Projects',  icon: 'flag' },
@@ -49,6 +56,7 @@ export default function TabsLayout() {
   const barAction = useBottomBarStore((s) => s.action);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [bugSheetOpen, setBugSheetOpen] = useState(false);
+  const [selectorX, setSelectorX] = useState(0);
 
   const isActive = (t: Tab) => pathname === `/${t.name}` || pathname.startsWith(`/${t.name}/`);
   const activeTab = TABS.find(isActive);
@@ -66,9 +74,21 @@ export default function TabsLayout() {
       <View style={styles.navBar}>
         {/* Left: logo + name, opens the About screen */}
         <TouchableOpacity style={styles.brand} onPress={() => router.push('/about')} activeOpacity={0.7}>
-          <Image source={require('../../assets/logo.png')} style={styles.logo} />
+          <Image source={BRAND_LOGO} style={styles.logo} />
           <Text style={styles.brandName}>Uptic</Text>
         </TouchableOpacity>
+
+        {/* Center: Home, icon only, circled when active */}
+        <View style={styles.homeCenter} pointerEvents="box-none">
+          <TouchableOpacity
+            style={[styles.homeBtn, homeActive && styles.homeBtnActive]}
+            onPress={() => navigate(HOME_TAB)}
+            activeOpacity={0.7}
+            accessibilityLabel="Home"
+          >
+            <MaterialIcons name="home" size={24} color={homeActive ? colors.accent : colors.textMuted} />
+          </TouchableOpacity>
+        </View>
 
         {/* Right: notifications + bug report + settings + profile */}
         <View style={styles.rightButtons}>
@@ -95,29 +115,30 @@ export default function TabsLayout() {
         <Slot />
       </View>
 
-      {/* Bottom bar: Home on the left, screen selector in the center, screen action on the right */}
+      {/* Bottom bar: screen selector in the center, screen action on the right */}
       {!keyboardVisible && (
         <View style={[styles.bottomBar, { height: bottomBarHeight, paddingBottom: insets.bottom }]}>
-          <View style={styles.barSide}>
-            <TouchableOpacity style={styles.homeBtn} onPress={() => navigate(HOME_TAB)} activeOpacity={0.7}>
-              <MaterialIcons name="home" size={24} color={homeActive ? colors.accent : colors.textMuted} />
-              {homeActive && <Text style={styles.homeLabel}>Home</Text>}
+          {/* Center: screen selector, absolutely centered so the right-side action can't push it off */}
+          <View style={[styles.selectorCenter, { bottom: insets.bottom }]} pointerEvents="box-none">
+            <TouchableOpacity
+              style={styles.selector}
+              onPress={() => setDropdownOpen((v) => !v)}
+              onLayout={(e) => setSelectorX(e.nativeEvent.layout.x)}
+              activeOpacity={0.7}
+            >
+              {activeTab ? (
+                <>
+                  <MaterialIcons name={activeTab.icon} size={22} color={colors.accent} />
+                  <Text style={styles.activeLabel}>{activeTab.title}</Text>
+                </>
+              ) : (
+                <>
+                  <MaterialIcons name="apps" size={22} color={colors.textMuted} />
+                  <Text style={styles.selectorPlaceholder}>Go to</Text>
+                </>
+              )}
             </TouchableOpacity>
           </View>
-
-          <TouchableOpacity style={styles.selector} onPress={() => setDropdownOpen((v) => !v)} activeOpacity={0.7}>
-            {activeTab ? (
-              <>
-                <MaterialIcons name={activeTab.icon} size={22} color={colors.accent} />
-                <Text style={styles.activeLabel}>{activeTab.title}</Text>
-              </>
-            ) : (
-              <>
-                <MaterialIcons name="apps" size={22} color={colors.textMuted} />
-                <Text style={styles.selectorPlaceholder}>Go to</Text>
-              </>
-            )}
-          </TouchableOpacity>
 
           <View style={[styles.barSide, styles.barSideRight]}>
             {barAction && (
@@ -130,12 +151,12 @@ export default function TabsLayout() {
         </View>
       )}
 
-      {/* Screen menu, opens upward from the selector */}
+      {/* Screen menu, opens upward from the selector with its icons and labels lined up under the selector's */}
       {dropdownOpen && !keyboardVisible && (
         <TouchableWithoutFeedback onPress={() => setDropdownOpen(false)}>
           <View style={[styles.overlay, { bottom: bottomBarHeight }]}>
             <TouchableWithoutFeedback>
-              <View style={styles.dropdown}>
+              <View style={[styles.dropdown, { marginLeft: selectorX - 1 }]}>
                 {TABS.filter((t) => t.name !== activeTab?.name).map((tab, i, list) => (
                   <TouchableOpacity
                     key={tab.name}
@@ -143,7 +164,7 @@ export default function TabsLayout() {
                     onPress={() => navigate(tab)}
                     activeOpacity={0.7}
                   >
-                    <MaterialIcons name={tab.icon} size={20} color={colors.textMuted} />
+                    <MaterialIcons name={tab.icon} size={22} color={colors.textMuted} />
                     <Text style={styles.dropdownItemText}>{tab.title}</Text>
                   </TouchableOpacity>
                 ))}
@@ -227,6 +248,15 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
+  selectorCenter: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   barSide: {
     flex: 1,
     flexDirection: 'row',
@@ -235,29 +265,38 @@ const styles = StyleSheet.create({
   barSideRight: {
     justifyContent: 'flex-end',
   },
-  homeBtn: {
-    flexDirection: 'row',
+  homeCenter: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
     alignItems: 'center',
-    gap: spacing.xs,
-    paddingVertical: spacing.sm,
-    paddingRight: spacing.sm,
+    justifyContent: 'center',
   },
-  homeLabel: {
-    color: colors.accent,
-    fontSize: font.lg,
-    fontWeight: '700',
+  homeBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** Same look as the Badge pills: accent at ~13% opacity, no border. */
+  homeBtnActive: {
+    backgroundColor: `${colors.accent}22`,
   },
   selector: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
     paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.lg,
   },
+  // Selector label and menu options share one text style (size + weight).
   activeLabel: {
     color: colors.accent,
     fontSize: font.lg,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   selectorPlaceholder: {
     color: colors.textMuted,
@@ -285,7 +324,7 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 100,
     justifyContent: 'flex-end',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     paddingBottom: spacing.sm,
   },
   dropdown: {
@@ -293,7 +332,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    minWidth: 180,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.3,
@@ -301,10 +339,11 @@ const styles = StyleSheet.create({
     elevation: 8,
     overflow: 'hidden',
   },
+  // Same icon size, gap and horizontal padding as the selector, so the columns line up.
   dropdownItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
+    gap: spacing.xs,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     borderBottomWidth: 1,
@@ -315,6 +354,7 @@ const styles = StyleSheet.create({
   },
   dropdownItemText: {
     color: colors.text,
-    fontSize: font.md,
+    fontSize: font.lg,
+    fontWeight: '600',
   },
 });

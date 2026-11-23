@@ -12,6 +12,7 @@ import type { Project } from '../../src/types/projects';
 import { Button } from '../../src/components/ui/Button';
 import { DragHandle } from '../../src/components/ui/DragHandle';
 import { PillarOptionsSheet } from '../../src/components/pillars/PillarOptionsSheet';
+import { useBottomBarAction } from '../../src/store/bottomBarStore';
 import { colors, spacing, font, radius } from '../../src/theme';
 
 function projectSummary(projects: Project[]): string {
@@ -29,6 +30,7 @@ export default function PillarsScreen() {
   const { projects } = useProjects(user?.uid);
   const [showArchived, setShowArchived] = useState(false);
   const [menuPillar, setMenuPillar] = useState<Pillar | null>(null);
+  useBottomBarAction('Add pillar', 'add', () => router.push('/pillars/edit/new'));
 
   const active = pillars.filter((p) => !p.archivedAt);
   const archived = pillars.filter((p) => p.archivedAt);
@@ -37,6 +39,10 @@ export default function PillarsScreen() {
   // Show the dropped order immediately; Firestore's snapshot catches up a moment later.
   const [dragOrder, setDragOrder] = useState<Pillar[] | null>(null);
   useEffect(() => setDragOrder(null), [pillars]);
+  // The drag library keeps each moved row's drag offset until that row re-measures, so on
+  // drop rows briefly render at new position + old offset (a flicker). Remounting the list
+  // in the same render as the new order draws every row cleanly in place.
+  const [listKey, setListKey] = useState(0);
   const list = dragOrder ?? active;
 
   const open = (id: string) => router.push(`/pillars/${id}`);
@@ -69,21 +75,17 @@ export default function PillarsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
-      <View style={styles.header}>
-        <Text style={styles.count}>{active.length} pillar{active.length !== 1 ? 's' : ''}</Text>
-        <Pressable onPress={() => router.push('/pillars/edit/new')} style={styles.addBtn}>
-          <Text style={styles.addBtnText}>+ Add</Text>
-        </Pressable>
-      </View>
-
       <DraggableFlatList
         data={list}
         keyExtractor={(item) => item.id}
         containerStyle={styles.flex}
         contentContainerStyle={styles.list}
         activationDistance={10}
-        onDragEnd={({ data }) => {
+        key={listKey}
+        onDragEnd={({ data, from, to }) => {
+          if (from === to) return;
           setDragOrder(data);
+          setListKey((k) => k + 1);
           reorder([...data.map((p) => p.id), ...archived.map((p) => p.id)]);
         }}
         renderItem={({ item, drag, isActive }) => (
@@ -156,23 +158,6 @@ function PillarCard({
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  count: { color: colors.textMuted, fontSize: font.sm },
-  addBtn: {
-    backgroundColor: colors.accent,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderRadius: radius.sm,
-  },
-  addBtnText: { color: '#fff', fontSize: font.sm, fontWeight: '600' },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, padding: spacing.xl },
   emptyTitle: { color: colors.text, fontSize: font.lg, fontWeight: '600' },
   emptyText: { color: colors.textDim, fontSize: font.md, textAlign: 'center', lineHeight: 22 },
