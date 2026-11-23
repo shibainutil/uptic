@@ -8,8 +8,12 @@
       "developmentClient": true,
       "distribution": "internal",
       "channel": "staging",
+      "env": {
+        "APP_VARIANT": "development"
+      },
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "credentialsSource": "local"
       }
     },
     "production": {

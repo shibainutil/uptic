@@ -46,3 +46,6 @@ yarn-error.*
 /ios
 /android
 *.apk
+
+# EAS local signing credentials (dev build uses debug.keystore)
+credentials.json
