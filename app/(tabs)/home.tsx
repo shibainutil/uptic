@@ -77,9 +77,7 @@ export default function HomeScreen() {
           <Text style={styles.summaryTitle}>
             {fromISO(today).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
           </Text>
-          {loaded && counted.length > 0 && (
-            <Text style={styles.summarySub}>{doneCount} of {counted.length} done</Text>
-          )}
+          {loaded && counted.length > 0 && <ProgressDots items={counted} today={today} doneCount={doneCount} />}
         </View>
 
         {!loaded ? (
@@ -93,6 +91,40 @@ export default function HomeScreen() {
 }
 
 // ── Views ────────────────────────────────────────────────────────────────────
+
+type DotStatus = 'done' | 'skipped' | 'overdue' | 'due' | 'upcoming';
+
+// Finished ones first, so the dots fill up from the left as the day goes on.
+const DOT_ORDER: DotStatus[] = ['done', 'skipped', 'overdue', 'due', 'upcoming'];
+const DOT_COLOR: Record<DotStatus, string> = {
+  done: SUCCESS, skipped: colors.danger, overdue: OVERDUE, due: colors.accent, upcoming: UPCOMING,
+};
+
+function dotStatus(i: HomeItem, today: string): DotStatus {
+  if (i.kind === 'task') return i.done ? 'done' : i.overdue ? 'overdue' : 'due';
+  if (i.kind === 'habit') {
+    switch (i.slot.status) {
+      case 'done': return 'done';
+      case 'skipped': return 'skipped';
+      case 'overdue': return 'overdue';
+      case 'later': case 'upcoming': return 'upcoming';
+      default: return 'due';
+    }
+  }
+  if (i.status === 'completed') return 'done';
+  if (i.status === 'failed') return 'skipped';
+  return i.date < today ? 'overdue' : 'due';
+}
+
+/** One dot per item counted for today, coloured like the Habits screen's status groups. */
+function ProgressDots({ items, today, doneCount }: { items: HomeItem[]; today: string; doneCount: number }) {
+  const dots = items.map((i) => dotStatus(i, today)).sort((a, b) => DOT_ORDER.indexOf(a) - DOT_ORDER.indexOf(b));
+  return (
+    <View style={styles.dots} accessible accessibilityLabel={`${doneCount} of ${items.length} done`}>
+      {dots.map((d, n) => <View key={n} style={[styles.dot, { backgroundColor: DOT_COLOR[d] }]} />)}
+    </View>
+  );
+}
 
 function isOverdue(i: HomeItem, today: string): boolean {
   if (i.kind === 'task') return i.overdue;
@@ -271,7 +303,8 @@ const styles = StyleSheet.create({
   body: { padding: spacing.lg, gap: spacing.lg },
   summary: { gap: 2 },
   summaryTitle: { color: colors.text, fontSize: font.lg, fontWeight: '700' },
-  summarySub: { color: colors.textMuted, fontSize: font.sm },
+  dots: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 4 },
+  dot: { width: 10, height: 10, borderRadius: 5 },
   empty: { color: colors.textDim, fontSize: font.md, textAlign: 'center', paddingVertical: spacing.xl },
   section: { gap: spacing.sm },
   sectionHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
