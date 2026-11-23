@@ -404,49 +404,6 @@ export function WeightTracker() {
       ) : (
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <LabeledBox
-            label={`${TARGET_ICON} Target`}
-            style={styles.card}
-          >
-            <Pressable onPress={() => setTargetModalOpen(true)} style={styles.targetBody}>
-              {!target ? (
-                <View style={styles.targetEmpty}>
-                  <MaterialIcons name="add-circle-outline" size={18} color={colors.accent} />
-                  <Text style={styles.targetHint}>Set a target weight to see when you'll reach it.</Text>
-                </View>
-              ) : (
-                <>
-                  <View style={styles.targetProgress}>
-                    <TargetProgress
-                      today={todayISO()}
-                      goalDate={target.byDate}
-                      projection={targetProjection}
-                      onTrack={onTrack}
-                      goalColor={TARGET_COLOR}
-                    />
-                  </View>
-                  <View style={styles.targetValueCol}>
-                    <Text style={styles.targetValue}>
-                      {formatValue(targetKg!, displayUnit)}<Text style={styles.targetUnit}> {displayUnit}</Text>
-                    </Text>
-                    {weeklyRateKg != null && (
-                      <View style={[styles.statusBadge, styles.targetStatus, { backgroundColor: `${onTrack ? colors.success : colors.danger}22` }]}>
-                        <Text style={[styles.statusBadgeText, { color: onTrack ? colors.success : colors.danger }]}>
-                          {onTrack ? 'On track' : 'Off track'}
-                        </Text>
-                      </View>
-                    )}
-                    {currentKg != null && (
-                      <Text style={styles.targetToGo}>
-                        {Math.abs(currentKg - targetKg!) < 0.05 ? 'reached' : `${fromKg(Math.abs(currentKg - targetKg!), displayUnit).toFixed(1)} ${displayUnit} to go`}
-                      </Text>
-                    )}
-                  </View>
-                </>
-              )}
-            </Pressable>
-          </LabeledBox>
-
-          <LabeledBox
             label={`${CHART_ICON} Evolution`}
             style={styles.card}
           >
@@ -578,6 +535,49 @@ export function WeightTracker() {
             </View>
           </LabeledBox>
 
+          <LabeledBox
+            label={`${TARGET_ICON} Target`}
+            style={styles.card}
+          >
+            <Pressable onPress={() => setTargetModalOpen(true)} style={styles.targetBody}>
+              {!target ? (
+                <View style={styles.targetEmpty}>
+                  <MaterialIcons name="add-circle-outline" size={18} color={colors.accent} />
+                  <Text style={styles.targetHint}>Set a target weight to see when you'll reach it.</Text>
+                </View>
+              ) : (
+                <>
+                  <View style={styles.targetProgress}>
+                    <TargetProgress
+                      today={todayISO()}
+                      goalDate={target.byDate}
+                      projection={targetProjection}
+                      onTrack={onTrack}
+                      goalColor={TARGET_COLOR}
+                    />
+                  </View>
+                  <View style={styles.targetValueCol}>
+                    <Text style={styles.targetValue}>
+                      {formatValue(targetKg!, displayUnit)}<Text style={styles.targetUnit}> {displayUnit}</Text>
+                    </Text>
+                    {weeklyRateKg != null && (
+                      <View style={[styles.statusBadge, styles.targetStatus, { backgroundColor: `${onTrack ? colors.success : colors.danger}22` }]}>
+                        <Text style={[styles.statusBadgeText, { color: onTrack ? colors.success : colors.danger }]}>
+                          {onTrack ? 'On track' : 'Off track'}
+                        </Text>
+                      </View>
+                    )}
+                    {currentKg != null && (
+                      <Text style={styles.targetToGo}>
+                        {Math.abs(currentKg - targetKg!) < 0.05 ? 'reached' : `${fromKg(Math.abs(currentKg - targetKg!), displayUnit).toFixed(1)} ${displayUnit} to go`}
+                      </Text>
+                    )}
+                  </View>
+                </>
+              )}
+            </Pressable>
+          </LabeledBox>
+
           <View style={styles.list}>
             {listPeriods.map(({ period, label, delta, items }) => {
               const isOpen = expanded.has(period.key);
@@ -686,13 +686,15 @@ const styles = StyleSheet.create({
   targetEmpty: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   targetHint: { flex: 1, color: colors.textDim, fontSize: font.sm, lineHeight: 18 },
   targetProgress: { flex: 1 },
-  targetValueCol: { alignItems: 'flex-end' },
+  // The negative vertical margin cancels the spacer under "to go" for layout, so the row is only
+  // as tall as the progress bar while the badge stays centred on it.
+  targetValueCol: { alignItems: 'flex-end', marginVertical: -14 },
   // Value and "to go" take equal height above and below the status badge, so the badge sits at
   // the column's centre, level with the progress bar's track (also centred in its column).
-  targetValue: { color: TARGET_COLOR, fontSize: 28, lineHeight: 34, fontWeight: '800' },
+  targetValue: { color: TARGET_COLOR, fontSize: 28, lineHeight: 30, fontWeight: '800' },
   targetUnit: { fontSize: font.md, fontWeight: '600', color: colors.textMuted },
-  targetToGo: { color: colors.textMuted, fontSize: font.sm, lineHeight: 18, marginBottom: 16 },
-  targetStatus: { marginVertical: 3 },
+  targetToGo: { color: colors.textMuted, fontSize: font.sm, lineHeight: 16, marginBottom: 14 },
+  targetStatus: { marginVertical: 2 },
   statusBadge: { paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: 4 },
   statusBadgeText: { fontSize: 11, lineHeight: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
   rangeRow: { flexDirection: 'row', gap: spacing.xs },

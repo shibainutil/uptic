@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Application from 'expo-application';
 import { addDays, fromISO } from './schedule';
 import { DUE_WINDOW_MIN, sessionSlots, type SessionSlot } from './habitSchedule';
 import { isHabitComplete, totalSessions, type Habit, type HabitLogEntry } from '../types/habits';
@@ -142,20 +143,43 @@ async function syncOnce(habits: Habit[], entries: HabitLogEntry[], today: string
   }
 
   try {
-    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    let scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    // Alarms scheduled by an older native build (e.g. before exact alarms were allowed) are
+    // kept as they are by the matching below, so re-create all of them once per build.
+    const version = `${Application.nativeApplicationVersion}|${Application.nativeBuildVersion}|exact1`;
+    const rescheduleAll = (await AsyncStorage.getItem(SCHEDULE_VERSION_KEY)) !== version;
+    if (rescheduleAll) {
+      for (const req of scheduled) {
+        if (habitData(req)) await Notifications.cancelScheduledNotificationAsync(req.identifier);
+      }
+      scheduled = [];
+    }
+    // On Android a force-stop (swiping the app away on Xiaomi/HyperOS, battery cleanup)
+    // wipes the OS alarms but not expo's list of scheduled requests, so "already scheduled"
+    // can't be trusted: re-arm everything whenever the app starts or comes back.
+    const rearm = rearmNext || rescheduleAll;
+    rearmNext = false;
+    const posted = await loadPosted(today);
     const have = new Map<string, number>();
     for (const req of scheduled) {
       const d = habitData(req);
       if (!d) continue;
+      // Still listed well after its moment: its alarm never fired (it was wiped). Drop it
+      // and let catch-up post the session's notification now.
+      if (d.at < now.getTime() - MISSED_AFTER_MS) {
+        delete posted[req.identifier];
+        await Notifications.cancelScheduledNotificationAsync(req.identifier).catch(() => {});
+        continue;
+      }
       const want = wanted.get(req.identifier);
       const same = want && want.at === d.at && want.content.title === req.content.title && want.content.body === req.content.body;
-      if (same) { have.set(req.identifier, d.at); continue; }
+      if (same && !rearm) { have.set(req.identifier, d.at); continue; }
+      if (same) continue; // re-armed below under the same id
       // One that is about to fire for a still-open session drops out of the plan only
       // because its moment is here; let it fire.
       const firing = d.at <= now.getTime() + 10_000 && open.has(`${d.habitId}|${d.slotKey}`);
       if (!firing) await Notifications.cancelScheduledNotificationAsync(req.identifier);
     }
-    const posted = await loadPosted(today);
     for (const p of plan) {
       // Scheduled with the OS: it fires on its own, so catch-up must never post it again.
       posted[p.id] = (p.content.data as HabitNotificationData).date;
@@ -169,9 +193,18 @@ async function syncOnce(habits: Habit[], entries: HabitLogEntry[], today: string
 
     await catchUp(habits, open, shown, posted, today);
     await AsyncStorage.setItem(POSTED_KEY, JSON.stringify(posted));
+    if (rescheduleAll) await AsyncStorage.setItem(SCHEDULE_VERSION_KEY, version);
   } catch (e) {
     console.warn('Habit notifications scheduling failed', e);
   }
+}
+
+const MISSED_AFTER_MS = 2 * 60_000;
+let rearmNext = true; // first sync of every app process
+
+/** Re-create every OS alarm on the next sync (call when the app comes to the foreground). */
+export function rearmHabitNotifications() {
+  rearmNext = true;
 }
 
 let syncing: Promise<void> | undefined;
@@ -249,6 +282,7 @@ export async function showHabitNotification(n: SessionNotification) {
 }
 
 const POSTED_KEY = 'habitNotifications.posted';
+const SCHEDULE_VERSION_KEY = 'habitNotifications.scheduleVersion';
 
 /**
  * Sessions that are already Due or Overdue (today's and yesterday's) but whose

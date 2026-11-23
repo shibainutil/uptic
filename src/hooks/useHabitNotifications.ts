@@ -7,7 +7,7 @@ import { sessionSlots } from '../lib/habitSchedule';
 import { todayISO } from '../lib/schedule';
 import { habitSlotActions } from '../lib/habitSlotActions';
 import {
-  ACTION_DONE, ACTION_SKIP, habitData, notificationsSupported, replaceDueWith,
+  ACTION_DONE, ACTION_SKIP, habitData, notificationsSupported, rearmHabitNotifications, replaceDueWith,
   setupHabitNotifications, syncHabitNotifications,
 } from '../lib/habitNotifications';
 import { useNow } from './useNow';
@@ -44,7 +44,7 @@ export function useHabitNotifications(userId: string | null | undefined) {
 
   // Coming back to the app: re-check right away instead of waiting for the next minute.
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') setActive((n) => n + 1); });
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') { rearmHabitNotifications(); setActive((n) => n + 1); } });
     return () => sub.remove();
   }, []);
 

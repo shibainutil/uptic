@@ -32,6 +32,8 @@ const TABS: Tab[] = [
   { name: 'fitness',   title: 'Fitness',   icon: 'fitness-center' },
   { name: 'habits',    title: 'Habits',    icon: 'track-changes' },
   { name: 'nutrition', title: 'Nutrition', icon: 'restaurant' },
+  { name: 'steps',     title: 'Steps',     icon: 'directions-walk' },
+  { name: 'water',     title: 'Water',     icon: 'local-drink' },
 ];
 
 /** Hides the bottom bar while the keyboard is up, so it doesn't sit on top of the keyboard. */
@@ -98,7 +100,7 @@ export default function TabsLayout() {
           <TouchableOpacity style={styles.iconBtn} onPress={() => setBugSheetOpen(true)} activeOpacity={0.7}>
             <MaterialIcons name="bug-report" size={24} color={colors.textMuted} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.iconBtn} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/settings')} activeOpacity={0.7}>
             <MaterialIcons name="settings" size={24} color={colors.textMuted} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.profileBtn} activeOpacity={0.7}>
