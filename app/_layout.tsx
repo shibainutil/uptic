@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from '../src/context/AuthContext';
 import { colors, themeMode } from '../src/theme';
 import { useDevReconnect } from '../src/lib/devReconnect';
 import { useHabitNotifications } from '../src/hooks/useHabitNotifications';
+import { useMigrateWeightToHabit } from '../src/hooks/useMigrateWeightToHabit';
 import { useWeightHealthSync } from '../src/hooks/useWeightHealthSync';
 import { useWatchStepsSync } from '../src/hooks/useWatchStepsSync';
 import { MetricLogHost } from '../src/components/habits/MetricLogHost';
@@ -41,6 +42,7 @@ function RootNavigator() {
   const segments = useSegments();
   useDevReconnect(!loading && !!user);
   useHabitNotifications(user?.uid);
+  useMigrateWeightToHabit(user?.uid);
   useWeightHealthSync(user?.uid);
   useWatchStepsSync(user?.uid);
 

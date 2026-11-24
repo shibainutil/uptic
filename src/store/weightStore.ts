@@ -1,89 +1,99 @@
-import {
-  collection, doc, onSnapshot, setDoc, deleteDoc,
-} from 'firebase/firestore';
-import { useEffect, useState, useCallback } from 'react';
+import { doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { useMemo, useCallback } from 'react';
 import { db } from '../firebase';
-import type { WeightEntry, WeightTarget, WeightUnit } from '../types/weight';
+import { useHabits, useHabitLogEntries, HABITS_COL, ENTRIES_COL } from './habitStore';
+import {
+  WEIGHT_METRIC_ID, weightEntryId, weightMetricOf, weighInLoggedAt, toWeightEntry,
+} from '../lib/weightHabit';
+import { toKg, fromKg, type WeightEntry, type WeightTarget, type WeightUnit } from '../types/weight';
+import type { Habit, MetricDef } from '../types/habits';
 
-function userCol(uid: string, col: string) {
-  return collection(db, 'users', uid, col);
-}
-
-function userDoc(uid: string, col: string, id: string) {
-  return doc(db, 'users', uid, col, id);
-}
-
-function targetDoc(uid: string) {
-  return doc(db, 'users', uid, 'settings', 'weightTarget');
-}
+// Weight is a habit with one metric (see lib/weightHabit). These hooks keep the old
+// Weight-tab interface on top of it, so the tab and the Health Connect sync are unchanged.
 
 function stripUndefined(obj: object): Record<string, unknown> {
   return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
 }
 
+function useWeightHabit(userId: string | null | undefined) {
+  const { habits, loaded, update } = useHabits(userId);
+  const habit = habits.find((h) => h.system === 'weight');
+  return { habit, habitsLoaded: loaded, updateHabit: update };
+}
+
+/** Replaces the weight metric (not the whole array) on the habit. */
+function withWeightMetric(habit: Habit, patch: (m: MetricDef) => MetricDef): MetricDef[] {
+  return (habit.metrics ?? []).map((m) => (m.id === WEIGHT_METRIC_ID ? patch(m) : m));
+}
+
 export function useWeightEntries(userId: string | null | undefined) {
-  const [entries, setEntries] = useState<WeightEntry[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const { habit, habitsLoaded, updateHabit } = useWeightHabit(userId);
+  const { entries: all, loaded: entriesLoaded } = useHabitLogEntries(userId);
+  const metric = habit ? weightMetricOf(habit) : undefined;
 
-  useEffect(() => {
-    if (!userId) {
-      setEntries([]);
-      setLoaded(false);
-      return;
-    }
-    setLoaded(false);
-    const unsub = onSnapshot(userCol(userId, 'weightEntries'), (snap) => {
-      setEntries(snap.docs.map((d) => d.data() as WeightEntry));
-      setLoaded(true);
-    });
-    return unsub;
-  }, [userId]);
+  const raw = useMemo(
+    () => (habit ? all.filter((e) => e.habitId === habit.id && e.values?.[WEIGHT_METRIC_ID] != null) : []),
+    [all, habit],
+  );
+  const entries: WeightEntry[] = useMemo(
+    () => (metric ? raw.map((e) => toWeightEntry(metric, e)) : []),
+    [raw, metric],
+  );
 
-  // The date is the doc id, so logging again for a day that already has an
-  // entry overwrites it instead of creating a duplicate.
+  // One entry per day: logging a day that already has an entry replaces its value.
   const upsert = useCallback(async (data: Omit<WeightEntry, 'id' | 'createdAt'>) => {
-    const existing = entries.find((e) => e.date === data.date);
-    const docData: WeightEntry = {
-      ...data,
-      id: data.date,
-      createdAt: existing?.createdAt ?? new Date().toISOString(),
-    };
-    await setDoc(userDoc(userId!, 'weightEntries', data.date), stripUndefined(docData));
+    if (!userId || !habit || !metric) throw new Error('The Weight habit is still being set up — try again in a moment.');
+    const stored = toKg(data.value, data.unit);
+    // The unit last used is how weight is shown from now on.
+    if (metric.unit !== data.unit) {
+      await updateHabit(habit.id, { metrics: withWeightMetric(habit, (m) => ({ ...m, unit: data.unit })) });
+    }
+    const existing = raw.find((e) => toWeightEntry(metric, e).date === data.date);
+    const now = new Date();
+    const docData = existing
+      ? { ...existing, values: { ...existing.values, [WEIGHT_METRIC_ID]: stored }, notes: data.note }
+      : {
+          id: weightEntryId(data.date), habitId: habit.id, count: 1,
+          loggedAt: weighInLoggedAt(data.date, now),
+          values: { [WEIGHT_METRIC_ID]: stored }, notes: data.note, createdAt: now.toISOString(),
+        };
+    await setDoc(doc(db, 'users', userId, ENTRIES_COL, docData.id), stripUndefined(docData));
     return data.date;
-  }, [userId, entries]);
+  }, [userId, habit, metric, raw, updateHabit]);
 
   const remove = useCallback(async (id: string) => {
-    await deleteDoc(userDoc(userId!, 'weightEntries', id));
+    await deleteDoc(doc(db, 'users', userId!, ENTRIES_COL, id));
   }, [userId]);
 
-  return { entries, loaded, upsert, remove };
+  return { entries, loaded: habitsLoaded && entriesLoaded, upsert, remove };
 }
 
 export function useWeightTarget(userId: string | null | undefined) {
-  const [target, setTarget] = useState<WeightTarget | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const { habit, habitsLoaded } = useWeightHabit(userId);
+  const metric = habit ? weightMetricOf(habit) : undefined;
+  const unit: WeightUnit = metric?.unit === 'lbs' ? 'lbs' : 'kg';
 
-  useEffect(() => {
-    if (!userId) {
-      setTarget(null);
-      setLoaded(false);
-      return;
-    }
-    setLoaded(false);
-    const unsub = onSnapshot(targetDoc(userId), (snap) => {
-      setTarget(snap.exists() ? (snap.data() as WeightTarget) : null);
-      setLoaded(true);
+  const target: WeightTarget | null = useMemo(() => {
+    if (!metric?.target) return null;
+    return stripUndefined({
+      value: Math.round(fromKg(metric.target.value, unit) * 100) / 100, unit, byDate: metric.target.byDate,
+    }) as unknown as WeightTarget;
+  }, [metric, unit]);
+
+  const setTarget = useCallback(async (next: MetricDef['target'] | undefined) => {
+    if (!habit) throw new Error('The Weight habit is still being set up — try again in a moment.');
+    const metrics = withWeightMetric(habit, (m) => {
+      const { target: _old, ...rest } = m;
+      return next ? { ...rest, target: next } : rest;
     });
-    return unsub;
-  }, [userId]);
+    await updateDoc(doc(db, 'users', userId!, HABITS_COL, habit.id), { metrics });
+  }, [userId, habit]);
 
-  const save = useCallback(async (value: number, unit: WeightUnit, byDate?: string) => {
-    await setDoc(targetDoc(userId!), stripUndefined({ value, unit, byDate }));
-  }, [userId]);
+  const save = useCallback(async (value: number, targetUnit: WeightUnit, byDate?: string) => {
+    await setTarget(stripUndefined({ value: toKg(value, targetUnit), byDate }) as MetricDef['target']);
+  }, [setTarget]);
 
-  const clear = useCallback(async () => {
-    await deleteDoc(targetDoc(userId!));
-  }, [userId]);
+  const clear = useCallback(() => setTarget(undefined), [setTarget]);
 
-  return { target, loaded, save, clear };
+  return { target, loaded: habitsLoaded, save, clear };
 }

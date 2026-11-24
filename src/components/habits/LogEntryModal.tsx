@@ -7,7 +7,7 @@ import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 import { colors, spacing, font, radius } from '../../theme';
 import { toISO, fromISO } from '../../lib/schedule';
-import { hasMetrics, parseMetricInput, type Habit, type HabitLogEntry } from '../../types/habits';
+import { hasMetrics, parseMetricInput, toDisplayValue, toStoredValue, type Habit, type HabitLogEntry } from '../../types/habits';
 
 const MAX_COUNT = 50;
 
@@ -40,7 +40,7 @@ export function LogEntryModal({ visible, entry, habit, initialLoggedAt, onSave, 
   const [inputs, setInputs] = useState<Record<string, string>>(() =>
     Object.fromEntries(metrics.map((m) => {
       const v = entry?.values?.[m.id];
-      return [m.id, v != null ? String(v) : ''];
+      return [m.id, v != null ? String(Math.round(toDisplayValue(m, v) * 100) / 100) : ''];
     })));
 
   function save() {
@@ -49,7 +49,7 @@ export function LogEntryModal({ visible, entry, habit, initialLoggedAt, onSave, 
       values = {};
       for (const m of metrics) {
         const v = parseMetricInput(inputs[m.id] ?? '');
-        if (v != null) values[m.id] = v;
+        if (v != null) values[m.id] = toStoredValue(m, v);
       }
       // A metric habit session is only worth logging with at least one number.
       if (Object.keys(values).length === 0) return;

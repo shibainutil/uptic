@@ -19,8 +19,8 @@ import type { Habit, HabitLogEntry, HabitPause } from '../types/habits';
 // Firestore collection names predate the Cleaning -> Habits rename and were kept
 // as-is to avoid a risky data migration; they're an internal implementation
 // detail invisible to the user.
-const HABITS_COL = 'cleaningTasks';
-const ENTRIES_COL = 'cleaningLogEntries';
+export const HABITS_COL = 'cleaningTasks';
+export const ENTRIES_COL = 'cleaningLogEntries';
 
 function uid() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);

@@ -316,6 +316,7 @@ function HabitForm({ existing, forMilestone = false }: { existing?: Habit; forMi
                 <Input
                   value={m.unit ?? ''} onChangeText={(t) => patchMetric(m.id, { unit: t })}
                   placeholder="Unit" autoCapitalize="none" style={styles.metricUnit}
+                  editable={!m.quantity}
                 />
                 <Pressable onPress={() => setMetrics((cur) => cur.filter((x) => x.id !== m.id))} hitSlop={8} style={styles.removeTimeBtn}>
                   <Text style={styles.removeTimeBtnText}>✕</Text>

@@ -41,6 +41,13 @@ export interface MetricDef {
   decimals?: number;             // digits shown when displaying a value (default 1)
   /** Which way is "good": colours deltas green/red. 'neutral' = no judgement. */
   direction?: 'down' | 'up' | 'neutral';
+  /**
+   * 'weight': values are stored in kg whatever `unit` ('kg' | 'lbs') says; `unit` is only
+   * how they are shown and typed. Keeps every entry comparable if the user changes unit.
+   */
+  quantity?: 'weight';
+  /** Goal for this metric, in the same stored unit as the values. */
+  target?: { value: number; byDate?: string };
 }
 
 export interface Habit {
@@ -77,6 +84,9 @@ export interface Habit {
    * Default false — fixed-schedule habits (physio Mon/Wed/Fri) should leave this off.
    */
   flexibleSchedule?: boolean;
+
+  /** Set on the habit the app created itself (the Weight tab reads and writes it). */
+  system?: 'weight';
 
   /** Numbers recorded with each session. Absent/empty = a plain done-or-skipped habit. */
   metrics?: MetricDef[];
@@ -143,9 +153,21 @@ export function hasMetrics(habit: Pick<Habit, 'metrics'> | undefined): boolean {
   return (habit?.metrics?.length ?? 0) > 0;
 }
 
-/** "72.4 kg" — a metric value formatted with its decimals and unit. */
-export function formatMetricValue(metric: MetricDef, value: number): string {
-  const text = value.toFixed(metric.decimals ?? 1);
+const LBS_PER_KG = 2.2046226218;
+
+/** A stored metric value as the user sees and types it (kg → lbs for weight shown in lbs). */
+export function toDisplayValue(metric: MetricDef, stored: number): number {
+  return metric.quantity === 'weight' && metric.unit === 'lbs' ? stored * LBS_PER_KG : stored;
+}
+
+/** What the user typed, converted to the stored unit. */
+export function toStoredValue(metric: MetricDef, shown: number): number {
+  return metric.quantity === 'weight' && metric.unit === 'lbs' ? shown / LBS_PER_KG : shown;
+}
+
+/** "72.4 kg" — a stored metric value formatted for display with its decimals and unit. */
+export function formatMetricValue(metric: MetricDef, stored: number): string {
+  const text = toDisplayValue(metric, stored).toFixed(metric.decimals ?? 1);
   return metric.unit ? `${text} ${metric.unit}` : text;
 }
 
