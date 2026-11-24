@@ -1,0 +1,25 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+  <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+  <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
+  <application>
+    <!-- An alarm went off: show that habit notification. Runs in its own short-lived process:
+         HyperOS freezes an idle app process and holds back ("caches") alarms aimed at it,
+         so this process ends itself after each notification and every alarm starts fresh. -->
+    <receiver
+      android:name="expo.modules.habitalarms.HabitAlarmReceiver"
+      android:exported="false"
+      android:process=":habitalarms" />
+    <!-- Skip / Done pressed on a notification. -->
+    <receiver android:name="expo.modules.habitalarms.HabitActionReceiver" android:exported="false" />
+    <!-- Alarms don't survive a reboot or an app update: set them again. -->
+    <receiver android:name="expo.modules.habitalarms.HabitBootReceiver" android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+      </intent-filter>
+    </receiver>
+  </application>
+</manifest>

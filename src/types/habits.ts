@@ -19,6 +19,14 @@ export interface HabitPause {
   until?: string;
 }
 
+/** A schedule that applied on dates `from`..`until` (inclusive), due dates counted from `anchor`. */
+export interface HabitScheduleEra {
+  schedule: HabitSchedule;
+  anchor: string;
+  from: string;
+  until: string;
+}
+
 export type HabitKind = 'continuous' | 'limited';
 
 /**
@@ -72,6 +80,22 @@ export interface Habit {
 
   /** Numbers recorded with each session. Absent/empty = a plain done-or-skipped habit. */
   metrics?: MetricDef[];
+
+  /**
+   * Grid anchor of the current `schedule` (e.g. "every 4 days" counts from here).
+   * Unset = `startDate`. When the schedule is edited after the habit started, this is
+   * the last done or skipped session, so the new frequency continues from it.
+   */
+  scheduleAnchor?: string;
+
+  /** First date the current `schedule` applies to. Unset = `scheduleAnchor`. */
+  scheduleFrom?: string;
+
+  /**
+   * Schedules the habit had before the current one, oldest first. Only their done or
+   * skipped sessions are kept on the list; unhandled ones disappear once replaced.
+   */
+  pastSchedules?: HabitScheduleEra[];
 
   /** Pauses, past (kept as history), current and scheduled; never overlapping. */
   pauses?: HabitPause[];

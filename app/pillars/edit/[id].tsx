@@ -175,7 +175,7 @@ const styles = StyleSheet.create({
   },
   swatches: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   swatch: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  swatchActive: { borderWidth: 2, borderColor: '#fff' },
+  swatchActive: { borderWidth: 2, borderColor: colors.text },
   icons: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   iconOption: {
     width: 44, height: 44, borderRadius: radius.sm,

@@ -4,6 +4,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider, useAuth } from '../src/context/AuthContext';
+import { colors, themeMode } from '../src/theme';
 import { useDevReconnect } from '../src/lib/devReconnect';
 import { useHabitNotifications } from '../src/hooks/useHabitNotifications';
 import { useWeightHealthSync } from '../src/hooks/useWeightHealthSync';
@@ -54,7 +55,7 @@ function RootNavigator() {
   }, [user, loading, segments]);
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="fitness/exercise/[id]" options={{ presentation: 'card' }} />
@@ -78,7 +79,7 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={styles.fill}>
       <AuthProvider>
-        <StatusBar style="light" />
+        <StatusBar style={themeMode === 'dark' ? 'light' : 'dark'} />
         <RootNavigator />
         <MetricLogHost />
       </AuthProvider>
@@ -87,5 +88,5 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  fill: { flex: 1 },
+  fill: { flex: 1, backgroundColor: colors.bg },
 });

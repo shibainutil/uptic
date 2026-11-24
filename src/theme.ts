@@ -1,4 +1,6 @@
-export const colors = {
+export type ThemeMode = 'dark' | 'light';
+
+const dark = {
   bg: '#121212',
   surface: '#1E1E1E',
   surface2: '#2A2A2A',
@@ -12,6 +14,35 @@ export const colors = {
   dangerDim: 'rgba(239,68,68,0.15)',
   success: '#22C55E',
 };
+
+const light: typeof dark = {
+  bg: '#F2F3F5',
+  surface: '#FFFFFF',
+  surface2: '#E9EBEF',
+  border: '#D9DCE1',
+  text: '#16181D',
+  textMuted: '#5F6670',
+  textDim: '#A0A6AE',
+  accent: '#3B82F6',
+  accentDark: '#2563EB',
+  danger: '#EF4444',
+  dangerDim: 'rgba(239,68,68,0.12)',
+  success: '#22C55E',
+};
+
+/**
+ * The active palette. Styles all over the app read it inside module-level
+ * StyleSheet.create, so it is filled once at startup (index.ts → ThemeGate, before any
+ * screen module loads) and a mode switch reloads the JS bundle instead of re-rendering.
+ */
+export const colors = { ...dark };
+
+export let themeMode: ThemeMode = 'dark';
+
+export function applyThemeMode(mode: ThemeMode) {
+  themeMode = mode;
+  Object.assign(colors, mode === 'light' ? light : dark);
+}
 
 export const spacing = {
   xs: 4,
