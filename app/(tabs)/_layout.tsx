@@ -8,7 +8,8 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Application from 'expo-application';
 import { useAuth } from '../../src/context/AuthContext';
-import { colors, font, spacing, radius } from '../../src/theme';
+import { colors, font, spacing, radius, themeMode } from '../../src/theme';
+import { toggleThemeMode } from '../../src/themeMode';
 import BugReportPickerSheet from '../../src/components/BugReportPickerSheet';
 import { useBottomBarStore } from '../../src/store/bottomBarStore';
 
@@ -92,8 +93,16 @@ export default function TabsLayout() {
           </TouchableOpacity>
         </View>
 
-        {/* Right: notifications + bug report + settings + profile */}
+        {/* Right: dark/light + notifications + bug report + settings + profile */}
         <View style={styles.rightButtons}>
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() => { toggleThemeMode(); }}
+            activeOpacity={0.7}
+            accessibilityLabel={themeMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            <MaterialIcons name={themeMode === 'dark' ? 'light-mode' : 'dark-mode'} size={24} color={colors.textMuted} />
+          </TouchableOpacity>
           <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/notifications')} activeOpacity={0.7}>
             <MaterialIcons name="notifications-none" size={24} color={colors.textMuted} />
           </TouchableOpacity>

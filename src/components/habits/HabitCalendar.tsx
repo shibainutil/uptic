@@ -3,7 +3,7 @@ import { View, Text, Pressable, StyleSheet, PixelRatio } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { toISO } from '../../lib/schedule';
 import type { SessionSlot, SlotStatus } from '../../lib/habitSchedule';
-import { colors, font, spacing, radius } from '../../theme';
+import { colors, font, spacing, radius, themeMode } from '../../theme';
 
 const DAY_LABELS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
 const MONTH_NAMES = [
@@ -22,11 +22,11 @@ const DOT_COLOR: Record<SlotStatus, string> = {
   paused: '#EAB308',
 };
 
-// Paused-day fills, pre-blended over colors.surface (#1E1E1E) at 18 % / 9 % yellow. They
-// are opaque on purpose: semi-transparent fills on neighbouring cells showed thin lines
-// where rows met (edges blending twice or leaving a sub-pixel gap).
-const PAUSED_FILL = '#43391A';
-const PAUSED_FILL_OUT = '#302B1C';
+// Paused-day fills, pre-blended over colors.surface (#1E1E1E dark / #FFFFFF light) at
+// 18 % / 9 % yellow. They are opaque on purpose: semi-transparent fills on neighbouring
+// cells showed thin lines where rows met (edges blending twice or leaving a sub-pixel gap).
+const PAUSED_FILL = themeMode === 'light' ? '#FBF1D3' : '#43391A';
+const PAUSED_FILL_OUT = themeMode === 'light' ? '#FDF8E9' : '#302B1C';
 
 interface Cell { date: Date; inMonth: boolean }
 
