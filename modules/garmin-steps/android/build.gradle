@@ -1,0 +1,22 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.uptic.garminsteps'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.garminsteps"
+  defaultConfig {
+    versionCode 1
+    versionName '1.0.0'
+  }
+}
+
+dependencies {
+  // Garmin's Connect IQ companion SDK: receives messages from the Uptic Steps watch app.
+  implementation "com.garmin.connectiq:ciq-companion-app-sdk:2.4.0@aar"
+  // Same version react-native-health-connect uses.
+  implementation "androidx.health.connect:connect-client:1.1.0"
+}

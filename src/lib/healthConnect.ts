@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { AppState, Platform, TurboModuleRegistry } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { toKg, type WeightEntry } from '../types/weight';
+import { rewriteWatchDaysToHealth } from './garminSteps';
 
 /**
  * Android Health Connect: the phone's shared health store. Garmin Connect writes
@@ -37,6 +38,10 @@ const PERMISSIONS = [
   { accessType: 'read', recordType: 'Distance' },
   { accessType: 'read', recordType: 'ActiveCaloriesBurned' },
   { accessType: 'write', recordType: 'Weight' },
+  // Steps from the watch itself (modules/garmin-steps writes these natively).
+  { accessType: 'write', recordType: 'Steps' },
+  { accessType: 'write', recordType: 'Distance' },
+  { accessType: 'write', recordType: 'TotalCaloriesBurned' },
 ] as const;
 
 export type HealthStatus =
@@ -74,6 +79,8 @@ export async function connectHealth(): Promise<HealthStatus> {
   const m = await ensureInit();
   if (!m) return getHealthStatus();
   await m.requestPermission(PERMISSIONS as any);
+  // Newly allowed to write steps: send everything the watch has stored so far.
+  await rewriteWatchDaysToHealth().catch(() => {});
   return getHealthStatus();
 }
 
@@ -166,20 +173,22 @@ export async function readActivity(days: number): Promise<DayActivity[]> {
 
 // ── Writing weight ─────────────────────────────────────────────────────────
 
-/** True when Uptic may write weight to Health Connect. */
-export async function canWriteWeight(): Promise<boolean> {
+/** True when Uptic may write this record type to Health Connect. */
+export async function canWrite(recordType: 'Weight' | 'Steps'): Promise<boolean> {
   const m = await ensureInit().catch(() => null);
   if (!m) return false;
   const granted = await m.getGrantedPermissions();
-  return granted.some((p: any) => p.recordType === 'Weight' && p.accessType === 'write');
+  return granted.some((p: any) => p.recordType === recordType && p.accessType === 'write');
 }
 
-/** Whether weight writing is allowed, re-checked when the app comes back to the foreground. */
-export function useWeightWriteAllowed() {
+export const canWriteWeight = () => canWrite('Weight');
+
+/** Whether Uptic may write a record type, re-checked when the app comes back to the foreground. */
+export function useWriteAllowed(recordType: 'Weight' | 'Steps') {
   const [allowed, setAllowed] = useState<boolean | null>(null);
   const refresh = useCallback(() => {
-    canWriteWeight().then(setAllowed).catch(() => setAllowed(false));
-  }, []);
+    canWrite(recordType).then(setAllowed).catch(() => setAllowed(false));
+  }, [recordType]);
   useEffect(() => {
     refresh();
     const sub = AppState.addEventListener('change', (s) => { if (s === 'active') refresh(); });
@@ -191,6 +200,8 @@ export function useWeightWriteAllowed() {
   }, [refresh]);
   return { allowed, allow };
 }
+
+export const useWeightWriteAllowed = () => useWriteAllowed('Weight');
 
 const weightRecordId = (date: string) => `uptic-weight-${date}`;
 const syncedKey = (uid: string) => `healthConnect.weightSynced.${uid}`;

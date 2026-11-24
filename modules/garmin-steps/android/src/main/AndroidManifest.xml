@@ -1,0 +1,18 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- Written from the watch's own step counter. The Garmin SDK merges in the <queries>
+       entry for Garmin Connect. -->
+  <uses-permission android:name="android.permission.health.WRITE_STEPS" />
+  <uses-permission android:name="android.permission.health.WRITE_DISTANCE" />
+  <uses-permission android:name="android.permission.health.WRITE_TOTAL_CALORIES_BURNED" />
+
+  <application>
+    <!-- Watch messages from Garmin Connect, also while Uptic is closed. -->
+    <receiver
+      android:name="expo.modules.garminsteps.GarminMessageReceiver"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="com.garmin.android.connectiq.INCOMING_MESSAGE" />
+      </intent-filter>
+    </receiver>
+  </application>
+</manifest>

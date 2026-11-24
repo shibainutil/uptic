@@ -5,6 +5,9 @@ import { ProgressRing } from '../../src/components/ui/ProgressRing';
 import { ActionBtn } from '../../src/components/habits/ActionBtn';
 import { colors, spacing, font, radius } from '../../src/theme';
 import { readActivity, useHealthStatus, type DayActivity } from '../../src/lib/healthConnect';
+import { useAuth } from '../../src/context/AuthContext';
+import { useStepDays } from '../../src/store/stepsStore';
+import { localDate } from '../../src/store/waterStore';
 
 const STEP_GOAL = 10000;
 const DAYS = 7;
@@ -16,11 +19,28 @@ function dayLabel(date: string, i: number) {
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-/** Steps from the Garmin watch, read from Health Connect. */
+/** The last DAYS local dates, newest first. */
+function lastDates(): string[] {
+  const d = new Date();
+  return Array.from({ length: DAYS }, (_, i) => {
+    const x = new Date(d.getFullYear(), d.getMonth(), d.getDate() - i);
+    return localDate(x);
+  });
+}
+
+/**
+ * Steps from the Garmin watch. Prefers what the Uptic Steps watch app sends from the
+ * watch's own counter (stored in Firestore); falls back to Health Connect, where Garmin
+ * Connect exports them, when the watch app hasn't sent anything.
+ */
 export default function StepsScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const { status, connect } = useHealthStatus();
-  const [days, setDays] = useState<DayActivity[] | null>(null);
+  const dates = lastDates();
+  const { days: watchDays } = useStepDays(user?.uid, dates[dates.length - 1]);
+  const fromWatch = watchDays.length > 0;
+  const [hcDays, setDays] = useState<DayActivity[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
@@ -35,15 +55,22 @@ export default function StepsScreen() {
   // time the tab is opened and whenever the app comes back to the foreground (this also
   // moves "Today" on after midnight).
   useFocusEffect(useCallback(() => {
-    if (status !== 'connected') return;
+    if (status !== 'connected' || fromWatch) return;
     load();
     const sub = AppState.addEventListener('change', (s) => { if (s === 'active') load(); });
     return () => sub.remove();
-  }, [status, load]));
+  }, [status, load, fromWatch]));
 
-  if (status === null) return <View style={styles.container} />;
+  const days: DayActivity[] | null = fromWatch
+    ? dates.map((date) => {
+      const w = watchDays.find((d) => d.date === date);
+      return { date, steps: w?.steps ?? 0, distanceKm: (w?.metres ?? 0) / 1000, activeKcal: w?.kcal ?? 0 };
+    })
+    : hcDays;
 
-  if (status !== 'connected') {
+  if (!fromWatch && status === null) return <View style={styles.container} />;
+
+  if (!fromWatch && status !== 'connected') {
     return (
       <View style={styles.empty}>
         <Text style={styles.emptyIcon}>👟</Text>
@@ -82,7 +109,7 @@ export default function StepsScreen() {
         <Text style={styles.goal}>of {STEP_GOAL.toLocaleString()} steps today</Text>
         <View style={styles.stats}>
           <Stat label="Distance" value={today ? `${today.distanceKm.toFixed(2)} km` : '—'} />
-          <Stat label="Active calories" value={today ? `${Math.round(today.activeKcal)} kcal` : '—'} />
+          <Stat label={fromWatch ? 'Calories' : 'Active calories'} value={today ? `${Math.round(today.activeKcal)} kcal` : '—'} />
         </View>
       </View>
 
@@ -103,7 +130,11 @@ export default function StepsScreen() {
           </View>
         ))}
       </View>
-      <Text style={styles.hint}>Pull down to refresh. New steps show up after your watch syncs with Garmin Connect.</Text>
+      <Text style={styles.hint}>
+        {fromWatch
+          ? 'Straight from your watch, updated every 5 minutes by the Uptic Steps watch app.'
+          : 'Pull down to refresh. New steps show up after your watch syncs with Garmin Connect.'}
+      </Text>
     </ScrollView>
   );
 }

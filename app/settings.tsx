@@ -5,7 +5,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { ActionBtn } from '../src/components/habits/ActionBtn';
 import { colors, spacing, font, radius } from '../src/theme';
-import { useHealthStatus, useWeightWriteAllowed, openHealthSettings, healthConnectSupported, type HealthStatus } from '../src/lib/healthConnect';
+import { useHealthStatus, useWeightWriteAllowed, useWriteAllowed, openHealthSettings, healthConnectSupported, type HealthStatus } from '../src/lib/healthConnect';
+import { watchStepsSupported, watchStatus } from '../src/lib/garminSteps';
 import { scaleSupported, useScaleReading } from '../src/lib/scaleReader';
 
 type MIName = React.ComponentProps<typeof MaterialIcons>['name'];
@@ -82,6 +83,7 @@ function GarminCard() {
       {status === 'unsupported' && (
         <Text style={styles.note}>This version of the app was built without Health Connect. Install the latest build.</Text>
       )}
+      <WatchAppStatus />
     </DeviceCard>
   );
 }
@@ -125,6 +127,34 @@ function ScaleCard() {
         <Text style={styles.note}>This version of the app was built without the scale reader. Install the latest build.</Text>
       )}
     </DeviceCard>
+  );
+}
+
+/** The Uptic Steps watch app: when it last sent steps, and saving them to Health Connect. */
+function WatchAppStatus() {
+  const { allowed, allow } = useWriteAllowed('Steps');
+  if (!watchStepsSupported) return null;
+  const s = watchStatus();
+  const last = s?.lastAt ? new Date(s.lastAt) : null;
+  const when = last
+    ? `${last.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} ${last.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
+    : null;
+  return (
+    <>
+      <Text style={styles.note}>
+        {when
+          ? `Uptic Steps watch app: last data ${when}.`
+          : s?.ready
+            ? 'Uptic Steps watch app: no data yet. Open the app on the watch once to start it.'
+            : `Uptic Steps watch app: can't reach Garmin Connect${s?.error ? ` (${s.error})` : ''}.`}
+      </Text>
+      {healthConnectSupported() && allowed === false && (
+        <View style={styles.actions}>
+          <ActionBtn label="Save steps to Health Connect" icon="favorite" scheme="blue" onPress={allow} />
+        </View>
+      )}
+      {allowed && <Text style={styles.note}>Watch steps are also saved to Health Connect.</Text>}
+    </>
   );
 }
 
