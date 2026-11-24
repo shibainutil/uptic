@@ -21,6 +21,20 @@ export interface HabitPause {
 
 export type HabitKind = 'continuous' | 'limited';
 
+/**
+ * A number a habit records with every session (weight, resting heart rate, minutes…).
+ * Values live on the log entry under `values[metric.id]`; the `id` is stable across
+ * renames so existing entries and charts keep pointing at the right metric.
+ */
+export interface MetricDef {
+  id: string;
+  name: string;
+  unit?: string;                 // display only, e.g. "kg", "bpm"
+  decimals?: number;             // digits shown when displaying a value (default 1)
+  /** Which way is "good": colours deltas green/red. 'neutral' = no judgement. */
+  direction?: 'down' | 'up' | 'neutral';
+}
+
 export interface Habit {
   id: string;
   name: string;
@@ -56,6 +70,9 @@ export interface Habit {
    */
   flexibleSchedule?: boolean;
 
+  /** Numbers recorded with each session. Absent/empty = a plain done-or-skipped habit. */
+  metrics?: MetricDef[];
+
   /** Pauses, past (kept as history), current and scheduled; never overlapping. */
   pauses?: HabitPause[];
 
@@ -74,6 +91,7 @@ export interface HabitLogEntry {
   habitId: string;
   loggedAt: string;              // ISO datetime — when the session actually happened
   count?: number;                // sessions this single entry represents (default 1); e.g. logging 6 at once
+  values?: Record<string, number>; // metric id -> recorded value (only for habits with `metrics`)
   notes?: string;
   createdAt: string;
 }
@@ -95,4 +113,20 @@ export function isHabitComplete(habit: Habit, completedCount: number, todayISO: 
   if (habit.targetSessions != null) return completedCount >= habit.targetSessions;
   if (habit.targetDate != null) return todayISO > habit.targetDate;
   return false;
+}
+
+export function hasMetrics(habit: Pick<Habit, 'metrics'> | undefined): boolean {
+  return (habit?.metrics?.length ?? 0) > 0;
+}
+
+/** "72.4 kg" — a metric value formatted with its decimals and unit. */
+export function formatMetricValue(metric: MetricDef, value: number): string {
+  const text = value.toFixed(metric.decimals ?? 1);
+  return metric.unit ? `${text} ${metric.unit}` : text;
+}
+
+/** Parses user input like "72,4" (comma or dot decimal); null when empty or not a number. */
+export function parseMetricInput(text: string): number | null {
+  const n = Number(text.trim().replace(',', '.'));
+  return text.trim() === '' || !Number.isFinite(n) ? null : n;
 }

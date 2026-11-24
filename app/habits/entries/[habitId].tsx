@@ -11,7 +11,7 @@ import { PauseHabitModal } from '../../../src/components/habits/PauseHabitModal'
 import {
   describeSchedule, isPaused, pauseCovering, sessionSlots, withPause, withoutCurrentPause, type SessionSlot,
 } from '../../../src/lib/habitSchedule';
-import { totalSessions, type HabitPause } from '../../../src/types/habits';
+import { totalSessions, formatMetricValue, type HabitPause } from '../../../src/types/habits';
 import { ProgressBar, slotsRate } from '../../../src/components/habits/ProgressBar';
 import { fromISO, todayISO } from '../../../src/lib/schedule';
 import { habitSlotActions } from '../../../src/lib/habitSlotActions';
@@ -66,6 +66,17 @@ export default function HabitEntriesScreen() {
     ? Math.min(totalSessions(entries.filter((e) => e.habitId === habit.id)) / habit.targetSessions, 1)
     : slotsRate(slots, today);
 
+  // Recorded numbers per filled slot, e.g. "Weight 72.4 kg".
+  const valueText = (slot: SessionSlot): string | undefined => {
+    const entry = slot.entryId ? entries.find((e) => e.id === slot.entryId) : undefined;
+    if (!entry?.values || !habit?.metrics) return undefined;
+    const parts = habit.metrics.flatMap((m) => {
+      const v = entry.values![m.id];
+      return v == null ? [] : [`${m.name} ${formatMetricValue(m, v)}`];
+    });
+    return parts.length ? parts.join(' · ') : undefined;
+  };
+
   const overdueSlots = slots.filter((s) => s.status === 'overdue');
   const dueSlots = slots.filter((s) => s.status === 'today');
   const laterSlots = slots.filter((s) => s.status === 'later');
@@ -103,8 +114,8 @@ export default function HabitEntriesScreen() {
   const skip = (slot: SessionSlot, value: boolean) => slotActions.skip(habitId!, slot, value);
   const undoDone = (slot: SessionSlot) => slotActions.undoDone(habitId!, slot);
 
-  function saveEntry(loggedAt: string, notes: string, count: number) {
-    Promise.resolve(add({ habitId: habitId!, loggedAt, notes: notes || undefined, count })).catch(errorAlert);
+  function saveEntry(loggedAt: string, notes: string, count: number, values?: Record<string, number>) {
+    Promise.resolve(add({ habitId: habitId!, loggedAt, notes: notes || undefined, count, values })).catch(errorAlert);
     setModalOpen(false);
   }
 
@@ -193,7 +204,7 @@ export default function HabitEntriesScreen() {
           <>
             <Text style={styles.sectionLabel}>Overdue</Text>
             {overdueSlots.map((slot) => (
-              <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} onUndoPause={undoPause} />
+              <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} onUndoPause={undoPause} detail={valueText(slot)} />
             ))}
           </>
         )}
@@ -202,7 +213,7 @@ export default function HabitEntriesScreen() {
           <>
             <Text style={styles.sectionLabel}>Due</Text>
             {dueSlots.map((slot) => (
-              <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} onUndoPause={undoPause} />
+              <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} onUndoPause={undoPause} detail={valueText(slot)} />
             ))}
           </>
         )}
@@ -211,7 +222,7 @@ export default function HabitEntriesScreen() {
           <>
             <Text style={styles.sectionLabel}>Upcoming</Text>
             {laterSlots.map((slot) => (
-              <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} onUndoPause={undoPause} />
+              <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} onUndoPause={undoPause} detail={valueText(slot)} />
             ))}
           </>
         )}
@@ -221,7 +232,7 @@ export default function HabitEntriesScreen() {
           <>
             <Text style={styles.sectionLabel}>Complete</Text>
             {pastSlots.map((slot) => (
-              <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} onUndoPause={undoPause} />
+              <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} onUndoPause={undoPause} detail={valueText(slot)} />
             ))}
           </>
         )}
@@ -241,7 +252,7 @@ export default function HabitEntriesScreen() {
               </View>
             </Pressable>
             {futureOpen && futureSlots.map((slot) => (
-              <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} onUndoPause={undoPause} future />
+              <SlotRow key={slot.key} slot={slot} onDone={markDone} onSkip={skip} onUndo={undoDone} onUndoPause={undoPause} detail={valueText(slot)} future />
             ))}
           </>
         )}
@@ -269,6 +280,7 @@ export default function HabitEntriesScreen() {
 
       <LogEntryModal
         visible={modalOpen}
+        habit={habit}
         onSave={saveEntry}
         onClose={() => setModalOpen(false)}
       />
@@ -312,13 +324,14 @@ function slotIconName(status: SessionSlot['status'], extra?: boolean): MIName {
   return slotIcon(status);
 }
 
-function SlotRow({ slot, onDone, onSkip, onUndo, onUndoPause, future }: {
+function SlotRow({ slot, onDone, onSkip, onUndo, onUndoPause, future, detail }: {
   slot: SessionSlot;
   onDone: (slot: SessionSlot) => void;
   onSkip: (slot: SessionSlot, value: boolean) => void;
   onUndo: (slot: SessionSlot) => void;
   onUndoPause: (slot: SessionSlot) => void;
   future?: boolean;
+  detail?: string;
 }) {
   const { status } = slot;
   const tint = slotTint(status, future);
@@ -335,6 +348,7 @@ function SlotRow({ slot, onDone, onSkip, onUndo, onUndoPause, future }: {
           {formatSlotDate(slot.date)} · {slot.time}
         </Text>
         {label ? <Text style={[styles.rowStatus, { color: tint }]}>{label}</Text> : null}
+        {detail ? <Text style={styles.rowDetail}>{detail}</Text> : null}
       </View>
       {!readOnly && (
         status === 'skipped' ? (
@@ -408,6 +422,7 @@ const styles = StyleSheet.create({
   },
   rowMain: { flex: 1, gap: 2 },
   rowDate: { fontSize: font.md, fontWeight: '500' },
+  rowDetail: { color: colors.text, fontSize: font.sm, fontWeight: '600' },
   rowStatus: { fontSize: font.sm },
   emptyText: { color: colors.textDim, fontSize: font.md, textAlign: 'center', paddingTop: spacing.xl },
 });

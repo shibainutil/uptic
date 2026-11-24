@@ -8,6 +8,7 @@ import { useDevReconnect } from '../src/lib/devReconnect';
 import { useHabitNotifications } from '../src/hooks/useHabitNotifications';
 import { useWeightHealthSync } from '../src/hooks/useWeightHealthSync';
 import { useWatchStepsSync } from '../src/hooks/useWatchStepsSync';
+import { MetricLogHost } from '../src/components/habits/MetricLogHost';
 
 // react-native-draggable-flatlist's nested lists (NestableDraggableFlatList inside
 // NestableScrollContainer) call measureLayout against the animated outer ScrollView,
@@ -79,6 +80,7 @@ export default function RootLayout() {
       <AuthProvider>
         <StatusBar style="light" />
         <RootNavigator />
+        <MetricLogHost />
       </AuthProvider>
     </GestureHandlerRootView>
   );

@@ -1,6 +1,7 @@
 import { fromISO } from './schedule';
 import { endPauseFrom, type SessionSlot } from './habitSchedule';
-import type { Habit, HabitLogEntry, HabitPause } from '../types/habits';
+import { hasMetrics, type Habit, type HabitLogEntry, type HabitPause } from '../types/habits';
+import { useMetricPromptStore } from '../store/metricPromptStore';
 
 interface Deps {
   today: string;
@@ -22,11 +23,20 @@ export function habitSlotActions({ today, habits, entries, setPauses, add, updat
   const guard = (task: Promise<unknown> | unknown) => { Promise.resolve(task).catch(onError); };
 
   return {
-    /** Log the slot as done at its scheduled time (createdAt records the real wall-clock moment). */
+    /**
+     * Log the slot as done at its scheduled time (createdAt records the real wall-clock
+     * moment). A habit with metrics needs numbers first, so it opens the value prompt
+     * instead and the entry is saved from there.
+     */
     markDone(habitId: string, slot: SessionSlot) {
       const [h, m] = slot.time.split(':').map(Number);
       const at = fromISO(slot.date);
       at.setHours(h, m, 0, 0);
+      const habit = habits.find((x) => x.id === habitId);
+      if (habit && hasMetrics(habit)) {
+        useMetricPromptStore.getState().open({ habit, loggedAt: at.toISOString() });
+        return;
+      }
       guard(add({ habitId, loggedAt: at.toISOString(), count: 1 }));
     },
 
