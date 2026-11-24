@@ -14,6 +14,7 @@ import { TimePicker } from '../../../src/components/ui/TimePicker';
 import { colors, spacing, font, radius } from '../../../src/theme';
 import { todayISO, addDays } from '../../../src/lib/schedule';
 import { setPendingHabitLink } from '../../../src/lib/pendingHabitLink';
+import { scheduleChange } from '../../../src/lib/habitSchedule';
 import {
   type HabitKind, type ScheduleUnit, type HabitSchedule, type Habit,
 } from '../../../src/types/habits';
@@ -162,7 +163,12 @@ function HabitForm({ existing, forMilestone = false }: { existing?: Habit; forMi
         const newId = await add(data);
         if (forMilestone) setPendingHabitLink({ habitId: newId, startDate, targetSessions: data.targetSessions });
       } else {
-        await update(existing!.id, data);
+        // A new schedule runs from today; past done/skipped sessions stay on the old one.
+        // Moving the start date re-plans the whole habit from that date instead.
+        const scheduleFields = startDate !== existing!.startDate
+          ? { scheduleAnchor: startDate, pastSchedules: [] }
+          : scheduleChange(existing!, schedule, todayISO()) ?? {};
+        await update(existing!.id, { ...data, ...scheduleFields });
       }
       router.back();
     } catch (e: unknown) {
@@ -327,7 +333,7 @@ const styles = StyleSheet.create({
   chipText: { color: colors.textMuted, fontSize: font.sm },
   chipTextActive: { color: colors.accent },
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  toggleHint: { color: colors.textDim, fontSize: font.xs, marginTop: 2 },
+  toggleHint: { color: colors.textDim, fontSize: font.sm, marginTop: 2 },
   checkbox: {
     width: 20, height: 20, borderRadius: 4, borderWidth: 1, borderColor: colors.border,
     alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface2,

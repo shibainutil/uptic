@@ -89,6 +89,7 @@ export default function ExerciseDetailScreen() {
     pendingImageUri?: string | null,
     removeImage?: boolean,
   ) {
+    if (!exercise) return;
     const uid = user?.uid;
     if (pendingImageUri && uid) {
       const imageUri = await uploadExerciseImage(uid, exercise.id, pendingImageUri);

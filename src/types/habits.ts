@@ -19,6 +19,14 @@ export interface HabitPause {
   until?: string;
 }
 
+/** A schedule that applied on dates `from`..`until` (inclusive), due dates counted from `anchor`. */
+export interface HabitScheduleEra {
+  schedule: HabitSchedule;
+  anchor: string;
+  from: string;
+  until: string;
+}
+
 export type HabitKind = 'continuous' | 'limited';
 
 export interface Habit {
@@ -55,6 +63,19 @@ export interface Habit {
    * Default false — fixed-schedule habits (physio Mon/Wed/Fri) should leave this off.
    */
   flexibleSchedule?: boolean;
+
+  /**
+   * Date the current `schedule` took effect and its grid anchor (e.g. "every 4 days"
+   * counts from here). Unset = `startDate`. Set when the schedule is edited after the
+   * habit started, so the new frequency runs from the day of the change.
+   */
+  scheduleAnchor?: string;
+
+  /**
+   * Schedules the habit had before the current one, oldest first. Only their done or
+   * skipped sessions are kept on the list; unhandled ones disappear once replaced.
+   */
+  pastSchedules?: HabitScheduleEra[];
 
   /** Pauses, past (kept as history), current and scheduled; never overlapping. */
   pauses?: HabitPause[];
