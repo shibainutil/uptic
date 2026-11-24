@@ -1,12 +1,12 @@
-import { useMemo } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { useMemo, useState } from 'react';
+import { Alert, View, Text, TextInput, ScrollView, Pressable, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { ProgressRing } from '../../src/components/ui/ProgressRing';
 import { useAuth } from '../../src/context/AuthContext';
-import { useWaterLogs, localDate, WATER_GOAL_ML } from '../../src/store/waterStore';
+import { useWaterLogs, useWaterAmounts, localDate, WATER_GOAL_ML } from '../../src/store/waterStore';
 import { colors, spacing, font, radius } from '../../src/theme';
 
-const QUICK_ADD = [150, 250, 330, 500];
+const MAX_ML = 5000;
 const DAYS = 7;
 
 function fmtMl(ml: number) {
@@ -32,6 +32,28 @@ export default function WaterScreen() {
     });
   }, []);
   const { logs, add, remove } = useWaterLogs(user?.uid, days[DAYS - 1]);
+  const { amounts, addAmount, removeAmount } = useWaterAmounts(user?.uid);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [custom, setCustom] = useState('');
+  const customMl = Number(custom);
+  const customValid = Number.isInteger(customMl) && customMl > 0 && customMl <= MAX_ML;
+
+  const fail = (e: unknown) => Alert.alert('Error', e instanceof Error ? e.message : 'Something went wrong.');
+
+  // Logs a custom amount and keeps it in the quick-add list.
+  const addCustom = () => {
+    if (!customValid) return;
+    add(customMl).catch(fail);
+    addAmount(customMl).catch(fail);
+    setCustom('');
+    setCustomOpen(false);
+  };
+
+  const confirmRemove = (ml: number) =>
+    Alert.alert(`Remove ${fmtMl(ml)}?`, 'It will no longer be offered for quick adding.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: () => { removeAmount(ml).catch(fail); } },
+    ]);
 
   const totals = useMemo(() => {
     const t: Record<string, number> = {};
@@ -51,13 +73,51 @@ export default function WaterScreen() {
       </View>
 
       <View style={styles.quick}>
-        {QUICK_ADD.map((ml) => (
-          <Pressable key={ml} style={({ pressed }) => [styles.quickBtn, pressed && { opacity: 0.6 }]} onPress={() => add(ml)}>
+        {amounts.map((ml) => (
+          <Pressable
+            key={ml}
+            style={({ pressed }) => [styles.quickBtn, pressed && { opacity: 0.6 }]}
+            onPress={() => { add(ml).catch(fail); }}
+            onLongPress={() => confirmRemove(ml)}
+          >
             <MaterialIcons name="local-drink" size={20} color={colors.accent} />
             <Text style={styles.quickText}>+{ml}</Text>
           </Pressable>
         ))}
+        <Pressable
+          style={({ pressed }) => [styles.quickBtn, styles.customBtn, pressed && { opacity: 0.6 }]}
+          onPress={() => setCustomOpen((o) => !o)}
+        >
+          <MaterialIcons name={customOpen ? 'close' : 'add'} size={20} color={colors.textMuted} />
+          <Text style={styles.quickText}>Custom</Text>
+        </Pressable>
       </View>
+
+      {customOpen && (
+        <View style={styles.customRow}>
+          <TextInput
+            style={styles.customInput}
+            value={custom}
+            onChangeText={(t) => setCustom(t.replace(/[^0-9]/g, ''))}
+            placeholder="Amount"
+            placeholderTextColor={colors.textDim}
+            keyboardType="number-pad"
+            autoFocus
+            maxLength={4}
+            returnKeyType="done"
+            onSubmitEditing={addCustom}
+          />
+          <Text style={styles.customUnit}>ml</Text>
+          <Pressable
+            style={({ pressed }) => [styles.customAdd, !customValid && { opacity: 0.4 }, pressed && { opacity: 0.6 }]}
+            onPress={addCustom}
+            disabled={!customValid}
+          >
+            <Text style={styles.customAddText}>Add</Text>
+          </Pressable>
+        </View>
+      )}
+      <Text style={styles.hint}>A custom amount is kept for quick adding. Hold an amount to remove it.</Text>
 
       {todayLogs.length > 0 && (
         <>
@@ -102,12 +162,22 @@ const styles = StyleSheet.create({
   body: { padding: spacing.lg, gap: spacing.md },
   hero: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.md },
   goal: { color: colors.textMuted, fontSize: font.md },
-  quick: { flexDirection: 'row', gap: spacing.sm, justifyContent: 'center' },
+  quick: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, justifyContent: 'center' },
   quickBtn: {
-    flex: 1, alignItems: 'center', gap: 2, paddingVertical: spacing.md,
+    width: '23%', flexGrow: 1, alignItems: 'center', gap: 2, paddingVertical: spacing.md,
     backgroundColor: `${colors.accent}20`, borderColor: `${colors.accent}50`, borderWidth: 1, borderRadius: radius.md,
   },
   quickText: { color: colors.text, fontSize: font.md, fontWeight: '600' },
+  customBtn: { backgroundColor: colors.surface, borderColor: colors.border },
+  customRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  customInput: {
+    flex: 1, color: colors.text, fontSize: font.lg, backgroundColor: colors.surface,
+    borderColor: colors.border, borderWidth: 1, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+  },
+  customUnit: { color: colors.textMuted, fontSize: font.md },
+  customAdd: { backgroundColor: colors.accent, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  customAddText: { color: '#FFFFFF', fontSize: font.md, fontWeight: '600' },
+  hint: { color: colors.textDim, fontSize: font.sm, textAlign: 'center' },
   sectionLabel: { color: colors.textMuted, fontSize: font.sm, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: spacing.md },
   card: {
     backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,

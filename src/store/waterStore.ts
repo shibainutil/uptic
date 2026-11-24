@@ -50,3 +50,36 @@ export function useWaterLogs(userId: string | null | undefined, fromDate: string
 
   return { logs, loaded, add, remove };
 }
+
+export const DEFAULT_WATER_AMOUNTS = [150, 250, 330, 500];
+
+/**
+ * The quick-add amounts (ml), saved per user at users/{uid}/settings/waterAmounts so
+ * they're the same on every device. Starts with the defaults until changed.
+ */
+export function useWaterAmounts(userId: string | null | undefined) {
+  const [amounts, setAmounts] = useState<number[]>(DEFAULT_WATER_AMOUNTS);
+
+  useEffect(() => {
+    if (!userId) {
+      setAmounts(DEFAULT_WATER_AMOUNTS);
+      return;
+    }
+    return onSnapshot(doc(db, 'users', userId, 'settings', 'waterAmounts'), (snap) => {
+      const list = snap.exists() ? (snap.data().amounts as number[] | undefined) : undefined;
+      setAmounts(Array.isArray(list) ? list : DEFAULT_WATER_AMOUNTS);
+    });
+  }, [userId]);
+
+  const save = useCallback(async (next: number[]) => {
+    const clean = [...new Set(next.filter((n) => Number.isFinite(n) && n > 0).map(Math.round))].sort((a, b) => a - b);
+    setAmounts(clean);
+    await setDoc(doc(db, 'users', userId!, 'settings', 'waterAmounts'), { amounts: clean });
+  }, [userId]);
+
+  /** Adds an amount to the list (no-op if it's already there). */
+  const addAmount = useCallback((ml: number) => (amounts.includes(ml) ? Promise.resolve() : save([...amounts, ml])), [amounts, save]);
+  const removeAmount = useCallback((ml: number) => save(amounts.filter((a) => a !== ml)), [amounts, save]);
+
+  return { amounts, addAmount, removeAmount };
+}
