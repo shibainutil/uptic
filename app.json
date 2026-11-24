@@ -30,7 +30,7 @@
         "android.permission.health.WRITE_HYDRATION",
         "android.permission.health.WRITE_WEIGHT"
       ],
-      "versionCode": 8
+      "versionCode": 9
     },
     "web": {
       "favicon": "./assets/favicon.png",
