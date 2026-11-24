@@ -26,19 +26,15 @@ class StepsView extends WatchUi.View {
         dc.drawText(w / 2, h * 0.68, Graphics.FONT_XTINY, gSending ? "Sending..." : lastSentText(), Graphics.TEXT_JUSTIFY_CENTER);
     }
 
-    //! "Last sent 14:05", or with the date when it wasn't today.
+    //! "Last sent 24 Nov 14:05:33"
     private function lastSentText() as String {
         var at = Storage.getValue("lastOk");
         if (!(at instanceof Number)) {
             return "Not sent yet";
         }
-        var moment = new Time.Moment(at);
-        var t = Gregorian.info(moment, Time.FORMAT_MEDIUM);
-        var hhmm = t.hour.format("%02d") + ":" + t.min.format("%02d");
-        if (moment.compare(Time.today()) >= 0) {
-            return "Last sent " + hhmm;
-        }
-        return "Last sent " + t.day.format("%d") + " " + t.month + " " + hhmm;
+        var t = Gregorian.info(new Time.Moment(at), Time.FORMAT_MEDIUM);
+        return "Last sent " + t.day.format("%d") + " " + t.month + " "
+            + t.hour.format("%02d") + ":" + t.min.format("%02d") + ":" + t.sec.format("%02d");
     }
 }
 
