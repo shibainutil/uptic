@@ -61,9 +61,9 @@ export function enumerateDueDates(schedule: HabitSchedule, startISO: string, fro
 
 // ── Schedule eras (schedule edits) ──────────────────────────────────────────
 // Editing the schedule of a running habit doesn't rewrite its history: the old
-// schedule is kept as an era ending on the day of the change, and the new one
-// counts from that day. On an old era's dates only the sessions already done or
-// skipped stay; the unhandled ones are dropped instead of turning overdue.
+// schedule is kept as an era ending on its last done or skipped session, and the
+// new one counts on from that session (every 3 days → every 4: done on the 21st,
+// next on the 25th). The old schedule's unhandled sessions after it are dropped.
 
 export interface ScheduleEra {
   schedule: HabitSchedule;
@@ -73,8 +73,8 @@ export interface ScheduleEra {
 }
 
 export function scheduleEras(habit: Habit): ScheduleEra[] {
-  const from = habit.scheduleAnchor ?? habit.startDate;
-  return [...(habit.pastSchedules ?? []), { schedule: habit.schedule, anchor: from, from }];
+  const anchor = habit.scheduleAnchor ?? habit.startDate;
+  return [...(habit.pastSchedules ?? []), { schedule: habit.schedule, anchor, from: habit.scheduleFrom ?? anchor }];
 }
 
 export const currentEra = (habit: Habit): ScheduleEra => {
@@ -102,17 +102,30 @@ export function dueEraOn(habit: Habit, iso: string, anchorFor: AnchorFn = fixedA
   return undefined;
 }
 
-/** The fields to save when a habit's schedule changes on `todayISO_` (none if it didn't change). */
-export function scheduleChange(habit: Habit, next: HabitSchedule, todayISO_: string): Pick<Habit, 'schedule' | 'scheduleAnchor' | 'pastSchedules'> | undefined {
-  if (sameSchedule(habit.schedule, next)) return undefined;
-  const cur = currentEra(habit);
-  // Not started yet, or already changed today: nothing on the old grid to keep.
-  if (cur.from >= todayISO_) return { schedule: next };
-  return {
-    schedule: next,
-    scheduleAnchor: todayISO_,
-    pastSchedules: [...(habit.pastSchedules ?? []), { schedule: habit.schedule, anchor: cur.anchor, from: cur.from, until: todayISO_ }],
-  };
+/**
+ * The fields to save when a habit's schedule is set to `next` on `todayISO_` (none if
+ * nothing changes). Re-saving an unchanged schedule whose current era has nothing done
+ * yet re-anchors it too, which repairs eras that started on a change date.
+ */
+export function scheduleChange(
+  habit: Habit, next: HabitSchedule, entries: HabitLogEntry[], todayISO_: string,
+): Pick<Habit, 'schedule' | 'scheduleAnchor' | 'scheduleFrom' | 'pastSchedules'> | undefined {
+  const eras = scheduleEras(habit);
+  const cur = eras[eras.length - 1];
+  const last = sessionSlots(habit, entries, todayISO_)
+    .filter((s) => !s.extra && s.date <= todayISO_ && (s.status === 'done' || s.status === 'skipped'))
+    .map((s) => s.date)
+    .sort()
+    .pop();
+  const same = sameSchedule(habit.schedule, next);
+  // Nothing done or skipped yet: no history to keep, the schedule just changes in place.
+  if (last == null) return same ? undefined : { schedule: next };
+  if (same && (last >= cur.from || last === cur.anchor)) return undefined;
+  // Eras that start after the last handled session had nothing handled: drop them.
+  const pastSchedules = eras
+    .filter((e) => e.from <= last)
+    .map((e) => ({ schedule: e.schedule, anchor: e.anchor, from: e.from, until: e.until != null && e.until < last ? e.until : last }));
+  return { schedule: next, scheduleAnchor: last, scheduleFrom: addDays(last, 1), pastSchedules };
 }
 
 function sameSchedule(a: HabitSchedule, b: HabitSchedule): boolean {

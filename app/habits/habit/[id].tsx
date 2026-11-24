@@ -5,7 +5,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../../src/context/AuthContext';
-import { useHabits } from '../../../src/store/habitStore';
+import { useHabits, useHabitLogEntries } from '../../../src/store/habitStore';
 import { Input } from '../../../src/components/ui/Input';
 import { Button } from '../../../src/components/ui/Button';
 import { Segmented } from '../../../src/components/ui/Segmented';
@@ -102,6 +102,7 @@ function HabitForm({ existing, forMilestone = false }: { existing?: Habit; forMi
   const router = useRouter();
   const { user } = useAuth();
   const { add, update } = useHabits(user?.uid);
+  const { entries, loaded: entriesLoaded } = useHabitLogEntries(user?.uid);
 
   const isNew = !existing;
 
@@ -128,7 +129,7 @@ function HabitForm({ existing, forMilestone = false }: { existing?: Habit; forMi
   }
 
   async function save() {
-    if (!name.trim() || saving) return;
+    if (!name.trim() || saving || (!isNew && !entriesLoaded)) return;
 
     const schedule = parseSchedule(unit, interval, daysOfWeek, dayOfMonth, timesOfDay);
     if ('error' in schedule) {
@@ -163,11 +164,11 @@ function HabitForm({ existing, forMilestone = false }: { existing?: Habit; forMi
         const newId = await add(data);
         if (forMilestone) setPendingHabitLink({ habitId: newId, startDate, targetSessions: data.targetSessions });
       } else {
-        // A new schedule runs from today; past done/skipped sessions stay on the old one.
-        // Moving the start date re-plans the whole habit from that date instead.
+        // A new schedule continues from the last done/skipped session, which stays on the
+        // old one. Moving the start date re-plans the whole habit from that date instead.
         const scheduleFields = startDate !== existing!.startDate
-          ? { scheduleAnchor: startDate, pastSchedules: [] }
-          : scheduleChange(existing!, schedule, todayISO()) ?? {};
+          ? { scheduleAnchor: startDate, scheduleFrom: startDate, pastSchedules: [] }
+          : scheduleChange(existing!, schedule, entries, todayISO()) ?? {};
         await update(existing!.id, { ...data, ...scheduleFields });
       }
       router.back();
@@ -287,7 +288,7 @@ function HabitForm({ existing, forMilestone = false }: { existing?: Habit; forMi
 
         <View style={styles.formRow}>
           <Button label="Cancel" onPress={() => router.back()} style={styles.flex1} disabled={saving} />
-          <Button label={isNew ? 'Create' : 'Save'} variant="primary" onPress={save} disabled={!name.trim() || saving} style={styles.flex1} />
+          <Button label={isNew ? 'Create' : 'Save'} variant="primary" onPress={save} disabled={!name.trim() || saving || (!isNew && !entriesLoaded)} style={styles.flex1} />
         </View>
       </ScrollView>
     </SafeAreaView>

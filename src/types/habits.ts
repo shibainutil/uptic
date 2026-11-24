@@ -65,11 +65,14 @@ export interface Habit {
   flexibleSchedule?: boolean;
 
   /**
-   * Date the current `schedule` took effect and its grid anchor (e.g. "every 4 days"
-   * counts from here). Unset = `startDate`. Set when the schedule is edited after the
-   * habit started, so the new frequency runs from the day of the change.
+   * Grid anchor of the current `schedule` (e.g. "every 4 days" counts from here).
+   * Unset = `startDate`. When the schedule is edited after the habit started, this is
+   * the last done or skipped session, so the new frequency continues from it.
    */
   scheduleAnchor?: string;
+
+  /** First date the current `schedule` applies to. Unset = `scheduleAnchor`. */
+  scheduleFrom?: string;
 
   /**
    * Schedules the habit had before the current one, oldest first. Only their done or
