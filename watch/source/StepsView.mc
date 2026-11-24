@@ -6,7 +6,7 @@ import Toybox.Time;
 import Toybox.Time.Gregorian;
 import Toybox.WatchUi;
 
-//! Today's steps and when they were last sent to Uptic.
+//! Today's steps, and below them either "Sending..." or when the last send went through.
 class StepsView extends WatchUi.View {
     function initialize() {
         View.initialize();
@@ -22,25 +22,45 @@ class StepsView extends WatchUi.View {
         dc.drawText(w / 2, h * 0.28, Graphics.FONT_SMALL, "Steps today", Graphics.TEXT_JUSTIFY_CENTER);
         dc.drawText(w / 2, h * 0.38, Graphics.FONT_NUMBER_MEDIUM, (steps != null ? steps : 0).toString(), Graphics.TEXT_JUSTIFY_CENTER);
 
-        var status = "Not sent yet";
-        var last = Storage.getValue("last");
-        if (last instanceof Dictionary && last["at"] != null) {
-            var t = Gregorian.info(new Time.Moment(last["at"] as Number), Time.FORMAT_SHORT);
-            var hhmm = t.hour.format("%02d") + ":" + t.min.format("%02d");
-            status = (last["ok"] == true ? "Sent to Uptic " : "Send failed ") + hhmm;
-        }
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, h * 0.68, Graphics.FONT_XTINY, status, Graphics.TEXT_JUSTIFY_CENTER);
-        dc.drawText(w / 2, h * 0.76, Graphics.FONT_XTINY, "Tap to send now", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(w / 2, h * 0.68, Graphics.FONT_XTINY, gSending ? "Sending..." : lastSentText(), Graphics.TEXT_JUSTIFY_CENTER);
+    }
+
+    //! "Last sent 14:05", or with the date when it wasn't today.
+    private function lastSentText() as String {
+        var at = Storage.getValue("lastOk");
+        if (!(at instanceof Number)) {
+            return "Not sent yet";
+        }
+        var moment = new Time.Moment(at);
+        var t = Gregorian.info(moment, Time.FORMAT_MEDIUM);
+        var hhmm = t.hour.format("%02d") + ":" + t.min.format("%02d");
+        if (moment.compare(Time.today()) >= 0) {
+            return "Last sent " + hhmm;
+        }
+        return "Last sent " + t.day.format("%d") + " " + t.month + " " + hhmm;
     }
 }
 
+//! Tap the screen or press the upper (Start) button to send now.
 class StepsDelegate extends WatchUi.BehaviorDelegate {
     function initialize() {
         BehaviorDelegate.initialize();
     }
 
-    //! Tap / select: send now.
+    function onKey(evt as WatchUi.KeyEvent) as Boolean {
+        if (evt.getKey() == WatchUi.KEY_ENTER) {
+            sendNow();
+            return true;
+        }
+        return false;
+    }
+
+    function onTap(evt as WatchUi.ClickEvent) as Boolean {
+        sendNow();
+        return true;
+    }
+
     function onSelect() as Boolean {
         sendNow();
         return true;

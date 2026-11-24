@@ -47,4 +47,12 @@ module StepsPayload {
         }
         return { "v" => 1, "days" => days };
     }
+
+    //! Today's date and steps: when either changes, there's something new to send.
+    //! (A new date also carries yesterday's final total in the history.)
+    function signature(payload as Dictionary) as String {
+        var days = payload["days"] as Array<Dictionary>;
+        var today = days[0];
+        return (today["d"] as String) + ":" + (today["s"] as Number).toString();
+    }
 }
