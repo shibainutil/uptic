@@ -16,7 +16,7 @@ import { todayISO, addDays } from '../../../src/lib/schedule';
 import { setPendingHabitLink } from '../../../src/lib/pendingHabitLink';
 import { scheduleChange } from '../../../src/lib/habitSchedule';
 import {
-  type HabitKind, type ScheduleUnit, type HabitSchedule, type Habit,
+  type HabitKind, type ScheduleUnit, type HabitSchedule, type Habit, type MetricDef,
 } from '../../../src/types/habits';
 
 // Display Monday-first; values are JS getDay() (Sun=0..Sat=6).
@@ -25,6 +25,10 @@ const WEEK_DAYS: { value: number; label: string }[] = [
   { value: 4, label: 'Thu' }, { value: 5, label: 'Fri' }, { value: 6, label: 'Sat' },
   { value: 0, label: 'Sun' },
 ];
+
+function newMetricId() {
+  return Math.random().toString(36).slice(2, 10);
+}
 
 const UNIT_OPTIONS: { value: ScheduleUnit; label: string }[] = [
   { value: 'day', label: 'Day' },
@@ -123,6 +127,11 @@ function HabitForm({ existing, forMilestone = false }: { existing?: Habit; forMi
   const [hasTargetDate, setHasTargetDate] = useState(existing?.targetDate != null);
   const [targetDate, setTargetDate] = useState(existing?.targetDate ?? addDays(todayISO(), 30));
   const [flexibleSchedule, setFlexibleSchedule] = useState(existing?.flexibleSchedule ?? false);
+  const [metrics, setMetrics] = useState<MetricDef[]>(existing?.metrics ?? []);
+
+  function patchMetric(id: string, patch: Partial<MetricDef>) {
+    setMetrics((cur) => cur.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+  }
 
   function toggleDay(d: number) {
     setDaysOfWeek((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d]));
@@ -147,6 +156,10 @@ function HabitForm({ existing, forMilestone = false }: { existing?: Habit; forMi
       return;
     }
 
+    const cleanMetrics = metrics
+      .map((m) => ({ ...m, name: m.name.trim(), unit: m.unit?.trim() || undefined }))
+      .filter((m) => m.name);
+
     const data: Omit<Habit, 'id' | 'createdAt'> = {
       name: name.trim(),
       description: description.trim() || undefined,
@@ -156,6 +169,8 @@ function HabitForm({ existing, forMilestone = false }: { existing?: Habit; forMi
       targetSessions: kind === 'limited' && hasTargetSessions ? sessions : undefined,
       targetDate: kind === 'limited' && hasTargetDate ? targetDate : undefined,
       flexibleSchedule: flexibleSchedule || undefined,
+      // Saved as [] (not omitted) so removing every metric actually clears them on update.
+      metrics: cleanMetrics,
     };
 
     setSaving(true);
@@ -286,6 +301,46 @@ function HabitForm({ existing, forMilestone = false }: { existing?: Habit; forMi
           </View>
         </Pressable>
 
+        <View style={styles.field}>
+          <Text style={styles.label}>Metrics</Text>
+          <Text style={styles.hint}>
+            Numbers to record with each session, e.g. weight in kg. Marking a session done will ask for them.
+          </Text>
+          {metrics.map((m) => (
+            <View key={m.id} style={styles.metricCard}>
+              <View style={styles.timeRow}>
+                <Input
+                  value={m.name} onChangeText={(t) => patchMetric(m.id, { name: t })}
+                  placeholder="Name, e.g. Weight" style={styles.metricName}
+                />
+                <Input
+                  value={m.unit ?? ''} onChangeText={(t) => patchMetric(m.id, { unit: t })}
+                  placeholder="Unit" autoCapitalize="none" style={styles.metricUnit}
+                  editable={!m.quantity}
+                />
+                <Pressable onPress={() => setMetrics((cur) => cur.filter((x) => x.id !== m.id))} hitSlop={8} style={styles.removeTimeBtn}>
+                  <Text style={styles.removeTimeBtnText}>✕</Text>
+                </Pressable>
+              </View>
+              <Segmented
+                options={[
+                  { value: 'neutral', label: 'Neutral' },
+                  { value: 'down', label: 'Lower is better' },
+                  { value: 'up', label: 'Higher is better' },
+                ]}
+                value={m.direction ?? 'neutral'}
+                onChange={(v) => patchMetric(m.id, { direction: v })}
+              />
+            </View>
+          ))}
+          <Pressable
+            onPress={() => setMetrics((cur) => [...cur, { id: newMetricId(), name: '', direction: 'neutral' }])}
+            style={styles.addTimeBtn}
+          >
+            <Text style={styles.addTimeBtnText}>+ Add metric</Text>
+          </Pressable>
+        </View>
+
         <View style={styles.formRow}>
           <Button label="Cancel" onPress={() => router.back()} style={styles.flex1} disabled={saving} />
           <Button label={isNew ? 'Create' : 'Save'} variant="primary" onPress={save} disabled={!name.trim() || saving || (!isNew && !entriesLoaded)} style={styles.flex1} />
@@ -350,5 +405,11 @@ const styles = StyleSheet.create({
   removeTimeBtn: { padding: spacing.xs },
   removeTimeBtnText: { color: colors.textMuted, fontSize: font.sm },
   addTimeBtn: { alignSelf: 'flex-start', paddingVertical: spacing.xs },
+  metricCard: {
+    gap: spacing.sm, padding: spacing.md, borderRadius: radius.sm,
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface,
+  },
+  metricName: { flex: 1 },
+  metricUnit: { width: 72 },
   addTimeBtnText: { color: colors.accent, fontSize: font.sm, fontWeight: '600' },
 });

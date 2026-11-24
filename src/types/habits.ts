@@ -29,6 +29,27 @@ export interface HabitScheduleEra {
 
 export type HabitKind = 'continuous' | 'limited';
 
+/**
+ * A number a habit records with every session (weight, resting heart rate, minutes…).
+ * Values live on the log entry under `values[metric.id]`; the `id` is stable across
+ * renames so existing entries and charts keep pointing at the right metric.
+ */
+export interface MetricDef {
+  id: string;
+  name: string;
+  unit?: string;                 // display only, e.g. "kg", "bpm"
+  decimals?: number;             // digits shown when displaying a value (default 1)
+  /** Which way is "good": colours deltas green/red. 'neutral' = no judgement. */
+  direction?: 'down' | 'up' | 'neutral';
+  /**
+   * 'weight': values are stored in kg whatever `unit` ('kg' | 'lbs') says; `unit` is only
+   * how they are shown and typed. Keeps every entry comparable if the user changes unit.
+   */
+  quantity?: 'weight';
+  /** Goal for this metric, in the same stored unit as the values. */
+  target?: { value: number; byDate?: string };
+}
+
 export interface Habit {
   id: string;
   name: string;
@@ -64,6 +85,12 @@ export interface Habit {
    */
   flexibleSchedule?: boolean;
 
+  /** Set on the habit the app created itself (the Weight tab reads and writes it). */
+  system?: 'weight';
+
+  /** Numbers recorded with each session. Absent/empty = a plain done-or-skipped habit. */
+  metrics?: MetricDef[];
+
   /**
    * Grid anchor of the current `schedule` (e.g. "every 4 days" counts from here).
    * Unset = `startDate`. When the schedule is edited after the habit started, this is
@@ -98,6 +125,7 @@ export interface HabitLogEntry {
   habitId: string;
   loggedAt: string;              // ISO datetime — when the session actually happened
   count?: number;                // sessions this single entry represents (default 1); e.g. logging 6 at once
+  values?: Record<string, number>; // metric id -> recorded value (only for habits with `metrics`)
   notes?: string;
   createdAt: string;
 }
@@ -119,4 +147,32 @@ export function isHabitComplete(habit: Habit, completedCount: number, todayISO: 
   if (habit.targetSessions != null) return completedCount >= habit.targetSessions;
   if (habit.targetDate != null) return todayISO > habit.targetDate;
   return false;
+}
+
+export function hasMetrics(habit: Pick<Habit, 'metrics'> | undefined): boolean {
+  return (habit?.metrics?.length ?? 0) > 0;
+}
+
+const LBS_PER_KG = 2.2046226218;
+
+/** A stored metric value as the user sees and types it (kg → lbs for weight shown in lbs). */
+export function toDisplayValue(metric: MetricDef, stored: number): number {
+  return metric.quantity === 'weight' && metric.unit === 'lbs' ? stored * LBS_PER_KG : stored;
+}
+
+/** What the user typed, converted to the stored unit. */
+export function toStoredValue(metric: MetricDef, shown: number): number {
+  return metric.quantity === 'weight' && metric.unit === 'lbs' ? shown / LBS_PER_KG : shown;
+}
+
+/** "72.4 kg" — a stored metric value formatted for display with its decimals and unit. */
+export function formatMetricValue(metric: MetricDef, stored: number): string {
+  const text = toDisplayValue(metric, stored).toFixed(metric.decimals ?? 1);
+  return metric.unit ? `${text} ${metric.unit}` : text;
+}
+
+/** Parses user input like "72,4" (comma or dot decimal); null when empty or not a number. */
+export function parseMetricInput(text: string): number | null {
+  const n = Number(text.trim().replace(',', '.'));
+  return text.trim() === '' || !Number.isFinite(n) ? null : n;
 }
